@@ -18,6 +18,8 @@
 #include "clang/APINotes/Types.h"
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/Specifiers.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/VersionTuple.h"
@@ -338,6 +340,42 @@ template <> struct MappingTraits<Class> {
 } // namespace llvm
 
 namespace {
+struct CXXMethodNoteDiagnosticKey {
+  std::string Name;
+  llvm::SmallVector<std::string, 4> ParamTypes;
+
+  friend bool operator==(const CXXMethodNoteDiagnosticKey &LHS,
+                         const CXXMethodNoteDiagnosticKey &RHS) {
+    return LHS.Name == RHS.Name && LHS.ParamTypes == RHS.ParamTypes;
+  }
+};
+
+struct CXXMethodNoteDiagnosticKeyInfo {
+  static inline CXXMethodNoteDiagnosticKey getEmptyKey() {
+    return {std::string(1, '\0'), {}};
+  }
+
+  static inline CXXMethodNoteDiagnosticKey getTombstoneKey() {
+    return {std::string(1, '\1'), {}};
+  }
+
+  static unsigned getHashValue(const CXXMethodNoteDiagnosticKey &Key) {
+    return llvm::hash_combine(
+        Key.Name, llvm::hash_combine_range(Key.ParamTypes.begin(),
+                                           Key.ParamTypes.end()));
+  }
+
+  static bool isEqual(const CXXMethodNoteDiagnosticKey &LHS,
+                      const CXXMethodNoteDiagnosticKey &RHS) {
+    return LHS == RHS;
+  }
+};
+
+struct CXXMethodSignature {
+  llvm::SmallVector<std::string, 4> NormalizedParamTypes;
+  bool IsLegacyNameOnly = true;
+};
+
 struct Function {
   StringRef Name;
   std::optional<ParamsSeq> Params;
@@ -1214,11 +1252,36 @@ public:
     for (const auto &CXXMethod : T.Methods)
       ++MethodNameCounts[CXXMethod.Name];
 
+    // Reuse the exact same typed-vs-legacy classification and normalized
+    // explicit parameter sequence that lowering uses for Writer.addCXXMethod.
+    // Legacy and typed notes are intentionally tracked separately so one
+    // legacy note and one typed note for the same method name can coexist.
+    llvm::SmallDenseSet<CXXMethodNoteDiagnosticKey, 4,
+                        CXXMethodNoteDiagnosticKeyInfo>
+        SeenLegacyMethodNotes;
+    llvm::SmallDenseSet<CXXMethodNoteDiagnosticKey, 4,
+                        CXXMethodNoteDiagnosticKeyInfo>
+        SeenTypedMethodNotes;
+
     for (const auto &CXXMethod : T.Methods) {
       CXXMethodInfo MI;
       convertFunction(CXXMethod, MI);
       CXXMethodSignature Signature = getCXXMethodSignature(
           CXXMethod, MethodNameCounts.lookup(CXXMethod.Name) > 1);
+      CXXMethodNoteDiagnosticKey DiagnosticKey =
+          getCXXMethodNoteDiagnosticKey(CXXMethod.Name,
+                                        Signature.NormalizedParamTypes);
+      auto &SeenMethodNotes =
+          Signature.IsLegacyNameOnly ? SeenLegacyMethodNotes
+                                     : SeenTypedMethodNotes;
+      if (!SeenMethodNotes.insert(DiagnosticKey).second) {
+        std::string DisplayName = getCXXMethodNoteDisplayName(
+            T.Name, CXXMethod.Name, Signature.NormalizedParamTypes,
+            Signature.IsLegacyNameOnly);
+        emitError(llvm::Twine("duplicate definition of C++ method note '") +
+                  DisplayName + "'");
+        continue;
+      }
 
       llvm::SmallVector<llvm::StringRef, 4> ParamTypeRefs;
       ParamTypeRefs.reserve(Signature.NormalizedParamTypes.size());
@@ -1226,7 +1289,6 @@ public:
         ParamTypeRefs.push_back(ParamType);
       Writer.addCXXMethod(TagCtxID, CXXMethod.Name, ParamTypeRefs,
                           Signature.IsLegacyNameOnly, MI, SwiftVersion);
-      Writer.addCXXMethod(TagCtxID, CXXMethod.Name, MI, SwiftVersion);
     }
 
     // Convert nested tags.
