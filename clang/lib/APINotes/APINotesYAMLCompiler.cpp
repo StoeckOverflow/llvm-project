@@ -340,7 +340,7 @@ template <> struct MappingTraits<Class> {
 namespace {
 struct Function {
   StringRef Name;
-  ParamsSeq Params;
+  std::optional<ParamsSeq> Params;
   NullabilitySeq Nullability;
   std::optional<NullabilityKind> NullabilityOfRet;
   std::optional<api_notes::RetainCountConventionKind> RetainCountConvention;
@@ -866,6 +866,75 @@ public:
     OutInfo.NumAdjustedNullable = idx;
   }
 
+  CXXMethodSignature getCXXMethodSignature(const Function &Function,
+                                           bool EnableTypedSignature) {
+    if (!EnableTypedSignature || !Function.Params)
+      return {};
+
+    if (Function.Params->empty())
+      return {{}, false};
+
+    llvm::SmallVector<std::optional<std::string>, 4> ParamTypes;
+    bool SawExplicitParamPosition = false;
+    for (const auto &P : *Function.Params) {
+      if (P.Position < 0)
+        continue;
+
+      SawExplicitParamPosition = true;
+
+      if (static_cast<unsigned>(P.Position) >= ParamTypes.size())
+        ParamTypes.resize(P.Position + 1);
+
+      if (P.Type.empty())
+        return {};
+
+      ParamTypes[P.Position] =
+          normalizeCXXMethodParamType(llvm::StringRef(P.Type));
+    }
+
+    // This implementation only keys C++ methods on explicit parameter types.
+    // Notes that only mention Position: -1 remain legacy name-only notes.
+    if (!SawExplicitParamPosition)
+      return {};
+
+    llvm::SmallVector<std::string, 4> NormalizedParamTypes;
+    NormalizedParamTypes.reserve(ParamTypes.size());
+    for (const auto &ParamType : ParamTypes) {
+      if (!ParamType)
+        return {};
+      NormalizedParamTypes.push_back(*ParamType);
+    }
+
+    return {std::move(NormalizedParamTypes), false};
+  }
+
+  std::string getCXXMethodNoteDisplayName(
+      llvm::StringRef TagName, llvm::StringRef MethodName,
+      llvm::ArrayRef<std::string> ParamTypes, bool IsLegacyNameOnly) {
+    std::string DisplayName =
+        (llvm::Twine(TagName) + "::" + MethodName).str();
+    if (IsLegacyNameOnly)
+      return DisplayName;
+
+    DisplayName += "(";
+    for (size_t I = 0; I != ParamTypes.size(); ++I) {
+      if (I)
+        DisplayName += ", ";
+      DisplayName += ParamTypes[I];
+    }
+    DisplayName += ")";
+    return DisplayName;
+  }
+
+  CXXMethodNoteDiagnosticKey
+  getCXXMethodNoteDiagnosticKey(llvm::StringRef MethodName,
+                                llvm::ArrayRef<std::string> ParamTypes) {
+    CXXMethodNoteDiagnosticKey Key;
+    Key.Name = std::string(MethodName);
+    Key.ParamTypes.assign(ParamTypes.begin(), ParamTypes.end());
+    return Key;
+  }
+
   /// Convert the common parts of an entity from YAML.
   template <typename T>
   void convertCommonEntity(const T &Common, CommonEntityInfo &Info,
@@ -1037,7 +1106,7 @@ public:
       FI.setSwiftSafety(Function.SafetyKind);
     FI.SwiftName = std::string(Function.SwiftName);
     std::optional<ParamInfo> This;
-    convertParams(Function.Params, FI, This);
+    convertParams(Function.Params.value_or(ParamsSeq()), FI, This);
     if constexpr (std::is_same_v<FuncOrMethodInfo, CXXMethodInfo>)
       FI.This = This;
     else if (This)
@@ -1136,9 +1205,27 @@ public:
       Writer.addField(TagCtxID, Field.Name, FI, SwiftVersion);
     }
 
+    // Phase 1 intentionally uses a compatibility heuristic here: only activate
+    // typed lookup when a tag contains multiple APINotes entries for the same
+    // method name. This preserves existing metadata-only Parameters[].Type
+    // behavior for unique APINotes entries rather than treating every typed
+    // parameter spelling as overload identity.
+    llvm::StringMap<unsigned> MethodNameCounts;
+    for (const auto &CXXMethod : T.Methods)
+      ++MethodNameCounts[CXXMethod.Name];
+
     for (const auto &CXXMethod : T.Methods) {
       CXXMethodInfo MI;
       convertFunction(CXXMethod, MI);
+      CXXMethodSignature Signature = getCXXMethodSignature(
+          CXXMethod, MethodNameCounts.lookup(CXXMethod.Name) > 1);
+
+      llvm::SmallVector<llvm::StringRef, 4> ParamTypeRefs;
+      ParamTypeRefs.reserve(Signature.NormalizedParamTypes.size());
+      for (const std::string &ParamType : Signature.NormalizedParamTypes)
+        ParamTypeRefs.push_back(ParamType);
+      Writer.addCXXMethod(TagCtxID, CXXMethod.Name, ParamTypeRefs,
+                          Signature.IsLegacyNameOnly, MI, SwiftVersion);
       Writer.addCXXMethod(TagCtxID, CXXMethod.Name, MI, SwiftVersion);
     }
 
