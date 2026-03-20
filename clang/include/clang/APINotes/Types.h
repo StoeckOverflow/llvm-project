@@ -14,6 +14,7 @@
 #include "llvm/ADT/StringRef.h"
 #include <climits>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace llvm {
@@ -22,6 +23,15 @@ class raw_ostream;
 
 namespace clang {
 namespace api_notes {
+/// Normalize a parameter type spelling for C++ APINotes method-key matching.
+///
+/// Phase 1 matching is intentionally spelling-based, not semantic type
+/// canonicalization. This helper only performs simple spacing normalization so
+/// the YAML and AST sides can compare the same printed type spelling
+/// consistently; semantically equivalent but differently spelled C++ types are
+/// not guaranteed to match.
+std::string normalizeCXXMethodParamType(llvm::StringRef TypeSpelling);
+
 enum class RetainCountConventionKind {
   None,
   CFReturnsRetained,

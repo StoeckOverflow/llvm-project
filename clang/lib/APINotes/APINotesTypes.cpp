@@ -7,10 +7,22 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/APINotes/Types.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace clang {
 namespace api_notes {
+
+std::string normalizeCXXMethodParamType(llvm::StringRef TypeSpelling) {
+  // Phase 1 only canonicalizes runs of ASCII space in the printed spelling.
+  // This is enough to make YAML and AST-emitted spellings compare
+  // consistently, but it intentionally does not imply semantic equivalence.
+  llvm::SmallVector<llvm::StringRef, 8> Parts;
+  TypeSpelling.trim().split(Parts, ' ', /*MaxSplit=*/-1, /*KeepEmpty=*/false);
+  return llvm::join(Parts, " ");
+}
+
 LLVM_DUMP_METHOD void CommonEntityInfo::dump(llvm::raw_ostream &OS) const {
   if (Unavailable)
     OS << "[Unavailable] (" << UnavailableMsg << ")" << ' ';
