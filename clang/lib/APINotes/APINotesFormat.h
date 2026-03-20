@@ -11,6 +11,7 @@
 
 #include "clang/APINotes/Types.h"
 #include "llvm/ADT/PointerEmbeddedInt.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Bitcode/BitcodeConvenience.h"
 
 namespace clang {
@@ -24,8 +25,8 @@ const uint16_t VERSION_MAJOR = 0;
 /// API notes file minor version number.
 ///
 /// When the format changes IN ANY WAY, this number should be incremented.
-const uint16_t VERSION_MINOR = 40; // 39 for BoundsSafety;
-                                   // 40 for UnsafeBufferUsageAttr
+const uint16_t VERSION_MINOR = 40; // CXX overload-aware method keys (40), SwiftSafety (38) and TO_UPSTREAM(BoundsSafety) (39)
+const uint16_t VERSION_MINOR_COMPAT = 39;
 
 const uint8_t kSwiftConforms = 1;
 const uint8_t kSwiftDoesNotConform = 2;
@@ -64,8 +65,8 @@ enum BlockID {
   /// about the method.
   OBJC_METHOD_BLOCK_ID,
 
-  /// The C++ method data block, which maps C++ (context id, method name) pairs
-  /// to information about the method.
+  /// The C++ method data block, which maps C++ method identities to
+  /// information about the method.
   CXX_METHOD_BLOCK_ID,
 
   /// The Objective-C selector data block, which maps Objective-C
@@ -199,8 +200,8 @@ using CXXMethodDataLayout =
     llvm::BCRecordLayout<CXX_METHOD_DATA, // record ID
                          llvm::BCVBR<16>, // table offset within the blob (see
                                           // below)
-                         llvm::BCBlob     // map from C++ (context id, name)
-                                          // tuples to C++ method information
+                         llvm::BCBlob // map from C++ method identities to
+                                      // C++ method information
                          >;
 } // namespace cxx_method_block
 
@@ -354,6 +355,52 @@ inline bool operator==(const SingleDeclTableKey &lhs,
   return lhs.parentContextID == rhs.parentContextID && lhs.nameID == rhs.nameID;
 }
 
+enum class CXXMethodKeyKind : uint8_t {
+  Typed = 0,
+  LegacyNameOnly = 1,
+};
+
+struct CXXMethodTableKey {
+  uint32_t parentContextID;
+  uint32_t nameID;
+  CXXMethodKeyKind kind;
+  llvm::SmallVector<uint32_t, 2> paramTypeIDs;
+
+  CXXMethodTableKey()
+      : parentContextID(-1), nameID(-1), kind(CXXMethodKeyKind::Typed) {}
+
+  CXXMethodTableKey(uint32_t ParentContextID, uint32_t NameID,
+                    CXXMethodKeyKind Kind,
+                    llvm::ArrayRef<uint32_t> ParamTypeIDs = {})
+      : parentContextID(ParentContextID), nameID(NameID), kind(Kind),
+        paramTypeIDs(ParamTypeIDs.begin(), ParamTypeIDs.end()) {}
+
+  static CXXMethodTableKey typed(uint32_t ParentContextID, uint32_t NameID,
+                                 llvm::ArrayRef<uint32_t> ParamTypeIDs) {
+    return CXXMethodTableKey(ParentContextID, NameID, CXXMethodKeyKind::Typed,
+                             ParamTypeIDs);
+  }
+
+  static CXXMethodTableKey legacy(uint32_t ParentContextID, uint32_t NameID) {
+    return CXXMethodTableKey(ParentContextID, NameID,
+                             CXXMethodKeyKind::LegacyNameOnly);
+  }
+
+  llvm::hash_code hashValue() const {
+    return llvm::hash_combine(parentContextID, nameID,
+                              static_cast<uint8_t>(kind),
+                              llvm::hash_combine_range(paramTypeIDs.begin(),
+                                                       paramTypeIDs.end()));
+  }
+};
+
+inline bool operator==(const CXXMethodTableKey &lhs,
+                       const CXXMethodTableKey &rhs) {
+  return lhs.parentContextID == rhs.parentContextID &&
+         lhs.nameID == rhs.nameID && lhs.kind == rhs.kind &&
+         lhs.paramTypeIDs == rhs.paramTypeIDs;
+}
+
 } // namespace api_notes
 } // namespace clang
 
@@ -428,6 +475,32 @@ template <> struct DenseMapInfo<clang::api_notes::SingleDeclTableKey> {
 
   static bool isEqual(const clang::api_notes::SingleDeclTableKey &lhs,
                       const clang::api_notes::SingleDeclTableKey &rhs) {
+    return lhs == rhs;
+  }
+};
+
+template <> struct DenseMapInfo<clang::api_notes::CXXMethodTableKey> {
+  static inline clang::api_notes::CXXMethodTableKey getEmptyKey() {
+    return clang::api_notes::CXXMethodTableKey{
+        DenseMapInfo<uint32_t>::getEmptyKey(),
+        DenseMapInfo<uint32_t>::getEmptyKey(),
+        clang::api_notes::CXXMethodKeyKind::Typed};
+  }
+
+  static inline clang::api_notes::CXXMethodTableKey getTombstoneKey() {
+    return clang::api_notes::CXXMethodTableKey{
+        DenseMapInfo<uint32_t>::getTombstoneKey(),
+        DenseMapInfo<uint32_t>::getTombstoneKey(),
+        clang::api_notes::CXXMethodKeyKind::Typed};
+  }
+
+  static unsigned
+  getHashValue(const clang::api_notes::CXXMethodTableKey &value) {
+    return value.hashValue();
+  }
+
+  static bool isEqual(const clang::api_notes::CXXMethodTableKey &lhs,
+                      const clang::api_notes::CXXMethodTableKey &rhs) {
     return lhs == rhs;
   }
 };

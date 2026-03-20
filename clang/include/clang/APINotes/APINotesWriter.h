@@ -82,8 +82,12 @@ public:
   ///
   /// \param CtxID The context in which this method resides, i.e. a C++ tag.
   /// \param Name The name of the method.
+  /// \param ParamTypes The normalized explicit parameter types.
+  /// \param IsLegacyNameOnly Whether this note should remain a name-only entry.
   /// \param Info Information about this method.
   void addCXXMethod(ContextID CtxID, llvm::StringRef Name,
+                    llvm::ArrayRef<llvm::StringRef> ParamTypes,
+                    bool IsLegacyNameOnly,
                     const CXXMethodInfo &Info, llvm::VersionTuple SwiftVersion);
 
   /// Add information about a specific C record field.

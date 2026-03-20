@@ -550,13 +550,21 @@ public:
 
 /// Used to deserialize the on-disk C++ method table.
 class CXXMethodTableInfo
-    : public VersionedTableInfo<CXXMethodTableInfo, SingleDeclTableKey,
+    : public VersionedTableInfo<CXXMethodTableInfo, CXXMethodTableKey,
                                 CXXMethodInfo> {
 public:
   static internal_key_type ReadKey(const uint8_t *Data, unsigned Length) {
     auto CtxID = endian::readNext<uint32_t, llvm::endianness::little>(Data);
     auto NameID = endian::readNext<uint32_t, llvm::endianness::little>(Data);
-    return {CtxID, NameID};
+    auto Kind = endian::readNext<uint8_t, llvm::endianness::little>(Data);
+    auto NumParamTypes =
+        endian::readNext<uint32_t, llvm::endianness::little>(Data);
+    llvm::SmallVector<uint32_t, 4> ParamTypeIDs;
+    ParamTypeIDs.reserve(NumParamTypes);
+    for (uint32_t I = 0; I != NumParamTypes; ++I)
+      ParamTypeIDs.push_back(
+          endian::readNext<uint32_t, llvm::endianness::little>(Data));
+    return {CtxID, NameID, static_cast<CXXMethodKeyKind>(Kind), ParamTypeIDs};
   }
 
   hash_value_type ComputeHash(internal_key_type Key) {
@@ -578,6 +586,29 @@ public:
       ReadParamInfo(Data, *Info.This);
     }
     return Info;
+  }
+};
+
+class LegacyCXXMethodTableInfo
+    : public VersionedTableInfo<LegacyCXXMethodTableInfo, SingleDeclTableKey,
+                                CXXMethodInfo> {
+public:
+  static internal_key_type ReadKey(const uint8_t *Data, unsigned Length) {
+    auto CtxID = endian::readNext<uint32_t, llvm::endianness::little>(Data);
+    auto NameID = endian::readNext<uint32_t, llvm::endianness::little>(Data);
+    return {CtxID, NameID};
+  }
+
+  hash_value_type ComputeHash(internal_key_type Key) {
+    return static_cast<size_t>(Key.hashValue());
+  }
+
+  static CXXMethodInfo readUnversioned(internal_key_type Key,
+                                       const uint8_t *&Data) {
+    return CXXMethodTableInfo::readUnversioned(CXXMethodTableKey::legacy(
+                                                   Key.parentContextID,
+                                                   Key.nameID),
+                                               Data);
   }
 };
 
@@ -717,6 +748,9 @@ public:
   /// The Swift version to use for filtering.
   llvm::VersionTuple SwiftVersion;
 
+  /// The APINotes file format minor version.
+  uint16_t FormatMinorVersion = VERSION_MINOR;
+
   /// The name of the module that we read from the control block.
   std::string ModuleName;
 
@@ -765,6 +799,12 @@ public:
 
   /// The C++ method table.
   std::unique_ptr<SerializedCXXMethodTable> CXXMethodTable;
+
+  using SerializedLegacyCXXMethodTable =
+      llvm::OnDiskIterableChainedHashTable<LegacyCXXMethodTableInfo>;
+
+  /// The C++ method table from an older name-only format.
+  std::unique_ptr<SerializedLegacyCXXMethodTable> LegacyCXXMethodTable;
 
   using SerializedObjCSelectorTable =
       llvm::OnDiskIterableChainedHashTable<ObjCSelectorTableInfo>;
@@ -925,10 +965,12 @@ llvm::Error APINotesReader::Implementation::readControlBlock(
         return llvm::createStringError(llvm::inconvertibleErrorCode(),
                                        "Multiple metadata records found");
 
-      if (Scratch[0] != VERSION_MAJOR || Scratch[1] != VERSION_MINOR)
+      if (Scratch[0] != VERSION_MAJOR ||
+          (Scratch[1] != VERSION_MINOR &&
+           Scratch[1] != VERSION_MINOR_COMPAT))
         return llvm::createStringError(llvm::inconvertibleErrorCode(),
                                        "Version mismatch in API Notes");
-
+      FormatMinorVersion = Scratch[1];
       SawMetadata = true;
       break;
 
@@ -1311,16 +1353,20 @@ llvm::Error APINotesReader::Implementation::readCXXMethodBlock(
     switch (Kind) {
     case cxx_method_block::CXX_METHOD_DATA: {
       // Already saw C++ method table.
-      if (CXXMethodTable)
+      if (CXXMethodTable || LegacyCXXMethodTable)
         return llvm::createStringError(llvm::inconvertibleErrorCode(),
                                        "Multiple C++ method records found");
 
       uint32_t tableOffset;
       cxx_method_block::CXXMethodDataLayout::readRecord(Scratch, tableOffset);
       auto base = reinterpret_cast<const uint8_t *>(BlobData.data());
-
-      CXXMethodTable.reset(SerializedCXXMethodTable::Create(
-          base + tableOffset, base + sizeof(uint32_t), base));
+      if (FormatMinorVersion >= VERSION_MINOR) {
+        CXXMethodTable.reset(SerializedCXXMethodTable::Create(
+            base + tableOffset, base + sizeof(uint32_t), base));
+      } else {
+        LegacyCXXMethodTable.reset(SerializedLegacyCXXMethodTable::Create(
+            base + tableOffset, base + sizeof(uint32_t), base));
+      }
       break;
     }
 
@@ -1849,6 +1895,7 @@ APINotesReader::APINotesReader(llvm::MemoryBuffer *InputBuffer,
                                llvm::VersionTuple SwiftVersion,
                                llvm::Error &Err)
     : Implementation(new class Implementation) {
+  llvm::ErrorAsOutParameter ErrAsOutParam(&Err);
 
   // Initialize the input buffer.
   Implementation->InputBuffer = InputBuffer;
@@ -2101,6 +2148,7 @@ APINotesReader::Create(std::unique_ptr<llvm::MemoryBuffer> InputBuffer,
   if (Err)
     return Err;
 
+  llvm::cantFail(std::move(Err));
   return std::move(Reader);
 }
 

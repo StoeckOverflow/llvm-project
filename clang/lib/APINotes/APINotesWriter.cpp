@@ -82,8 +82,9 @@ class APINotesWriter::Implementation {
 
   /// Information about C++ methods.
   ///
-  /// Indexed by the context ID and name ID.
-  llvm::DenseMap<SingleDeclTableKey,
+  /// Indexed by the context ID, name ID, kind, and normalized parameter
+  /// type IDs.
+  llvm::DenseMap<CXXMethodTableKey,
                  llvm::SmallVector<std::pair<VersionTuple, CXXMethodInfo>, 1>>
       CXXMethods;
 
@@ -148,6 +149,20 @@ class APINotesWriter::Implementation {
 
     // Look for the stored selector.  Add to the selector table if missing.
     return SelectorIDs.try_emplace(Selector, SelectorIDs.size()).first->second;
+  }
+
+  CXXMethodTableKey getCXXMethodKey(ContextID CtxID, llvm::StringRef Name,
+                                    llvm::ArrayRef<llvm::StringRef> ParamTypes,
+                                    bool IsLegacyNameOnly) {
+    IdentifierID NameID = getIdentifier(Name);
+    if (IsLegacyNameOnly)
+      return CXXMethodTableKey::legacy(CtxID.Value, NameID);
+
+    llvm::SmallVector<uint32_t, 4> ParamTypeIDs;
+    ParamTypeIDs.reserve(ParamTypes.size());
+    for (llvm::StringRef ParamType : ParamTypes)
+      ParamTypeIDs.push_back(getIdentifier(ParamType));
+    return CXXMethodTableKey::typed(CtxID.Value, NameID, ParamTypeIDs);
   }
 
 private:
@@ -801,17 +816,22 @@ public:
 
 /// Used to serialize the on-disk C++ method table.
 class CXXMethodTableInfo
-    : public VersionedTableInfo<CXXMethodTableInfo, SingleDeclTableKey,
+    : public VersionedTableInfo<CXXMethodTableInfo, CXXMethodTableKey,
                                 CXXMethodInfo> {
 public:
-  unsigned getKeyLength(key_type_ref) {
-    return sizeof(uint32_t) + sizeof(uint32_t);
+  unsigned getKeyLength(key_type_ref Key) {
+    return sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint8_t) +
+           sizeof(uint32_t) + Key.paramTypeIDs.size() * sizeof(uint32_t);
   }
 
   void EmitKey(raw_ostream &OS, key_type_ref Key, unsigned) {
     llvm::support::endian::Writer writer(OS, llvm::endianness::little);
     writer.write<uint32_t>(Key.parentContextID);
     writer.write<uint32_t>(Key.nameID);
+    writer.write<uint8_t>(static_cast<uint8_t>(Key.kind));
+    writer.write<uint32_t>(Key.paramTypeIDs.size());
+    for (uint32_t ParamTypeID : Key.paramTypeIDs)
+      writer.write<uint32_t>(ParamTypeID);
   }
 
   hash_value_type ComputeHash(key_type_ref key) {
@@ -1565,10 +1585,12 @@ void APINotesWriter::addObjCMethod(ContextID CtxID, ObjCSelectorRef Selector,
 }
 
 void APINotesWriter::addCXXMethod(ContextID CtxID, llvm::StringRef Name,
+                                  llvm::ArrayRef<llvm::StringRef> ParamTypes,
+                                  bool IsLegacyNameOnly,
                                   const CXXMethodInfo &Info,
                                   VersionTuple SwiftVersion) {
-  IdentifierID NameID = Implementation->getIdentifier(Name);
-  SingleDeclTableKey Key(CtxID.Value, NameID);
+  CXXMethodTableKey Key = Implementation->getCXXMethodKey(
+      CtxID, Name, ParamTypes, IsLegacyNameOnly);
   Implementation->CXXMethods[Key].push_back({SwiftVersion, Info});
 }
 
