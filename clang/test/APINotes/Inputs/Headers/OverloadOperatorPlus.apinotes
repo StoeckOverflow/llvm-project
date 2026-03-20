@@ -1,0 +1,17 @@
+---
+Name: OverloadOperatorPlus
+Tags:
+- Name: OverloadOperatorPlus
+  Methods:
+  - Name: operator+
+    Availability: none
+    AvailabilityMsg: "int operator+ unavailable"
+    Parameters:
+    - Position: 0
+      Type: int
+  - Name: operator+
+    Availability: none
+    AvailabilityMsg: "double operator+ unavailable"
+    Parameters:
+    - Position: 0
+      Type: double

@@ -1,0 +1,18 @@
+RUN: apinotes-test %S/Inputs/Headers/TypedVsLegacy.apinotes | FileCheck %s
+
+This locks down that omitted Parameters and explicit Parameters: [] remain
+distinct on the YAML round-trip output.
+
+CHECK: ---
+CHECK: - Name:            ping
+CHECK-NEXT: Availability:    none
+CHECK-NEXT: AvailabilityMsg: legacy ping unavailable
+CHECK: - Name:            ping
+CHECK-NEXT: Parameters:      []
+CHECK-NEXT: Availability:    none
+CHECK-NEXT: AvailabilityMsg: zero-arg ping unavailable
+CHECK: - Name:            selfOnly
+CHECK-NEXT: Parameters:
+CHECK-NEXT: - Position:        -1
+CHECK-NEXT: Type:            'TypedVsLegacy *'
+CHECK: ...

@@ -1,0 +1,57 @@
+---
+Name: TypedVsLegacy
+Tags:
+- Name: TypedVsLegacy
+  Methods:
+  - Name: mix
+    Availability: none
+    AvailabilityMsg: "legacy mix unavailable"
+  - Name: mix
+    Availability: none
+    AvailabilityMsg: "int mix unavailable"
+    Parameters:
+    - Position: 0
+      Type: int
+  - Name: ping
+    Availability: none
+    AvailabilityMsg: "legacy ping unavailable"
+  - Name: ping
+    Availability: none
+    AvailabilityMsg: "zero-arg ping unavailable"
+    Parameters: []
+  - Name: ping
+    Availability: none
+    AvailabilityMsg: "int ping unavailable"
+    Parameters:
+    - Position: 0
+      Type: int
+  - Name: selfOnly
+    Availability: none
+    AvailabilityMsg: "legacy selfOnly unavailable"
+    Parameters:
+    - Position: -1
+      Type: TypedVsLegacy *
+  - Name: selfOnly
+    Availability: none
+    AvailabilityMsg: "int selfOnly unavailable"
+    Parameters:
+    - Position: 0
+      Type: int
+  - Name: rewrite
+    Availability: none
+    AvailabilityMsg: "legacy rewrite unavailable"
+    Parameters:
+    - Position: 0
+      Type: "int *"
+  - Name: partial
+    Availability: none
+    AvailabilityMsg: "legacy partial unavailable"
+    Parameters:
+    - Position: 0
+      Type: int
+    - Position: 1
+      Nullability: N
+  - Name: singleZeroTyped
+    Availability: none
+    AvailabilityMsg: "single zero-arg note still legacy"
+    Parameters: []

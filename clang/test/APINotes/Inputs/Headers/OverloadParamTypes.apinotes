@@ -1,0 +1,17 @@
+---
+Name: OverloadParamTypes
+Tags:
+- Name: OverloadParamTypes
+  Methods:
+  - Name: frob
+    Availability: none
+    AvailabilityMsg: "int overload unavailable"
+    Parameters:
+    - Position: 0
+      Type: "  int  "
+  - Name: frob
+    Availability: none
+    AvailabilityMsg: "double overload unavailable"
+    Parameters:
+    - Position: 0
+      Type: " double   "

@@ -42,6 +42,14 @@ module Methods {
   header "Methods.h"
 }
 
+module OverloadConstQual {
+  header "OverloadConstQual.h"
+}
+
+module OverloadConversion {
+  header "OverloadConversion.h"
+}
+
 module ModuleWithWrongCase {
   header "ModuleWithWrongCase.h"
 }
@@ -52,6 +60,18 @@ module ModuleWithWrongCasePrivate {
 
 module Namespaces {
   header "Namespaces.h"
+}
+
+module OverloadOperatorPlus {
+  header "OverloadOperatorPlus.h"
+}
+
+module OverloadParamTypes {
+  header "OverloadParamTypes.h"
+}
+
+module TypedVsLegacy {
+  header "TypedVsLegacy.h"
 }
 
 module Templates {

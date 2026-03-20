@@ -1,0 +1,11 @@
+---
+Name: OverloadConversion
+Tags:
+- Name: OverloadConversion
+  Methods:
+  - Name: operator int
+    Availability: none
+    AvailabilityMsg: "int conversion unavailable"
+  - Name: operator double
+    Availability: none
+    AvailabilityMsg: "double conversion unavailable"

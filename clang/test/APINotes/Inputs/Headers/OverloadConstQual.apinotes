@@ -1,0 +1,17 @@
+---
+Name: OverloadConstQual
+Tags:
+- Name: OverloadConstQual
+  Methods:
+  - Name: pick
+    Availability: none
+    AvailabilityMsg: "non-const pick unavailable"
+    Parameters:
+    - Position: -1
+      Type: OverloadConstQual *
+  - Name: pick
+    Availability: none
+    AvailabilityMsg: "const pick unavailable"
+    Parameters:
+    - Position: -1
+      Type: "const OverloadConstQual *"

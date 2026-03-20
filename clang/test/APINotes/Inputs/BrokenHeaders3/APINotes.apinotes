@@ -1,0 +1,32 @@
+Name: SomeBrokenLib
+Tags:
+  - Name: DuplicateMethods
+    Methods:
+      - Name: legacy
+        Availability: none
+      - Name: legacy
+        Availability: none
+
+      - Name: mixed
+        Availability: none
+      - Name: mixed
+        Availability: none
+        Parameters:
+          - Position: 0
+            Type: int
+
+      - Name: typed
+        Availability: none
+        Parameters:
+          - Position: 0
+            Type: int
+      - Name: typed
+        Availability: none
+        Parameters:
+          - Position: 0
+            Type: int
+      - Name: typed
+        Availability: none
+        Parameters:
+          - Position: 0
+            Type: double
