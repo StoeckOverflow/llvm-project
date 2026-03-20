@@ -2314,18 +2314,49 @@ auto APINotesReader::lookupField(ContextID CtxID, llvm::StringRef Name)
   return {Implementation->SwiftVersion, *Known};
 }
 
-auto APINotesReader::lookupCXXMethod(ContextID CtxID, llvm::StringRef Name)
+auto APINotesReader::lookupCXXMethod(ContextID CtxID, llvm::StringRef Name,
+                                     llvm::ArrayRef<llvm::StringRef> ParamTypes)
     -> VersionedInfo<CXXMethodInfo> {
-  if (!Implementation->CXXMethodTable)
+  if (!Implementation->CXXMethodTable && !Implementation->LegacyCXXMethodTable)
     return std::nullopt;
 
   std::optional<IdentifierID> NameID = Implementation->getIdentifier(Name);
   if (!NameID)
     return std::nullopt;
 
-  auto Known = Implementation->CXXMethodTable->find(
+  if (Implementation->CXXMethodTable) {
+    bool CanFormTypedKey = true;
+    llvm::SmallVector<uint32_t, 4> ParamTypeIDs;
+    ParamTypeIDs.reserve(ParamTypes.size());
+    for (llvm::StringRef ParamType : ParamTypes) {
+      std::optional<IdentifierID> ParamTypeID =
+          Implementation->getIdentifier(ParamType);
+      if (!ParamTypeID) {
+        CanFormTypedKey = false;
+        break;
+      }
+      ParamTypeIDs.push_back(*ParamTypeID);
+    }
+
+    if (CanFormTypedKey) {
+      auto TypedKnown = Implementation->CXXMethodTable->find(
+          CXXMethodTableKey::typed(CtxID.Value, *NameID, ParamTypeIDs));
+      if (TypedKnown != Implementation->CXXMethodTable->end())
+        return {Implementation->SwiftVersion, *TypedKnown};
+    }
+
+    auto LegacyKnown = Implementation->CXXMethodTable->find(
+        CXXMethodTableKey::legacy(CtxID.Value, *NameID));
+    if (LegacyKnown != Implementation->CXXMethodTable->end())
+      return {Implementation->SwiftVersion, *LegacyKnown};
+  }
+
+  if (!Implementation->LegacyCXXMethodTable)
+    return std::nullopt;
+
+  auto Known = Implementation->LegacyCXXMethodTable->find(
       SingleDeclTableKey(CtxID.Value, *NameID));
-  if (Known == Implementation->CXXMethodTable->end())
+  if (Known == Implementation->LegacyCXXMethodTable->end())
     return std::nullopt;
 
   return {Implementation->SwiftVersion, *Known};

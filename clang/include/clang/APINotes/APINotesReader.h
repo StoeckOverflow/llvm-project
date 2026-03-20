@@ -154,10 +154,13 @@ public:
   ///
   /// \param CtxID The ID that references the parent context, i.e. a C++ tag.
   /// \param Name The name of the C++ method we're looking for.
+  /// \param ParamTypes The normalized explicit parameter types.
   ///
   /// \returns Information about the method, if known.
   VersionedInfo<CXXMethodInfo> lookupCXXMethod(ContextID CtxID,
-                                               llvm::StringRef Name);
+                                               llvm::StringRef Name,
+                                               llvm::ArrayRef<llvm::StringRef>
+                                                   ParamTypes);
 
   /// Look for information regarding the given global variable.
   ///

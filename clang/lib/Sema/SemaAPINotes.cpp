@@ -108,6 +108,13 @@ static void applyNullability(Sema &S, Decl *decl, NullabilityKind nullability,
   }
 }
 
+static std::string
+getNormalizedCXXMethodParamType(const PrintingPolicy &Policy, QualType Type) {
+  // C++ APINotes overload lookup is currently spelling-based: print the AST
+  // type with a stable policy, then normalize the spelling for lookup.
+  return api_notes::normalizeCXXMethodParamType(Type.getAsString(Policy));
+}
+
 /// Copy a string into ASTContext-allocated memory.
 static StringRef ASTAllocateString(ASTContext &Ctx, StringRef String) {
   void *mem = Ctx.Allocate(String.size(), alignof(char *));
@@ -1209,6 +1216,9 @@ void Sema::ProcessAPINotes(Decl *D) {
         for (auto Reader : APINotes.findAPINotes(D->getLocation())) {
           if (auto Context = UnwindTagContext(TagContext, APINotes)) {
             std::string MethodName;
+            llvm::SmallVector<std::string, 4> ParamTypeStorage;
+            llvm::SmallVector<llvm::StringRef, 4> ParamTypes;
+            PrintingPolicy Policy(getLangOpts());
             if (CXXMethod->isOverloadedOperator())
               MethodName =
                   std::string("operator") +
@@ -1216,7 +1226,16 @@ void Sema::ProcessAPINotes(Decl *D) {
             else
               MethodName = CXXMethod->getName();
 
-            auto Info = Reader->lookupCXXMethod(Context->id, MethodName);
+            ParamTypeStorage.reserve(CXXMethod->getNumParams());
+            ParamTypes.reserve(CXXMethod->getNumParams());
+            for (const ParmVarDecl *Param : CXXMethod->parameters()) {
+              ParamTypeStorage.push_back(
+                  getNormalizedCXXMethodParamType(Policy, Param->getType()));
+              ParamTypes.push_back(ParamTypeStorage.back());
+            }
+
+            auto Info =
+                Reader->lookupCXXMethod(Context->id, MethodName, ParamTypes);
             ProcessVersionedAPINotes(*this, CXXMethod, Info);
           }
         }
