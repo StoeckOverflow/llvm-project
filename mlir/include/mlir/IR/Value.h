@@ -113,7 +113,7 @@ public:
   /// completely invalid IR very easily.  It is strongly recommended that you
   /// recreate IR objects with the right types instead of mutating them in
   /// place.
-  void setType(Type newType) { impl->setType(newType); }
+  void setType(Type newType);
 
   /// If this value is the result of an operation, return the operation that
   /// defines it.
@@ -146,9 +146,7 @@ public:
   /// Replace all uses of 'this' value with the new value, updating anything in
   /// the IR that uses 'this' to use the other value instead.  When this returns
   /// there are zero uses of 'this'.
-  void replaceAllUsesWith(Value newValue) {
-    impl->replaceAllUsesWith(newValue);
-  }
+  void replaceAllUsesWith(Value newValue);
 
   /// Replace all uses of 'this' value with 'newValue', updating anything in the
   /// IR that uses 'this' to use the other value instead except if the user is

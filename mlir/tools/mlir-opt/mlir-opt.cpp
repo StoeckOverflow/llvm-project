@@ -34,6 +34,7 @@ using namespace mlir;
 namespace mlir {
 void registerCloneTestPasses();
 void registerConvertToTargetEnvPass();
+void registerDependentTensorTestPasses();
 void registerLazyLoadingTestPasses();
 void registerLoopLikeInterfaceTestPasses();
 void registerPassManagerTestPass();
@@ -183,6 +184,7 @@ void registerTestTransformsTransformDialectExtension(DialectRegistry &);
 static void registerTestPasses() {
   registerCloneTestPasses();
   registerConvertToTargetEnvPass();
+  registerDependentTensorTestPasses();
   registerPrintTosaAvailabilityPass();
   registerLazyLoadingTestPasses();
   registerLoopLikeInterfaceTestPasses();

@@ -9,7 +9,10 @@
 #include "mlir/IR/Block.h"
 
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/Operation.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using namespace mlir;
 
@@ -20,8 +23,10 @@ using namespace mlir;
 Block::~Block() {
   assert(!verifyOpOrder() && "Expected valid operation ordering.");
   clear();
-  for (BlockArgument arg : arguments)
+  for (BlockArgument arg : arguments) {
+    unregisterDependentTypeUse(arg);
     arg.destroy();
+  }
 }
 
 Region *Block::getParent() const { return parentValidOpOrderPair.getPointer(); }
@@ -158,6 +163,8 @@ auto Block::getArgumentTypes() -> ValueTypeRange<BlockArgListType> {
 BlockArgument Block::addArgument(Type type, Location loc) {
   BlockArgument arg = BlockArgument::create(type, this, arguments.size(), loc);
   arguments.push_back(arg);
+  if (isDependentTensorType(type))
+    registerDependentTypeUse(arg);
   return arg;
 }
 
@@ -179,6 +186,8 @@ BlockArgument Block::insertArgument(unsigned index, Type type, Location loc) {
 
   auto arg = BlockArgument::create(type, this, index, loc);
   arguments.insert(arguments.begin() + index, arg);
+  if (isDependentTensorType(type))
+    registerDependentTypeUse(arg);
   // Update the cached position for all the arguments after the newly inserted
   // one.
   ++index;
@@ -197,6 +206,12 @@ BlockArgument Block::insertArgument(args_iterator it, Type type, Location loc) {
 
 void Block::eraseArgument(unsigned index) {
   assert(index < arguments.size());
+  if (failed(checkDependentAnchorValueCanErase(
+          arguments[index], [&]() { return emitError(arguments[index].getLoc()); })))
+    llvm::report_fatal_error(
+        "attempted to erase anchor value with live dependent tensor references");
+  unregisterDependentTypeUse(arguments[index]);
+  (void)markDependentAnchorDead(arguments[index]);
   arguments[index].destroy();
   arguments.erase(arguments.begin() + index);
   for (BlockArgument arg : llvm::drop_begin(arguments, index))
@@ -206,10 +221,7 @@ void Block::eraseArgument(unsigned index) {
 void Block::eraseArguments(unsigned start, unsigned num) {
   assert(start + num <= arguments.size());
   for (unsigned i = 0; i < num; ++i)
-    arguments[start + i].destroy();
-  arguments.erase(arguments.begin() + start, arguments.begin() + start + num);
-  for (BlockArgument arg : llvm::drop_begin(arguments, start))
-    arg.setArgNumber(start++);
+    eraseArgument(start);
 }
 
 void Block::eraseArguments(const BitVector &eraseIndices) {
@@ -218,26 +230,13 @@ void Block::eraseArguments(const BitVector &eraseIndices) {
 }
 
 void Block::eraseArguments(function_ref<bool(BlockArgument)> shouldEraseFn) {
-  auto firstDead = llvm::find_if(arguments, shouldEraseFn);
-  if (firstDead == arguments.end())
-    return;
+  SmallVector<unsigned> deadArgs;
+  for (BlockArgument arg : arguments)
+    if (shouldEraseFn(arg))
+      deadArgs.push_back(arg.getArgNumber());
 
-  // Destroy the first dead argument, this avoids reapplying the predicate to
-  // it.
-  unsigned index = firstDead->getArgNumber();
-  firstDead->destroy();
-
-  // Iterate the remaining arguments to remove any that are now dead.
-  for (auto it = std::next(firstDead), e = arguments.end(); it != e; ++it) {
-    // Destroy dead arguments, and shift those that are still live.
-    if (shouldEraseFn(*it)) {
-      it->destroy();
-    } else {
-      it->setArgNumber(index++);
-      *firstDead++ = *it;
-    }
-  }
-  arguments.erase(firstDead, arguments.end());
+  for (unsigned index : llvm::reverse(deadArgs))
+    eraseArgument(index);
 }
 
 //===----------------------------------------------------------------------===//

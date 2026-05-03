@@ -13,6 +13,7 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinDialect.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
+#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/TensorEncoding.h"
@@ -26,6 +27,45 @@
 
 using namespace mlir;
 using namespace mlir::detail;
+
+MLIR_DEFINE_EXPLICIT_TYPE_ID(mlir::DependentTensorType)
+
+namespace mlir::detail {
+struct DependentTensorTypeStorage : public TypeStorage {
+  using KeyTy = std::tuple<ArrayRef<DependentDimExpr>, Type>;
+
+  DependentTensorTypeStorage(ArrayRef<DependentDimExpr> dims,
+                             ArrayRef<int64_t> shape, Type elementType)
+      : dims(dims), shape(shape), elementType(elementType) {}
+
+  bool operator==(const KeyTy &key) const {
+    return std::get<0>(key) == dims && std::get<1>(key) == elementType;
+  }
+
+  static llvm::hash_code hashKey(const KeyTy &key) {
+    return llvm::hash_combine(
+        llvm::hash_combine_range(std::get<0>(key).begin(),
+                                 std::get<0>(key).end()),
+        std::get<1>(key));
+  }
+
+  static DependentTensorTypeStorage *construct(TypeStorageAllocator &allocator,
+                                               const KeyTy &key) {
+    ArrayRef<DependentDimExpr> dims = allocator.copyInto(std::get<0>(key));
+    SmallVector<int64_t> shape;
+    shape.reserve(dims.size());
+    for (DependentDimExpr dim : dims)
+      shape.push_back(dim.isConstant() ? dim.constantValue : ShapedType::kDynamic);
+    ArrayRef<int64_t> storedShape = allocator.copyInto(ArrayRef<int64_t>(shape));
+    return new (allocator.allocate<DependentTensorTypeStorage>())
+        DependentTensorTypeStorage(dims, storedShape, std::get<1>(key));
+  }
+
+  ArrayRef<DependentDimExpr> dims;
+  ArrayRef<int64_t> shape;
+  Type elementType;
+};
+} // namespace mlir::detail
 
 //===----------------------------------------------------------------------===//
 /// Tablegen Type Definitions
@@ -46,6 +86,8 @@ void BuiltinDialect::registerTypes() {
   addTypes<
 #define GET_TYPEDEF_LIST
 #include "mlir/IR/BuiltinTypes.cpp.inc"
+      ,
+      DependentTensorType
       >();
 }
 
@@ -383,7 +425,7 @@ VectorType VectorType::cloneWith(std::optional<ArrayRef<int64_t>> shape,
 
 Type TensorType::getElementType() const {
   return llvm::TypeSwitch<TensorType, Type>(*this)
-      .Case<RankedTensorType, UnrankedTensorType>(
+      .Case<RankedTensorType, UnrankedTensorType, DependentTensorType>(
           [](auto type) { return type.getElementType(); });
 }
 
@@ -392,7 +434,9 @@ bool TensorType::hasRank() const {
 }
 
 ArrayRef<int64_t> TensorType::getShape() const {
-  return llvm::cast<RankedTensorType>(*this).getShape();
+  return llvm::TypeSwitch<TensorType, ArrayRef<int64_t>>(*this)
+      .Case<RankedTensorType, DependentTensorType>(
+          [](auto type) { return type.getShape(); });
 }
 
 TensorType TensorType::cloneWith(std::optional<ArrayRef<int64_t>> shape,
@@ -401,6 +445,12 @@ TensorType TensorType::cloneWith(std::optional<ArrayRef<int64_t>> shape,
     if (shape)
       return RankedTensorType::get(*shape, elementType);
     return UnrankedTensorType::get(elementType);
+  }
+
+  if (auto dependentTy = llvm::dyn_cast<DependentTensorType>(*this)) {
+    if (!shape)
+      return dependentTy;
+    return RankedTensorType::get(*shape, elementType);
   }
 
   auto rankedTy = llvm::cast<RankedTensorType>(*this);
@@ -437,6 +487,33 @@ bool TensorType::isValidElementType(Type type) {
   return llvm::isa<ComplexType, FloatType, IntegerType, OpaqueType, VectorType,
                    IndexType>(type) ||
          !llvm::isa<BuiltinDialect>(type.getDialect());
+}
+
+DependentTensorType DependentTensorType::get(MLIRContext *context,
+                                             ArrayRef<DependentDimExpr> dims,
+                                             Type elementType) {
+  return Base::get(context, dims, elementType);
+}
+
+LogicalResult
+DependentTensorType::verify(function_ref<InFlightDiagnostic()> emitError,
+                            ArrayRef<DependentDimExpr> dims, Type elementType) {
+  for (DependentDimExpr dim : dims)
+    if (dim.isConstant() && dim.constantValue < 0)
+      return emitError() << "invalid dependent tensor dimension size";
+  return checkTensorElementType(emitError, elementType);
+}
+
+ArrayRef<DependentDimExpr> DependentTensorType::getDimensionExprs() const {
+  return getImpl()->dims;
+}
+
+ArrayRef<int64_t> DependentTensorType::getShape() const {
+  return getImpl()->shape;
+}
+
+Type DependentTensorType::getElementType() const {
+  return getImpl()->elementType;
 }
 
 //===----------------------------------------------------------------------===//

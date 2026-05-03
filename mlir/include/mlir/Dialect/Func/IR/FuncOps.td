@@ -10,6 +10,7 @@
 #define MLIR_DIALECT_FUNC_IR_FUNCOPS_TD
 
 include "mlir/IR/EnumAttr.td"
+include "mlir/IR/DependentTensorInterfaces.td"
 include "mlir/IR/OpAsmInterface.td"
 include "mlir/IR/SymbolInterfaces.td"
 include "mlir/Interfaces/CallInterfaces.td"
@@ -249,7 +250,8 @@ def ConstantOp : Func_Op<"constant",
 
 def FuncOp : Func_Op<"func", [
   AffineScope, AutomaticAllocationScope,
-  FunctionOpInterface, IsolatedFromAbove, OpAsmOpInterface
+  FunctionOpInterface, IsolatedFromAbove, OpAsmOpInterface,
+  DeclareOpInterfaceMethods<DependentTensorScopeOwnerOpInterface>
 ]> {
   let summary = "An operation with a name containing a single `SSACFG` region";
   let description = [{
@@ -295,7 +297,12 @@ def FuncOp : Func_Op<"func", [
                        OptionalAttr<StrAttr>:$sym_visibility,
                        OptionalAttr<DictArrayAttr>:$arg_attrs,
                        OptionalAttr<DictArrayAttr>:$res_attrs,
-                       UnitAttr:$no_inline);
+                       UnitAttr:$no_inline,
+                       OptionalProp<DependentTensorDistinctAttrProp>:
+                           $dependentTensorOwnerTag,
+                       OptionalProp<DependentTensorArrayAttrProp>:
+                           $dependentTensorAnchorSlots,
+                       DefaultValuedProp<I32Prop, "0">:$dependentTensorNextSlot);
   let regions = (region AnyRegion:$body);
 
   let builders = [OpBuilder<(ins

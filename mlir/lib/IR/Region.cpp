@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/IR/Region.h"
+#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
 using namespace mlir;
@@ -103,7 +104,16 @@ void Region::cloneInto(Region *dest, Region::iterator destPos,
     // argument to the cloned block.
     for (auto arg : block.getArguments())
       if (!mapper.contains(arg))
-        mapper.map(arg, newBlock->addArgument(arg.getType(), arg.getLoc()));
+        mapper.map(arg, newBlock->addArgument(
+                            arg.getType().replace([&](Type nested)
+                                                      -> std::optional<Type> {
+                              if (!isDependentTensorType(nested))
+                                return std::nullopt;
+                              Operation *anchorRoot = block.getParentOp();
+                              return remapDependentTensorType(nested, mapper,
+                                                              anchorRoot);
+                            }),
+                            arg.getLoc()));
 
     dest->getBlocks().insert(destPos, newBlock);
   }

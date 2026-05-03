@@ -10,6 +10,7 @@
 #include "TestOps.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Interfaces/FunctionImplementation.h"
 #include "mlir/Interfaces/MemorySlotInterfaces.h"
@@ -296,6 +297,48 @@ LogicalResult OpWithShapedTypeInferTypeInterfaceOp::reifyReturnTypeShapes(
     llvm::SmallVectorImpl<Value> &shapes) {
   shapes = SmallVector<Value, 1>{
       builder.createOrFold<tensor::DimOp>(getLoc(), operands.front(), 0)};
+  return success();
+}
+
+static bool sameDependentDimExpr(DependentDimExpr lhs, DependentDimExpr rhs) {
+  if (lhs.kind != rhs.kind)
+    return false;
+  if (lhs.isConstant())
+    return lhs.constantValue == rhs.constantValue;
+  if (lhs.isAnchor())
+    return lhs.anchor == rhs.anchor;
+  return false;
+}
+
+//===----------------------------------------------------------------------===//
+// DependentMatmulOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult DependentMatmulOp::verify() {
+  auto lhsType = dyn_cast<DependentTensorType>(getLhs().getType());
+  auto rhsType = dyn_cast<DependentTensorType>(getRhs().getType());
+  auto resultType = dyn_cast<DependentTensorType>(getResult().getType());
+  if (!lhsType || !rhsType || !resultType)
+    return emitOpError("requires dependent tensor operand and result types");
+
+  if (lhsType.getShape().size() != 2 || rhsType.getShape().size() != 2 ||
+      resultType.getShape().size() != 2)
+    return emitOpError("requires rank-2 dependent tensor operand and result types");
+
+  if (lhsType.getElementType() != rhsType.getElementType() ||
+      lhsType.getElementType() != resultType.getElementType())
+    return emitOpError("requires matching element types across operands and result");
+
+  auto lhsDims = lhsType.getDimensionExprs();
+  auto rhsDims = rhsType.getDimensionExprs();
+  auto resultDims = resultType.getDimensionExprs();
+  if (!sameDependentDimExpr(lhsDims[0], resultDims[0]))
+    return emitOpError("expected lhs dim 0 to equal result dim 0");
+  if (!sameDependentDimExpr(lhsDims[1], rhsDims[0]))
+    return emitOpError("expected lhs dim 1 to equal rhs dim 0");
+  if (!sameDependentDimExpr(rhsDims[1], resultDims[1]))
+    return emitOpError("expected rhs dim 1 to equal result dim 1");
+
   return success();
 }
 

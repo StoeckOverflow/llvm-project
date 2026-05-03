@@ -11,6 +11,7 @@
 
 #include "ParserState.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/OpImplementation.h"
 #include <optional>
 
@@ -32,6 +33,7 @@ public:
 
   Parser(ParserState &state)
       : builder(state.config.getContext()), state(state) {}
+  virtual ~Parser() = default;
 
   // Helper methods to get stuff from the parser-global state.
   ParserState &getState() const { return state; }
@@ -363,6 +365,12 @@ public:
   Attribute
   codeCompleteDialectSymbol(const llvm::StringMap<Attribute> &aliases);
   Type codeCompleteDialectSymbol(const llvm::StringMap<Type> &aliases);
+
+  /// Resolve a live SSA value for dependent tensor type syntax.
+  virtual FailureOr<AnchorKey> parseDependentTypeAnchorKey();
+  virtual void pushDependentTensorAnchorAliasScope() {}
+  virtual void popDependentTensorAnchorAliasScope() {}
+  virtual void addDependentTensorAnchorAlias(StringRef, AnchorKey) {}
 
 protected:
   /// The Parser is subclassed and reinstantiated.  Do not add additional

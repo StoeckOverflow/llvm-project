@@ -8,6 +8,7 @@
 
 #include "mlir/IR/Value.h"
 #include "mlir/IR/Block.h"
+#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/Operation.h"
 
 using namespace mlir;
@@ -49,6 +50,18 @@ Block *Value::getParentBlock() {
   return llvm::cast<BlockArgument>(*this).getOwner();
 }
 
+void Value::setType(Type newType) {
+  Type oldType = getType();
+  if (oldType == newType)
+    return;
+
+  if (isDependentTensorType(oldType))
+    unregisterDependentTypeUse(*this);
+  impl->setType(newType);
+  if (isDependentTensorType(newType))
+    registerDependentTypeUse(*this);
+}
+
 unsigned Value::getNumUses() const {
   return (unsigned)std::distance(use_begin(), use_end());
 }
@@ -65,11 +78,17 @@ bool Value::hasNUsesOrMore(unsigned n) const {
 // Value::UseLists
 //===----------------------------------------------------------------------===//
 
+void Value::replaceAllUsesWith(Value newValue) {
+  remapDependentTypeUsesOnValueChange(*this, newValue);
+  impl->replaceAllUsesWith(newValue);
+}
+
 /// Replace all uses of 'this' value with the new value, updating anything in
 /// the IR that uses 'this' to use the other value instead except if the user is
 /// listed in 'exceptions' .
 void Value::replaceAllUsesExcept(
     Value newValue, const SmallPtrSetImpl<Operation *> &exceptions) {
+  remapDependentTypeUsesOnValueChange(*this, newValue);
   for (OpOperand &use : llvm::make_early_inc_range(getUses())) {
     if (exceptions.count(use.getOwner()) == 0)
       use.set(newValue);
@@ -80,6 +99,7 @@ void Value::replaceAllUsesExcept(
 /// IR that uses 'this' to use the other value instead except if the user is
 /// 'exceptedUser'.
 void Value::replaceAllUsesExcept(Value newValue, Operation *exceptedUser) {
+  remapDependentTypeUsesOnValueChange(*this, newValue);
   for (OpOperand &use : llvm::make_early_inc_range(getUses())) {
     if (use.getOwner() != exceptedUser)
       use.set(newValue);
@@ -90,6 +110,7 @@ void Value::replaceAllUsesExcept(Value newValue, Operation *exceptedUser) {
 /// returns true.
 void Value::replaceUsesWithIf(Value newValue,
                               function_ref<bool(OpOperand &)> shouldReplace) {
+  remapDependentTypeUsesOnValueChange(*this, newValue);
   for (OpOperand &use : llvm::make_early_inc_range(getUses()))
     if (shouldReplace(use))
       use.set(newValue);

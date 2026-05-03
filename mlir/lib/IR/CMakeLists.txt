@@ -19,6 +19,8 @@ add_mlir_library(MLIRIR
   BuiltinTypes.cpp
   BuiltinTypeInterfaces.cpp
   Diagnostics.cpp
+  DependentTensorSupport.cpp
+  DependentTensorInterfaces.cpp
   Dialect.cpp
   DialectResourceBlobManager.cpp
   Dominance.cpp
@@ -63,6 +65,7 @@ add_mlir_library(MLIRIR
   MLIRCallInterfacesIncGen
   MLIRCastInterfacesIncGen
   MLIRDataLayoutInterfacesIncGen
+  MLIRDependentTensorInterfacesIncGen
   MLIRDialectFoldInterfaceIncGen
   MLIROpAsmInterfaceIncGen
   MLIRQuantStorageTypeInterfaceIncGen

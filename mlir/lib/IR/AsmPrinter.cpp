@@ -20,6 +20,7 @@
 #include "mlir/IR/BuiltinDialect.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/DialectResourceBlobManager.h"
@@ -1979,7 +1980,7 @@ public:
   explicit AsmStateImpl(Operation *op, const OpPrintingFlags &printerFlags,
                         AsmState::LocationMap *locationMap)
       : interfaces(op->getContext()), nameState(op, printerFlags),
-        printerFlags(printerFlags), locationMap(locationMap) {}
+        printerFlags(printerFlags), locationMap(locationMap), topLevelOp(op) {}
   explicit AsmStateImpl(MLIRContext *ctx, const OpPrintingFlags &printerFlags,
                         AsmState::LocationMap *locationMap)
       : interfaces(ctx), printerFlags(printerFlags), locationMap(locationMap) {}
@@ -2011,6 +2012,8 @@ public:
 
   /// Get the printer flags.
   const OpPrintingFlags &getPrinterFlags() const { return printerFlags; }
+
+  Operation *getTopLevelOp() const { return topLevelOp; }
 
   /// Register the location, line and column, within the buffer that the given
   /// operation was printed at.
@@ -2055,6 +2058,9 @@ private:
 
   /// An optional location map to be populated.
   AsmState::LocationMap *locationMap;
+
+  /// The operation used to seed this printer state when available.
+  Operation *topLevelOp = nullptr;
 
   /// Stack of potentially cyclic mutable attributes or type currently being
   /// printed.
@@ -2852,6 +2858,29 @@ void AsmPrinter::Impl::printTypeImpl(Type type) {
           os << ", ";
           printAttribute(tensorTy.getEncoding());
         }
+        os << '>';
+      })
+      .Case([&](DependentTensorType tensorTy) {
+        os << "tensor<[";
+        llvm::interleaveComma(tensorTy.getDimensionExprs(), os,
+                              [&](DependentDimExpr expr) {
+                                if (expr.isConstant()) {
+                                  os << expr.constantValue;
+                                  return;
+                                }
+                                FailureOr<Value> value =
+                                    resolveAnchorKey(expr.anchor,
+                                                     state.getTopLevelOp());
+                                if (failed(value)) {
+                                  os << "<<anchor:" << expr.anchor.slot << ":"
+                                     << expr.anchor.generation << ">>";
+                                  return;
+                                }
+                                state.getSSANameState().printValueID(
+                                    *value, /*printResultNo=*/true, os);
+                              });
+        os << "], ";
+        printType(tensorTy.getElementType());
         os << '>';
       })
       .Case([&](UnrankedTensorType tensorTy) {

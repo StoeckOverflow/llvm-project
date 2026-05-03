@@ -10,6 +10,7 @@
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Matchers.h"
@@ -130,6 +131,9 @@ Operation *Operation::create(Location location, OperationName name,
     new (op->getOutOfLineOpResult(i))
         detail::OutOfLineOpResult(*resultTypeIt, i);
   }
+  for (OpResult result : op->getResults())
+    if (isDependentTensorType(result.getType()))
+      registerDependentTypeUse(Value(result));
 
   // Initialize the regions.
   for (unsigned i = 0; i != numRegions; ++i)
@@ -189,6 +193,8 @@ Operation::~Operation() {
     llvm::report_fatal_error("operation destroyed but still has uses");
   }
 #endif
+  for (OpResult result : getResults())
+    unregisterDependentTypeUse(Value(result));
   // Explicitly run the destructors for the operands.
   if (hasOperandStorage)
     getOperandStorage().~OperandStorage();
@@ -532,6 +538,10 @@ void llvm::ilist_traits<::mlir::Operation>::transferNodesFromList(
 /// Remove this operation (and its descendants) from its Block and delete
 /// all of them.
 void Operation::erase() {
+  if (failed(checkDependentAnchorOwnerCanErase(
+          this, [&]() { return emitOpError(); })))
+    llvm::report_fatal_error(
+        "attempted to erase anchor owner with live dependent tensor references");
   if (auto *parent = getBlock())
     parent->getOperations().erase(this);
   else
@@ -557,6 +567,12 @@ void Operation::moveBefore(Block *block,
                            llvm::iplist<Operation>::iterator iterator) {
   assert(getBlock() &&
          "cannot move an operation that isn't contained in a block");
+  for (OpResult result : getResults())
+    if (failed(checkDependentAnchorValueCanMove(
+            Value(result), [&]() { return emitOpError(); })))
+      llvm::report_fatal_error(
+          "attempted to move scope-owned anchor value with live dependent tensor "
+          "references");
   block->getOperations().splice(iterator, getBlock()->getOperations(),
                                 getIterator());
 }
@@ -725,6 +741,7 @@ Operation *Operation::cloneWithoutRegions() {
 Operation *Operation::clone(IRMapping &mapper, const CloneOptions &options) {
   SmallVector<Value, 8> operands;
   SmallVector<Block *, 2> successors;
+  SmallVector<Type, 4> resultTypes;
 
   // Remap the operands.
   if (options.shouldCloneOperands()) {
@@ -738,10 +755,24 @@ Operation *Operation::clone(IRMapping &mapper, const CloneOptions &options) {
   for (Block *successor : getSuccessors())
     successors.push_back(mapper.lookupOrDefault(successor));
 
+  TypeRange clonedResultTypes = options.resultTypesOr(getResultTypes());
+  if (options.shouldCloneResults()) {
+    resultTypes.reserve(getNumResults());
+    for (Type type : getResultTypes()) {
+      resultTypes.push_back(type.replace([&](Type nested) -> std::optional<Type> {
+        if (!isDependentTensorType(nested))
+          return std::nullopt;
+        return remapDependentTensorType(nested, mapper, this);
+      }));
+    }
+    clonedResultTypes = resultTypes;
+  }
+
   // Create the new operation.
   auto *newOp = create(getLoc(), getName(),
-                       options.resultTypesOr(getResultTypes()), operands, attrs,
+                       clonedResultTypes, operands, attrs,
                        getPropertiesStorage(), successors, getNumRegions());
+  resetDependentTensorOwnerProperties(newOp);
   mapper.map(this, newOp);
 
   // Clone the regions.

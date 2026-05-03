@@ -12,16 +12,20 @@
 #include "mlir/Conversion/ConvertToLLVM/ToLLVMInterface.h"
 #include "mlir/Dialect/Bufferization/IR/BufferizableOpInterface.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "mlir/IR/Value.h"
+#include "mlir/Interfaces/CallInterfaces.h"
 #include "mlir/Interfaces/FunctionImplementation.h"
 #include "mlir/Transforms/InliningUtils.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVectorExtras.h"
 
@@ -29,6 +33,64 @@
 
 using namespace mlir;
 using namespace mlir::func;
+
+namespace {
+static ParseResult parseDependentTensorAwareFunctionSignature(
+    OpAsmParser &parser, Region &bodyRegion,
+    SmallVectorImpl<OpAsmParser::Argument> &arguments, bool &isVariadic,
+    SmallVectorImpl<Type> &resultTypes,
+    SmallVectorImpl<DictionaryAttr> &resultAttrs) {
+  isVariadic = false;
+  if (parser.parseCommaSeparatedList(
+          OpAsmParser::Delimiter::Paren, [&]() -> ParseResult {
+            if (isVariadic)
+              return parser.emitError(
+                  parser.getCurrentLocation(),
+                  "variadic arguments must be in the end of the argument list");
+
+            OpAsmParser::Argument argument;
+            auto argPresent = parser.parseOptionalArgument(
+                argument, /*allowType=*/true, /*allowAttrs=*/true);
+            if (argPresent.has_value()) {
+              if (failed(argPresent.value()))
+                return failure();
+              if (!arguments.empty() && arguments.back().ssaName.name.empty())
+                return parser.emitError(argument.ssaName.location,
+                                        "expected type instead of SSA identifier");
+            } else {
+              argument.ssaName.location = parser.getCurrentLocation();
+              if (!arguments.empty() && !arguments.back().ssaName.name.empty())
+                return parser.emitError(argument.ssaName.location,
+                                        "expected SSA identifier");
+
+              NamedAttrList attrs;
+              if (parser.parseType(argument.type) ||
+                  parser.parseOptionalAttrDict(attrs) ||
+                  parser.parseOptionalLocationSpecifier(argument.sourceLoc))
+                return failure();
+              argument.attrs = attrs.getDictionary(parser.getContext());
+            }
+
+            arguments.push_back(argument);
+            if (!argument.ssaName.name.empty() && argument.type.isIndex()) {
+              FailureOr<AnchorKey> key =
+                  createProvisionalDependentTensorBlockArgAnchor(
+                      &bodyRegion, arguments.size() - 1);
+              if (failed(key))
+                return parser.emitError(argument.ssaName.location,
+                                        "failed to materialize dependent tensor anchor");
+              parser.addDependentTensorAnchorAlias(argument.ssaName.name, *key);
+            }
+            return success();
+          }))
+    return failure();
+
+  if (succeeded(parser.parseOptionalArrow()))
+    return call_interface_impl::parseFunctionResultList(parser, resultTypes,
+                                                        resultAttrs);
+  return success();
+}
+} // namespace
 
 //===----------------------------------------------------------------------===//
 // FuncDialect
@@ -199,11 +261,91 @@ ParseResult FuncOp::parse(OpAsmParser &parser, OperationState &result) {
       [](Builder &builder, ArrayRef<Type> argTypes, ArrayRef<Type> results,
          function_interface_impl::VariadicFlag,
          std::string &) { return builder.getFunctionType(argTypes, results); };
+  auto &builder = parser.getBuilder();
+  SmallVector<OpAsmParser::Argument> entryArgs;
+  SmallVector<DictionaryAttr> resultAttrs;
+  SmallVector<Type> resultTypes;
 
-  return function_interface_impl::parseFunctionOp(
-      parser, result, /*allowVariadic=*/false,
-      getFunctionTypeAttrName(result.name), buildFuncType,
-      getArgAttrsAttrName(result.name), getResAttrsAttrName(result.name));
+  (void)impl::parseOptionalVisibilityKeyword(parser, result.attributes);
+
+  StringAttr nameAttr;
+  if (parser.parseSymbolName(nameAttr, SymbolTable::getSymbolAttrName(),
+                             result.attributes))
+    return failure();
+
+  auto *body = result.addRegion();
+  mlir::detail::ProvisionalAnchorOwnerState provisionalOwnerState;
+  registerProvisionalDependentTensorScopeOwner(body, parser.getContext(),
+                                               provisionalOwnerState);
+  auto provisionalOwnerCleanup = llvm::scope_exit(
+      [&] { unregisterProvisionalDependentTensorScopeOwner(body); });
+
+  parser.pushDependentTensorAnchorAliasScope();
+  auto aliasScopeCleanup =
+      llvm::scope_exit([&] { parser.popDependentTensorAnchorAliasScope(); });
+
+  SMLoc signatureLocation = parser.getCurrentLocation();
+  bool isVariadic = false;
+  if (parseDependentTensorAwareFunctionSignature(
+          parser, *body, entryArgs, isVariadic, resultTypes, resultAttrs))
+    return failure();
+
+  std::string errorMessage;
+  SmallVector<Type> argTypes;
+  argTypes.reserve(entryArgs.size());
+  for (OpAsmParser::Argument &arg : entryArgs)
+    argTypes.push_back(arg.type);
+  Type type = buildFuncType(builder, argTypes, resultTypes,
+                            function_interface_impl::VariadicFlag(isVariadic),
+                            errorMessage);
+  if (!type) {
+    return parser.emitError(signatureLocation)
+           << "failed to construct function type"
+           << (errorMessage.empty() ? "" : ": ") << errorMessage;
+  }
+  result.addAttribute(getFunctionTypeAttrName(result.name), TypeAttr::get(type));
+
+  NamedAttrList parsedAttributes;
+  SMLoc attributeDictLocation = parser.getCurrentLocation();
+  if (parser.parseOptionalAttrDictWithKeyword(parsedAttributes))
+    return failure();
+
+  for (StringRef disallowed :
+       {SymbolTable::getVisibilityAttrName(), SymbolTable::getSymbolAttrName(),
+        getFunctionTypeAttrName(result.name).getValue()}) {
+    if (parsedAttributes.get(disallowed))
+      return parser.emitError(attributeDictLocation, "'")
+             << disallowed
+             << "' is an inferred attribute and should not be specified in the "
+                "explicit attribute dictionary";
+  }
+  result.attributes.append(parsedAttributes);
+
+  assert(resultAttrs.size() == resultTypes.size());
+  call_interface_impl::addArgAndResultAttrs(
+      builder, result, entryArgs, resultAttrs, getArgAttrsAttrName(result.name),
+      getResAttrsAttrName(result.name));
+
+  SMLoc loc = parser.getCurrentLocation();
+  OptionalParseResult parseResult =
+      parser.parseOptionalRegion(*body, entryArgs,
+                                 /*enableNameShadowing=*/false);
+  if (parseResult.has_value()) {
+    if (failed(*parseResult))
+      return failure();
+    if (body->empty())
+      return parser.emitError(loc, "expected non-empty function body");
+  }
+
+  auto &properties = result.getOrAddProperties<FuncOp::Properties>();
+  if (provisionalOwnerState.ownerTag)
+    properties.dependentTensorOwnerTag = provisionalOwnerState.ownerTag;
+  if (!provisionalOwnerState.slots.empty())
+    properties.dependentTensorAnchorSlots = serializeDependentTensorAnchorSlots(
+        builder.getContext(), provisionalOwnerState.slots);
+  properties.dependentTensorNextSlot =
+      static_cast<int32_t>(provisionalOwnerState.nextSlot);
+  return success();
 }
 
 void FuncOp::print(OpAsmPrinter &p) {
