@@ -8,6 +8,7 @@ add_mlir_library(MLIRTestIR
   TestDiagnostics.cpp
   TestDiagnosticsMetadata.cpp
   TestDependentTensor.cpp
+  TestDependentTensorEquality.cpp
   TestDominance.cpp
   TestFunc.cpp
   TestInterfaces.cpp

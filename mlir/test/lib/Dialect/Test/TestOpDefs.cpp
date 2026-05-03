@@ -10,9 +10,10 @@
 #include "TestOps.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Interfaces/FunctionImplementation.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Verifier.h"
-#include "mlir/Interfaces/FunctionImplementation.h"
 #include "mlir/Interfaces/MemorySlotInterfaces.h"
 #include "llvm/ADT/SmallVectorExtras.h"
 
