@@ -11,7 +11,6 @@
 
 #include "mlir/IR/BuiltinAttributeInterfaces.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
-#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/Support/TypeID.h"
 #include "mlir/Support/ADTExtras.h"
 
@@ -30,7 +29,6 @@ class AffineMap;
 class IndexType;
 class IntegerType;
 class MemRefType;
-class DependentTensorType;
 class RankedTensorType;
 class StringAttr;
 class TypeRange;
@@ -92,31 +90,6 @@ public:
 
   /// Allow implicit conversion to ShapedType.
   operator ShapedType() const { return llvm::cast<ShapedType>(*this); }
-};
-
-namespace detail {
-struct DependentTensorTypeStorage;
-} // namespace detail
-
-class DependentTensorType
-    : public Type::TypeBase<DependentTensorType, TensorType,
-                            detail::DependentTensorTypeStorage> {
-public:
-  using Base::Base;
-
-  static DependentTensorType get(MLIRContext *context,
-                                 ArrayRef<DependentDimExpr> dims,
-                                 Type elementType);
-  static LogicalResult verify(function_ref<InFlightDiagnostic()> emitError,
-                              ArrayRef<DependentDimExpr> dims,
-                              Type elementType);
-
-  ArrayRef<DependentDimExpr> getDimensionExprs() const;
-  ArrayRef<int64_t> getShape() const;
-  Type getElementType() const;
-  bool hasRank() const { return true; }
-
-  static constexpr StringLiteral name = "builtin.dependent_tensor";
 };
 
 //===----------------------------------------------------------------------===//
@@ -190,8 +163,6 @@ public:
 };
 
 } // namespace mlir
-
-MLIR_DECLARE_EXPLICIT_TYPE_ID(mlir::DependentTensorType)
 
 //===----------------------------------------------------------------------===//
 // Tablegen Type Declarations
@@ -450,8 +421,7 @@ inline bool BaseMemRefType::isValidElementType(Type type) {
 }
 
 inline bool TensorType::classof(Type type) {
-  return llvm::isa<RankedTensorType, UnrankedTensorType, DependentTensorType>(
-      type);
+  return llvm::isa<RankedTensorType, UnrankedTensorType>(type);
 }
 
 //===----------------------------------------------------------------------===//

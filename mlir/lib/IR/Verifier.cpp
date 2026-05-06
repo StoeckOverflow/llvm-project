@@ -26,7 +26,6 @@
 
 #include "mlir/IR/Verifier.h"
 #include "mlir/IR/Attributes.h"
-#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/Dominance.h"
 #include "mlir/IR/Operation.h"
@@ -134,12 +133,6 @@ LogicalResult OperationVerifier::verifyOnEntrance(Block &block) {
                << " type from a different MLIRContext than its "
                   "parent operation";
     }
-    if (failed(verifyDependentTypeAnchors(arg, [&] {
-          return emitError(arg.getLoc(),
-                           "invalid dependent tensor type on block argument #")
-                 << idx << ": ";
-        })))
-      return failure();
   }
 
   // Verify that this block has a terminator.
@@ -208,11 +201,6 @@ LogicalResult OperationVerifier::verifyOnEntrance(Operation &op) {
       return op.emitOpError()
              << "result #" << i
              << " type from a different MLIRContext than this operation";
-    if (failed(verifyDependentTypeAnchors(result.getType(), &op, [&] {
-          return op.emitOpError() << "invalid dependent tensor in result #" << i
-                                  << ": ";
-        })))
-      return failure();
   }
 
   // Check that operands are non-nil and their types are from the same context.
@@ -223,11 +211,6 @@ LogicalResult OperationVerifier::verifyOnEntrance(Operation &op) {
       return op.emitOpError()
              << "operand #" << i
              << " type from a different MLIRContext than this operation";
-    if (failed(verifyDependentTypeAnchors(operand.getType(), &op, [&] {
-          return op.emitOpError() << "invalid dependent tensor in operand #"
-                                  << i << ": ";
-        })))
-      return failure();
   }
 
   /// Verify that all of the attributes are okay.

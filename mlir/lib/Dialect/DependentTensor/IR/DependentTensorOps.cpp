@@ -7,62 +7,112 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/DependentTensor/IR/DependentTensor.h"
-#include "mlir/Interfaces/FunctionImplementation.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLExtras.h"
 
 using namespace mlir;
 using namespace mlir::dependent_tensor;
 
 namespace {
-static constexpr StringLiteral kDependentTensorSeedArgsAttrName =
-    "dependent_tensor.seed_args";
-
-static FailureOr<SmallVector<int32_t>>
-getSeedArgPositions(Attribute attr, RankedTensorType type) {
-  auto positions = dyn_cast_or_null<DenseI32ArrayAttr>(attr);
-  if (!positions)
-    return failure();
-  if (positions.size() != static_cast<unsigned>(type.getRank()))
-    return failure();
-
-  SmallVector<int32_t> values;
-  values.reserve(positions.size());
-  for (int32_t position : positions.asArrayRef()) {
-    if (position < 0)
-      return failure();
-    values.push_back(position);
-  }
-  return values;
-}
-
 static FailureOr<TensorValueSemantics>
-buildValueSemantics(RankedTensorType type, ArrayRef<int32_t> seedArgPositions,
-                    ValueRange availableSeeds,
+buildValueSemantics(RankedTensorType type, ArrayRef<Value> dimValues,
                     ArrayRef<std::string> dimNames = {}) {
-  if (type.getRank() != static_cast<int64_t>(seedArgPositions.size()))
+  if (type.getRank() != static_cast<int64_t>(dimValues.size()))
     return failure();
   if (!dimNames.empty() &&
       type.getRank() != static_cast<int64_t>(dimNames.size()))
     return failure();
 
   TensorValueSemantics info{type, {}};
-  info.dimSeeds.reserve(seedArgPositions.size());
+  info.dimValues.reserve(dimValues.size());
   if (!dimNames.empty())
     info.dimNames.assign(dimNames.begin(), dimNames.end());
-  for (int32_t position : seedArgPositions) {
-    if (position < 0 || position >= static_cast<int32_t>(availableSeeds.size()))
+  for (Value dimValue : dimValues) {
+    if (!dimValue || !dimValue.getType().isIndex())
       return failure();
-    Value seed = availableSeeds[position];
-    if (!seed.getType().isIndex())
-      return failure();
-    info.dimSeeds.push_back(seed);
+    info.dimValues.push_back(dimValue);
   }
   return info;
 }
+
+static DependentTensorValueSemantics
+buildStored(unsigned valueIndex, RankedTensorType type, ArrayRef<Value> dimValues,
+            ArrayRef<std::string> dimNames = {}) {
+  DependentTensorValueSemantics stored;
+  stored.valueIndex = valueIndex;
+  stored.rank = type.getRank();
+  stored.dimValues.assign(dimValues.begin(), dimValues.end());
+  if (!dimNames.empty())
+    stored.dimNames.assign(dimNames.begin(), dimNames.end());
+  return stored;
+}
+
+static DependentTensorValueSemantics
+buildStoredFromRange(unsigned valueIndex, RankedTensorType type,
+                     ValueRange dimValues,
+                     ArrayRef<std::string> dimNames = {}) {
+  SmallVector<Value> values(dimValues.begin(), dimValues.end());
+  return buildStored(valueIndex, type, ArrayRef<Value>(values), dimNames);
+}
+
+template <typename Range>
+static const DependentTensorValueSemantics *
+findStoredSemantics(Range &&range, unsigned valueIndex) {
+  for (const DependentTensorValueSemantics &semantics : range)
+    if (semantics.valueIndex == valueIndex)
+      return &semantics;
+  return nullptr;
+}
+
+static FailureOr<TensorValueSemantics>
+getFuncArgSemantics(BlockArgument arg, func::FuncOp func,
+                    RankedTensorType rankedType) {
+  if (const DependentTensorValueSemantics *stored = findStoredSemantics(
+          func.getProperties().dependentTensorArgSemantics, arg.getArgNumber()))
+    return decodeStoredSemantics(arg, *stored);
+  return failure();
+}
+
+static FailureOr<TensorValueSemantics>
+getCallResultSemantics(OpResult result, func::CallOp call,
+                       func::FuncOp callee, RankedTensorType rankedType) {
+  if (const DependentTensorValueSemantics *stored =
+          findStoredSemantics(callee.getProperties().dependentTensorResultSemantics,
+                              result.getResultNumber())) {
+    SmallVector<Value> mappedDims;
+    mappedDims.reserve(stored->dimValues.size());
+    for (Value dimValue : stored->dimValues) {
+      auto arg = dyn_cast<BlockArgument>(dimValue);
+      if (!arg || arg.getOwner() != &callee.getBody().front() ||
+          arg.getArgNumber() >= call.getNumOperands())
+        return failure();
+      mappedDims.push_back(call.getOperand(arg.getArgNumber()));
+    }
+    return buildValueSemantics(rankedType, mappedDims, stored->dimNames);
+  }
+  return failure();
+}
 } // namespace
 
-StringAttr dependent_tensor::getSeedArgsAttrName(MLIRContext *context) {
-  return StringAttr::get(context, kDependentTensorSeedArgsAttrName);
+DependentTensorValueSemantics dependent_tensor::buildStoredSemantics(
+    unsigned valueIndex, RankedTensorType type, ArrayRef<Value> dimValues,
+    ArrayRef<std::string> dimNames) {
+  return buildStored(valueIndex, type, dimValues, dimNames);
+}
+
+FailureOr<TensorValueSemantics> dependent_tensor::decodeStoredSemantics(
+    Value value, const DependentTensorValueSemantics &stored) {
+  auto rankedType = dyn_cast<RankedTensorType>(value.getType());
+  if (!rankedType)
+    return failure();
+  unsigned valueIndex = 0;
+  if (auto result = dyn_cast<OpResult>(value))
+    valueIndex = result.getResultNumber();
+  else if (auto arg = dyn_cast<BlockArgument>(value))
+    valueIndex = arg.getArgNumber();
+  if (stored.valueIndex != valueIndex || stored.rank != rankedType.getRank())
+    return failure();
+  return buildValueSemantics(rankedType, stored.dimValues, stored.dimNames);
 }
 
 FailureOr<TensorValueSemantics> dependent_tensor::getValueSemantics(Value value) {
@@ -74,49 +124,48 @@ FailureOr<TensorValueSemantics> dependent_tensor::getValueSemantics(Value value)
     auto *block = arg.getOwner();
     auto func =
         dyn_cast_or_null<func::FuncOp>(block ? block->getParentOp() : nullptr);
-    if (!func || block != &func.getBody().front())
+    if (func && block == &func.getBody().front())
+      return getFuncArgSemantics(arg, func, rankedType);
+
+    Operation *parentOp = block ? block->getParentOp() : nullptr;
+    auto iface = dyn_cast_or_null<DependentTensorPropertyOpInterface>(parentOp);
+    if (!iface)
       return failure();
-    DictionaryAttr argAttrs =
-        function_interface_impl::getArgAttrDict(func, arg.getArgNumber());
-    if (!argAttrs)
+    unsigned regionNumber = 0;
+    unsigned blockNumber = 0;
+    bool foundRegion = false;
+    bool foundBlock = false;
+    for (Region &region : parentOp->getRegions()) {
+      if (&region == block->getParent()) {
+        foundRegion = true;
+        for (Block &candidate : region) {
+          if (&candidate == block) {
+            foundBlock = true;
+            break;
+          }
+          ++blockNumber;
+        }
+        break;
+      }
+      ++regionNumber;
+    }
+    if (!foundRegion || !foundBlock)
       return failure();
-    auto seedPositions =
-        getSeedArgPositions(argAttrs.get(getSeedArgsAttrName(func.getContext())),
-                            rankedType);
-    if (failed(seedPositions))
+    FailureOr<DependentTensorValueSemantics> stored =
+        iface.getDependentTensorBlockArgumentSemantics(
+            regionNumber, blockNumber, arg.getArgNumber());
+    if (failed(stored))
       return failure();
-    return buildValueSemantics(rankedType, *seedPositions, func.getArguments());
+    return decodeStoredSemantics(value, *stored);
   }
 
   auto result = cast<OpResult>(value);
   Operation *def = result.getOwner();
-  if (auto op = dyn_cast<MakeOp>(def))
-    return buildValueSemantics(rankedType, op.getDependencyMap(), op.getSeeds(),
-                               op.getDimNames());
-
-  if (auto op = dyn_cast<MatmulOp>(def)) {
-    auto lhsInfo = getValueSemantics(op.getLhs());
-    auto rhsInfo = getValueSemantics(op.getRhs());
-    if (failed(lhsInfo) || failed(rhsInfo))
-      return failure();
-    if (lhsInfo->dimSeeds.size() != 2 || rhsInfo->dimSeeds.size() != 2 ||
-        rankedType.getRank() != 2)
-      return failure();
-    TensorValueSemantics info{rankedType, {}};
-    info.dimSeeds = {lhsInfo->dimSeeds[0], rhsInfo->dimSeeds[1]};
-    if (lhsInfo->dimNames.size() == 2 && rhsInfo->dimNames.size() == 2)
-      info.dimNames = {lhsInfo->dimNames[0], rhsInfo->dimNames[1]};
-    return info;
-  }
-
-  if (auto op = dyn_cast<GemmOp>(def)) {
-    auto accInfo = getValueSemantics(op.getAcc());
-    if (failed(accInfo) || rankedType.getRank() != 2)
-      return failure();
-    TensorValueSemantics info{rankedType, {}};
-    info.dimSeeds = accInfo->dimSeeds;
-    info.dimNames = accInfo->dimNames;
-    return info;
+  if (auto iface = dyn_cast<DependentTensorPropertyOpInterface>(def)) {
+    FailureOr<DependentTensorValueSemantics> stored =
+        iface.getDependentTensorResultSemantics(result.getResultNumber());
+    if (succeeded(stored))
+      return decodeStoredSemantics(value, *stored);
   }
 
   if (auto call = dyn_cast<func::CallOp>(def)) {
@@ -124,16 +173,7 @@ FailureOr<TensorValueSemantics> dependent_tensor::getValueSemantics(Value value)
         call, call.getCalleeAttr());
     if (!callee)
       return failure();
-    DictionaryAttr resAttrs = function_interface_impl::getResultAttrDict(
-        callee, result.getResultNumber());
-    if (!resAttrs)
-      return failure();
-    auto seedPositions =
-        getSeedArgPositions(resAttrs.get(getSeedArgsAttrName(call.getContext())),
-                            rankedType);
-    if (failed(seedPositions))
-      return failure();
-    return buildValueSemantics(rankedType, *seedPositions, call.getOperands());
+    return getCallResultSemantics(result, call, callee, rankedType);
   }
 
   return failure();
@@ -141,7 +181,7 @@ FailureOr<TensorValueSemantics> dependent_tensor::getValueSemantics(Value value)
 
 bool dependent_tensor::haveEqualSemantics(const TensorValueSemantics &lhs,
                                           const TensorValueSemantics &rhs) {
-  return lhs.type == rhs.type && lhs.dimSeeds == rhs.dimSeeds;
+  return lhs.type == rhs.type && lhs.dimValues == rhs.dimValues;
 }
 
 FailureOr<bool> dependent_tensor::haveEqualSemantics(Value lhs, Value rhs) {
@@ -160,9 +200,9 @@ FailureOr<bool> dependent_tensor::haveEqualDimSemantics(Value lhs,
   auto rhsInfo = getValueSemantics(rhs);
   if (failed(lhsInfo) || failed(rhsInfo))
     return failure();
-  if (lhsDim >= lhsInfo->dimSeeds.size() || rhsDim >= rhsInfo->dimSeeds.size())
+  if (lhsDim >= lhsInfo->dimValues.size() || rhsDim >= rhsInfo->dimValues.size())
     return failure();
-  return lhsInfo->dimSeeds[lhsDim] == rhsInfo->dimSeeds[rhsDim];
+  return lhsInfo->dimValues[lhsDim] == rhsInfo->dimValues[rhsDim];
 }
 
 namespace {
@@ -188,38 +228,11 @@ static void printDimNames(OpAsmPrinter &printer, ArrayRef<std::string> dimNames)
   printer << "]";
 }
 
-static FailureOr<int32_t> findDimName(ArrayRef<std::string> dimNames,
-                                      StringRef name) {
-  for (auto [index, candidate] : llvm::enumerate(dimNames))
-    if (candidate == name)
-      return static_cast<int32_t>(index);
-  return failure();
-}
-
-static ParseResult
-parseSchemaDimList(OpAsmParser &parser, ArrayRef<std::string> dimNames,
-                   SmallVectorImpl<int32_t> &indices) {
-  return parser.parseCommaSeparatedList(
-      OpAsmParser::Delimiter::Paren, [&]() -> ParseResult {
-        std::string name;
-        if (parser.parseKeywordOrString(&name))
-          return failure();
-        auto index = findDimName(dimNames, name);
-        if (failed(index))
-          return parser.emitError(parser.getCurrentLocation(),
-                                  "schema references undeclared dim name");
-        indices.push_back(*index);
-        return success();
-      });
-}
-
-static void printSchemaDimList(OpAsmPrinter &printer, ArrayRef<int32_t> indices,
-                               ArrayRef<std::string> dimNames) {
-  printer << "(";
-  llvm::interleaveComma(indices, printer, [&](int32_t index) {
-    printer << dimNames[index];
-  });
-  printer << ")";
+static void printValueList(OpAsmPrinter &printer, ValueRange values) {
+  printer << "[";
+  llvm::interleaveComma(values, printer,
+                        [&](Value value) { printer.printOperand(value); });
+  printer << "]";
 }
 
 static LogicalResult verifyUniqueDimNames(Operation *op,
@@ -232,34 +245,39 @@ static LogicalResult verifyUniqueDimNames(Operation *op,
   return success();
 }
 
-static FailureOr<SmallVector<Value>>
-resolveSchemaSeeds(const TensorValueSemantics &info,
-                   ArrayRef<std::string> globalDimNames,
-                   ArrayRef<int32_t> schemaDims) {
-  if (info.dimNames.size() != info.dimSeeds.size())
+static LogicalResult
+verifyStoredSemantics(Operation *op, Value value,
+                      const DependentTensorValueSemantics &stored,
+                      ValueRange dimOperands = {}) {
+  auto rankedType = dyn_cast<RankedTensorType>(value.getType());
+  if (!rankedType)
+    return op->emitOpError("requires ranked tensor value semantics");
+  if (stored.valueIndex != cast<OpResult>(value).getResultNumber())
+    return op->emitOpError("has dependent tensor semantics for wrong result");
+  if (stored.rank != rankedType.getRank())
+    return op->emitOpError("requires dependent tensor rank to match result rank");
+  if (stored.dimValues.size() != static_cast<size_t>(rankedType.getRank()))
+    return op->emitOpError("requires one dependent dimension value per result dimension");
+  if (!stored.dimNames.empty() &&
+      stored.dimNames.size() != static_cast<size_t>(rankedType.getRank()))
+    return op->emitOpError("requires one dependent dimension name per result dimension");
+  if (!stored.dimNames.empty() && failed(verifyUniqueDimNames(op, stored.dimNames)))
     return failure();
-
-  DenseMap<StringRef, Value> localSeeds;
-  for (auto [name, seed] : llvm::zip_equal(info.dimNames, info.dimSeeds))
-    localSeeds.try_emplace(name, seed);
-
-  SmallVector<Value> seeds;
-  seeds.reserve(schemaDims.size());
-  for (int32_t index : schemaDims) {
-    if (index < 0 || index >= static_cast<int32_t>(globalDimNames.size()))
-      return failure();
-    auto it = localSeeds.find(globalDimNames[index]);
-    if (it == localSeeds.end())
-      return failure();
-    seeds.push_back(it->second);
+  if (!dimOperands.empty() && !llvm::equal(stored.dimValues, dimOperands))
+    return op->emitOpError("requires dependent dimension operands to match stored semantics");
+  for (auto [dim, dimValue] : llvm::enumerate(stored.dimValues)) {
+    if (!rankedType.isDynamicDim(dim))
+      return op->emitOpError("requires dependent result dimensions to be dynamic");
+    if (!dimValue || !dimValue.getType().isIndex())
+      return op->emitOpError("requires index-typed dependent dimension values");
   }
-  return seeds;
+  return success();
 }
 } // namespace
 
 ParseResult MakeOp::parse(OpAsmParser &parser, OperationState &result) {
-  SmallVector<OpAsmParser::UnresolvedOperand> seeds;
-  if (parser.parseOperandList(seeds))
+  SmallVector<OpAsmParser::UnresolvedOperand> dims;
+  if (parser.parseOperandList(dims))
     return failure();
 
   SmallVector<std::string> dimNames;
@@ -275,23 +293,22 @@ ParseResult MakeOp::parse(OpAsmParser &parser, OperationState &result) {
     return parser.emitError(parser.getCurrentLocation(),
                             "expected ranked tensor result type");
 
-  SmallVector<Type> seedTypes(seeds.size(), parser.getBuilder().getIndexType());
-  if (parser.resolveOperands(seeds, seedTypes, parser.getCurrentLocation(),
+  SmallVector<Type> dimTypes(dims.size(), parser.getBuilder().getIndexType());
+  if (parser.resolveOperands(dims, dimTypes, parser.getCurrentLocation(),
                              result.operands))
     return failure();
 
   result.addTypes(resultType);
   auto &props = result.getOrAddProperties<MakeOp::Properties>();
   props.dim_names.assign(dimNames.begin(), dimNames.end());
-  props.dependency_map.resize(seeds.size());
-  for (auto [index, _] : llvm::enumerate(seeds))
-    props.dependency_map[index] = static_cast<int32_t>(index);
+  props.result_semantics = buildStored(
+      /*valueIndex=*/0, rankedType, ArrayRef<Value>(result.operands), dimNames);
   return success();
 }
 
 void MakeOp::print(OpAsmPrinter &p) {
   p << ' ';
-  p.printOperands(getSeeds());
+  p.printOperands(getDimValues());
   printDimNames(p, getDimNames());
   p << " : ";
   p.printType(getResult().getType());
@@ -302,166 +319,219 @@ LogicalResult MakeOp::verify() {
   if (!rankedType)
     return emitOpError("requires ranked tensor result type");
 
-  if (static_cast<int64_t>(getSeeds().size()) != rankedType.getRank())
-    return emitOpError("requires one index seed operand per result dimension");
+  if (static_cast<int64_t>(getDimValues().size()) != rankedType.getRank())
+    return emitOpError("requires one index dimension operand per result dimension");
 
   if (static_cast<int64_t>(getDimNames().size()) != rankedType.getRank())
     return emitOpError("requires one dimension name per result dimension");
 
-  if (getDependencyMap().size() != static_cast<size_t>(rankedType.getRank()))
-    return emitOpError("requires dependency map arity to match result rank");
-
-  if (failed(verifyUniqueDimNames(*this, getDimNames())))
+  if (failed(verifyStoredSemantics(*this, getResult(),
+                                   getProperties().result_semantics,
+                                   getDimValues())))
     return failure();
-
-  for (Value seed : getSeeds())
-    if (!seed.getType().isIndex())
-      return emitOpError("requires index-typed seed operands");
-
-  for (auto [dim, position] : llvm::enumerate(getDependencyMap())) {
-    if (!rankedType.isDynamicDim(dim))
-      return emitOpError("requires dependent result dimensions to be dynamic");
-    if (position != static_cast<int32_t>(dim))
-      return emitOpError("requires positional dependency mapping in v1");
-    if (position < 0 || position >= static_cast<int32_t>(getSeeds().size()))
-      return emitOpError("references an out-of-range seed operand");
-  }
-
+  if (getProperties().result_semantics.dimNames != getDimNames())
+    return emitOpError("requires stored dimension names to match printed names");
   return success();
 }
 
-LogicalResult MatmulOp::verify() {
-  auto lhsType = dyn_cast<RankedTensorType>(getLhs().getType());
-  auto rhsType = dyn_cast<RankedTensorType>(getRhs().getType());
-  auto resultType = dyn_cast<RankedTensorType>(getResult().getType());
-  if (!lhsType || !rhsType || !resultType)
-    return emitOpError("requires ranked tensor operands and result");
-  if (lhsType.getRank() != 2 || rhsType.getRank() != 2 ||
-      resultType.getRank() != 2)
-    return emitOpError("requires rank-2 tensors");
-  if (lhsType.getElementType() != rhsType.getElementType() ||
-      lhsType.getElementType() != resultType.getElementType())
-    return emitOpError("requires matching element types");
+void MakeOp::walkDependentTensorPropertyValues(
+    function_ref<void(Value &)> callback) {
+  for (Value &value : getProperties().result_semantics.dimValues)
+    callback(value);
+}
 
-  auto equalContractingDim = haveEqualDimSemantics(getLhs(), 1, getRhs(), 0);
-  if (failed(equalContractingDim))
-    return emitOpError("requires operands with dependent_tensor semantics");
-  if (!*equalContractingDim)
-    return emitOpError("expected lhs dim 1 to equal rhs dim 0");
+FailureOr<DependentTensorValueSemantics>
+MakeOp::getDependentTensorResultSemantics(unsigned resultNumber) {
+  if (resultNumber != 0)
+    return failure();
+  return getProperties().result_semantics;
+}
+
+ParseResult DimOp::parse(OpAsmParser &parser, OperationState &result) {
+  OpAsmParser::UnresolvedOperand source;
+  OpAsmParser::UnresolvedOperand dimension;
+  Type sourceType;
+  if (parser.parseOperand(source) || parser.parseComma() ||
+      parser.parseOperand(dimension) || parser.parseColonType(sourceType))
+    return failure();
+  if (parser.resolveOperand(source, sourceType, result.operands) ||
+      parser.resolveOperand(dimension, parser.getBuilder().getIndexType(),
+                            result.operands))
+    return failure();
+  result.addTypes(parser.getBuilder().getIndexType());
   return success();
 }
 
-ParseResult GemmOp::parse(OpAsmParser &parser, OperationState &result) {
-  SmallVector<OpAsmParser::UnresolvedOperand> tensors;
-  if (parser.parseOperandList(tensors))
-    return failure();
-  if (tensors.size() != 3)
-    return parser.emitError(parser.getCurrentLocation(),
-                            "expected three tensor operands");
-
-  SmallVector<std::string> dimNames;
-  if (parseDimNames(parser, dimNames))
-    return failure();
-
-  SmallVector<int32_t> lhsDims, rhsDims, accDims, resultDims;
-  if (parseSchemaDimList(parser, dimNames, lhsDims) || parser.parseKeyword("x") ||
-      parseSchemaDimList(parser, dimNames, rhsDims) || parser.parsePlus() ||
-      parseSchemaDimList(parser, dimNames, accDims) || parser.parseArrow() ||
-      parseSchemaDimList(parser, dimNames, resultDims))
-    return failure();
-
-  if (parser.parseColon())
-    return failure();
-  Type lhsType, rhsType, accType, resultType;
-  if (parser.parseType(lhsType) || parser.parseComma() || parser.parseType(rhsType) ||
-      parser.parseComma() || parser.parseType(accType) || parser.parseArrow() ||
-      parser.parseType(resultType))
-    return failure();
-
-  if (parser.resolveOperand(tensors[0], lhsType, result.operands) ||
-      parser.resolveOperand(tensors[1], rhsType, result.operands) ||
-      parser.resolveOperand(tensors[2], accType, result.operands))
-    return failure();
-
-  result.addTypes(resultType);
-  auto &props = result.getOrAddProperties<GemmOp::Properties>();
-  props.dim_names.assign(dimNames.begin(), dimNames.end());
-  props.lhs_dims.assign(lhsDims.begin(), lhsDims.end());
-  props.rhs_dims.assign(rhsDims.begin(), rhsDims.end());
-  props.acc_dims.assign(accDims.begin(), accDims.end());
-  props.result_dims.assign(resultDims.begin(), resultDims.end());
-  return success();
-}
-
-void GemmOp::print(OpAsmPrinter &p) {
+void DimOp::print(OpAsmPrinter &p) {
   p << ' ';
-  p.printOperand(getLhs());
+  p.printOperand(getSource());
   p << ", ";
-  p.printOperand(getRhs());
-  p << ", ";
-  p.printOperand(getAcc());
-  printDimNames(p, getDimNames());
-  p << " ";
-  printSchemaDimList(p, getLhsDims(), getDimNames());
-  p << " x ";
-  printSchemaDimList(p, getRhsDims(), getDimNames());
-  p << " + ";
-  printSchemaDimList(p, getAccDims(), getDimNames());
-  p << " -> ";
-  printSchemaDimList(p, getResultDims(), getDimNames());
+  p.printOperand(getDimension());
   p << " : ";
-  p.printType(getLhs().getType());
-  p << ", ";
-  p.printType(getRhs().getType());
-  p << ", ";
-  p.printType(getAcc().getType());
-  p << " -> ";
-  p.printType(getResult().getType());
+  p.printType(getSource().getType());
 }
 
-LogicalResult GemmOp::verify() {
-  auto lhsType = dyn_cast<RankedTensorType>(getLhs().getType());
-  auto rhsType = dyn_cast<RankedTensorType>(getRhs().getType());
-  auto accType = dyn_cast<RankedTensorType>(getAcc().getType());
-  auto resultType = dyn_cast<RankedTensorType>(getResult().getType());
-  if (!lhsType || !rhsType || !accType || !resultType)
-    return emitOpError("requires ranked tensor operands and result");
-  if (lhsType.getRank() != 2 || rhsType.getRank() != 2 || accType.getRank() != 2 ||
-      resultType.getRank() != 2)
-    return emitOpError("requires rank-2 tensors");
-  if (lhsType.getElementType() != rhsType.getElementType() ||
-      lhsType.getElementType() != accType.getElementType() ||
-      lhsType.getElementType() != resultType.getElementType())
-    return emitOpError("requires matching element types");
-
-  if (failed(verifyUniqueDimNames(*this, getDimNames())))
-    return failure();
-  if (getDimNames().size() != 3)
-    return emitOpError("requires exactly three named dimensions in v1");
-  if (getLhsDims().size() != 2 || getRhsDims().size() != 2 ||
-      getAccDims().size() != 2 || getResultDims().size() != 2)
-    return emitOpError("requires rank-2 schema groups");
-
-  auto lhsInfo = getValueSemantics(getLhs());
-  auto rhsInfo = getValueSemantics(getRhs());
-  auto accInfo = getValueSemantics(getAcc());
-  if (failed(lhsInfo) || failed(rhsInfo) || failed(accInfo))
-    return emitOpError("requires operands with dependent_tensor semantics");
-
-  auto lhsSeeds = resolveSchemaSeeds(*lhsInfo, getDimNames(), getLhsDims());
-  auto rhsSeeds = resolveSchemaSeeds(*rhsInfo, getDimNames(), getRhsDims());
-  auto accSeeds = resolveSchemaSeeds(*accInfo, getDimNames(), getAccDims());
-  auto resultSeeds = resolveSchemaSeeds(*accInfo, getDimNames(), getResultDims());
-  if (failed(lhsSeeds) || failed(rhsSeeds) || failed(accSeeds) || failed(resultSeeds))
-    return emitOpError("schema is incompatible with operand dimension labels");
-
-  if ((*lhsSeeds)[1] != (*rhsSeeds)[0])
-    return emitOpError("expected lhs contraction dim to equal rhs contraction dim");
-  if ((*lhsSeeds)[0] != (*accSeeds)[0] || (*lhsSeeds)[0] != (*resultSeeds)[0])
-    return emitOpError("expected lhs row dim to match accumulator/result row dim");
-  if ((*rhsSeeds)[1] != (*accSeeds)[1] || (*rhsSeeds)[1] != (*resultSeeds)[1])
-    return emitOpError("expected rhs col dim to match accumulator/result col dim");
+LogicalResult DimOp::verify() {
+  auto sourceType = dyn_cast<RankedTensorType>(getSource().getType());
+  if (!sourceType)
+    return emitOpError("requires ranked tensor source");
+  if (failed(getValueSemantics(getSource())))
+    return emitOpError("requires source with dependent_tensor semantics");
   return success();
+}
+
+ParseResult ExtractOp::parse(OpAsmParser &parser, OperationState &result) {
+  OpAsmParser::UnresolvedOperand source;
+  SmallVector<OpAsmParser::UnresolvedOperand> indices;
+  Type sourceType;
+  if (parser.parseOperand(source) ||
+      parser.parseOperandList(indices, OpAsmParser::Delimiter::Square) ||
+      parser.parseColonType(sourceType))
+    return failure();
+
+  auto tensorType = dyn_cast<RankedTensorType>(sourceType);
+  if (!tensorType)
+    return parser.emitError(parser.getCurrentLocation(),
+                            "expected ranked tensor source type");
+  if (parser.resolveOperand(source, sourceType, result.operands))
+    return failure();
+  SmallVector<Type> indexTypes(indices.size(), parser.getBuilder().getIndexType());
+  if (parser.resolveOperands(indices, indexTypes, parser.getCurrentLocation(),
+                             result.operands))
+    return failure();
+  result.addTypes(tensorType.getElementType());
+  return success();
+}
+
+void ExtractOp::print(OpAsmPrinter &p) {
+  p << ' ';
+  p.printOperand(getSource());
+  printValueList(p, getIndices());
+  p << " : ";
+  p.printType(getSource().getType());
+}
+
+LogicalResult ExtractOp::verify() {
+  auto sourceType = dyn_cast<RankedTensorType>(getSource().getType());
+  if (!sourceType)
+    return emitOpError("requires ranked tensor source");
+  if (static_cast<int64_t>(getIndices().size()) != sourceType.getRank())
+    return emitOpError("requires one index operand per tensor dimension");
+  if (getResult().getType() != sourceType.getElementType())
+    return emitOpError("requires result type to match tensor element type");
+  if (failed(getValueSemantics(getSource())))
+    return emitOpError("requires source with dependent_tensor semantics");
+  return success();
+}
+
+ParseResult InsertOp::parse(OpAsmParser &parser, OperationState &result) {
+  OpAsmParser::UnresolvedOperand scalar;
+  OpAsmParser::UnresolvedOperand dest;
+  SmallVector<OpAsmParser::UnresolvedOperand> indices;
+  SmallVector<OpAsmParser::UnresolvedOperand> resultDims;
+  SmallVector<std::string> resultDimNames;
+  Type scalarType;
+  Type destType;
+  if (parser.parseOperand(scalar) || parser.parseKeyword("into") ||
+      parser.parseOperand(dest) ||
+      parser.parseOperandList(indices, OpAsmParser::Delimiter::Square) ||
+      parser.parseKeyword("result_dims") || parser.parseCommaSeparatedList(
+          OpAsmParser::Delimiter::Square, [&]() -> ParseResult {
+            OpAsmParser::UnresolvedOperand dim;
+            if (parser.parseOperand(dim))
+              return failure();
+            resultDims.push_back(dim);
+            return success();
+          }) ||
+      parseDimNames(parser, resultDimNames) ||
+      parser.parseColonType(scalarType) || parser.parseKeyword("into") ||
+      parser.parseType(destType))
+    return failure();
+
+  auto tensorType = dyn_cast<RankedTensorType>(destType);
+  if (!tensorType)
+    return parser.emitError(parser.getCurrentLocation(),
+                            "expected ranked tensor destination type");
+  if (parser.resolveOperand(scalar, scalarType, result.operands) ||
+      parser.resolveOperand(dest, destType, result.operands))
+    return failure();
+  SmallVector<Type> indexTypes(indices.size(), parser.getBuilder().getIndexType());
+  if (parser.resolveOperands(indices, indexTypes, parser.getCurrentLocation(),
+                             result.operands))
+    return failure();
+  SmallVector<Type> dimTypes(resultDims.size(), parser.getBuilder().getIndexType());
+  if (parser.resolveOperands(resultDims, dimTypes, parser.getCurrentLocation(),
+                             result.operands))
+    return failure();
+  result.addAttribute(
+      InsertOp::getOperandSegmentSizeAttr(),
+      parser.getBuilder().getDenseI32ArrayAttr(
+          {1, 1, static_cast<int32_t>(indices.size()),
+           static_cast<int32_t>(resultDims.size())}));
+  result.addTypes(destType);
+
+  auto &props = result.getOrAddProperties<InsertOp::Properties>();
+  ValueRange dimValues =
+      ArrayRef<Value>(result.operands).drop_front(2 + indices.size());
+  props.result_semantics =
+      buildStoredFromRange(/*valueIndex=*/0, tensorType, dimValues,
+                           resultDimNames);
+  return success();
+}
+
+void InsertOp::print(OpAsmPrinter &p) {
+  p << ' ';
+  p.printOperand(getScalar());
+  p << " into ";
+  p.printOperand(getDest());
+  printValueList(p, getIndices());
+  p << " result_dims";
+  printValueList(p, getResultDimValues());
+  printDimNames(p, getProperties().result_semantics.dimNames);
+  p << " : ";
+  p.printType(getScalar().getType());
+  p << " into ";
+  p.printType(getDest().getType());
+}
+
+LogicalResult InsertOp::verify() {
+  auto destType = dyn_cast<RankedTensorType>(getDest().getType());
+  auto resultType = dyn_cast<RankedTensorType>(getResult().getType());
+  if (!destType || !resultType)
+    return emitOpError("requires ranked tensor destination and result");
+  if (destType != resultType)
+    return emitOpError("requires result type to match destination type");
+  if (getScalar().getType() != destType.getElementType())
+    return emitOpError("requires scalar type to match tensor element type");
+  if (static_cast<int64_t>(getIndices().size()) != destType.getRank())
+    return emitOpError("requires one index operand per tensor dimension");
+
+  auto destInfo = getValueSemantics(getDest());
+  if (failed(destInfo))
+    return emitOpError("requires destination with dependent_tensor semantics");
+  if (failed(verifyStoredSemantics(*this, getResult(),
+                                   getProperties().result_semantics,
+                                   getResultDimValues())))
+    return failure();
+  if (getProperties().result_semantics.dimValues != destInfo->dimValues)
+    return emitOpError("stored result semantics must match destination semantics");
+  if (!destInfo->dimNames.empty() &&
+      getProperties().result_semantics.dimNames != destInfo->dimNames)
+    return emitOpError("stored result dimension names must match destination semantics");
+  return success();
+}
+
+void InsertOp::walkDependentTensorPropertyValues(
+    function_ref<void(Value &)> callback) {
+  for (Value &value : getProperties().result_semantics.dimValues)
+    callback(value);
+}
+
+FailureOr<DependentTensorValueSemantics>
+InsertOp::getDependentTensorResultSemantics(unsigned resultNumber) {
+  if (resultNumber != 0)
+    return failure();
+  return getProperties().result_semantics;
 }
 
 #define GET_OP_CLASSES

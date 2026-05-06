@@ -1,5 +1,5 @@
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(dependent-tensor-clone-local-producer))' | FileCheck %s --check-prefix=CLONE
-// RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(dependent-tensor-replace-seed))' | FileCheck %s --check-prefix=REMAP
+// RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(dependent-tensor-replace-dim-value))' | FileCheck %s --check-prefix=REMAP
 
 func.func @clone_make() {
   %m = arith.constant 1 : index
@@ -19,15 +19,15 @@ func.func @clone_make() {
 
 // -----
 
-func.func @replace_seed() {
-  %seed = arith.constant 1 : index
+func.func @replace_dim_value() {
+  %dim = arith.constant 1 : index
   %replacement = arith.constant 2 : index
   %other = arith.constant 3 : index
-  %t = dependent_tensor.make %seed, %other dims[m, n] : tensor<?x?xf32>
+  %t = dependent_tensor.make %dim, %other dims[m, n] : tensor<?x?xf32>
   return
 }
 
-// REMAP-LABEL: func.func @replace_seed
+// REMAP-LABEL: func.func @replace_dim_value
 // REMAP-NEXT: %[[S:.*]] = arith.constant 1 : index
 // REMAP-NEXT: %[[R:.*]] = arith.constant 2 : index
 // REMAP-NEXT: %[[O:.*]] = arith.constant 3 : index
@@ -36,24 +36,18 @@ func.func @replace_seed() {
 
 // -----
 
-func.func @clone_gemm() {
+func.func @clone_insert() {
   %m = arith.constant 1 : index
-  %k = arith.constant 2 : index
-  %n = arith.constant 3 : index
-  %a = dependent_tensor.make %m, %k dims[m, k] : tensor<?x?xf32>
-  %b = dependent_tensor.make %k, %n dims[k, n] : tensor<?x?xf32>
-  %c = dependent_tensor.make %m, %n dims[m, n] : tensor<?x?xf32>
-  %r = dependent_tensor.gemm %a, %b, %c dims[m, k, n] (m, k) x (k, n) + (m, n) -> (m, n)
-    : tensor<?x?xf32>, tensor<?x?xf32>, tensor<?x?xf32> -> tensor<?x?xf32>
+  %n = arith.constant 2 : index
+  %i = arith.constant 0 : index
+  %v = arith.constant 0.000000e+00 : f32
+  %t = dependent_tensor.make %m, %n dims[m, n] : tensor<?x?xf32>
+  %r = dependent_tensor.insert %v into %t[%i, %i] result_dims[%m, %n] dims[m, n] : f32 into tensor<?x?xf32>
   return
 }
 
-// CLONE-LABEL: func.func @clone_gemm
-// CLONE: %[[A0:.*]] = dependent_tensor.make
-// CLONE: %[[B0:.*]] = dependent_tensor.make
-// CLONE: %[[C0:.*]] = dependent_tensor.make
-// CLONE: %[[R0:.*]] = dependent_tensor.gemm %[[A0]], %[[B0]], %[[C0]] dims[m, k, n] (m, k) x (k, n) + (m, n) -> (m, n) : tensor<?x?xf32>, tensor<?x?xf32>, tensor<?x?xf32> -> tensor<?x?xf32>
-// CLONE: %[[A1:.*]] = dependent_tensor.make
-// CLONE: %[[B1:.*]] = dependent_tensor.make
-// CLONE: %[[C1:.*]] = dependent_tensor.make
-// CLONE: %[[R1:.*]] = dependent_tensor.gemm %[[A1]], %[[B1]], %[[C1]] dims[m, k, n] (m, k) x (k, n) + (m, n) -> (m, n) : tensor<?x?xf32>, tensor<?x?xf32>, tensor<?x?xf32> -> tensor<?x?xf32>
+// CLONE-LABEL: func.func @clone_insert
+// CLONE: %[[T0:.*]] = dependent_tensor.make
+// CLONE: %[[R0:.*]] = dependent_tensor.insert {{.*}} into %[[T0]]{{.*}}result_dims
+// CLONE: %[[T1:.*]] = dependent_tensor.make
+// CLONE: %[[R1:.*]] = dependent_tensor.insert {{.*}} into %[[T1]]{{.*}}result_dims

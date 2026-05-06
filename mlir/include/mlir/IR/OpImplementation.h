@@ -13,7 +13,6 @@
 #ifndef MLIR_IR_OPIMPLEMENTATION_H
 #define MLIR_IR_OPIMPLEMENTATION_H
 
-#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/DialectInterface.h"
 #include "mlir/IR/OpAsmSupport.h"
@@ -1717,15 +1716,6 @@ public:
                                         Delimiter delimiter = Delimiter::None,
                                         bool allowType = false,
                                         bool allowAttrs = false) = 0;
-
-  /// Manage a parser-local scope of dependent tensor anchor aliases. These are
-  /// used for contexts such as function signatures where the dependent tensor
-  /// type parser must resolve previously parsed arguments before live SSA
-  /// values exist in the body.
-  virtual void pushDependentTensorAnchorAliasScope() = 0;
-  virtual void popDependentTensorAnchorAliasScope() = 0;
-  virtual void addDependentTensorAnchorAlias(StringRef name,
-                                             AnchorKey key) = 0;
 
   //===--------------------------------------------------------------------===//
   // Region Parsing

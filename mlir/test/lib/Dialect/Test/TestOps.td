@@ -194,25 +194,6 @@ def MixedNormalVariadicResults : TEST_Op<
   );
 }
 
-def DependentTensorResultOwnerOp : TEST_Op<
-    "dependent_result_owner",
-    [DeclareOpInterfaceMethods<DependentTensorResultOwnerOpInterface>]> {
-  let arguments = (ins
-    OptionalProp<DependentTensorDistinctAttrProp>:$dependentTensorOwnerTag,
-    OptionalProp<DependentTensorArrayAttrProp>:$dependentTensorAnchorSlots,
-    DefaultValuedProp<I32Prop, "0">:$dependentTensorNextSlot
-  );
-  let results = (outs Index:$result);
-  let assemblyFormat = "attr-dict `:` type(results)";
-}
-
-def DependentMatmulOp : TEST_Op<"dependent_matmul"> {
-  let arguments = (ins AnyType:$lhs, AnyType:$rhs);
-  let results = (outs AnyType:$result);
-  let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($lhs) `,` type($rhs) `->` type($result)";
-  let hasVerifier = 1;
-}
-
 //===----------------------------------------------------------------------===//
 // Test Attributes
 //===----------------------------------------------------------------------===//

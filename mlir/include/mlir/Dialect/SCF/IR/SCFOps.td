@@ -15,6 +15,7 @@
 
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/LoopLikeInterface.td"
+include "mlir/IR/DependentTensorInterfaces.td"
 include "mlir/IR/RegionKindInterface.td"
 include "mlir/Dialect/SCF/IR/DeviceMappingInterface.td"
 include "mlir/Interfaces/DestinationStyleOpInterface.td"
@@ -161,6 +162,10 @@ def ForOp : SCF_Op<"for",
        ConditionallySpeculatable,
        DeclareOpInterfaceMethods<RegionBranchOpInterface,
         ["getEntrySuccessorOperands", "getSuccessorInputs"]>,
+       DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
+        ["getDependentTensorResultSemantics",
+         "getDependentTensorBlockArgumentSemantics",
+         "walkDependentTensorPropertyValues"]>,
        SingleBlockImplicitTerminator<"scf::YieldOp">,
        RecursiveMemoryEffects]> {
   let summary = "for operation";
@@ -265,7 +270,11 @@ def ForOp : SCF_Op<"for",
                        AnySignlessIntegerOrIndex:$upperBound,
                        AnySignlessIntegerOrIndex:$step,
                        Variadic<AnyType>:$initArgs,
-                       UnitAttr:$unsignedCmp);
+                       UnitAttr:$unsignedCmp,
+                       ArrayProp<DependentTensorValueSemanticsProp>:
+                           $dependentTensorIterArgSemantics,
+                       ArrayProp<DependentTensorValueSemanticsProp>:
+                           $dependentTensorResultSemantics);
   let results = (outs Variadic<AnyType>:$results);
   let regions = (region SizedRegion<1>:$region);
 

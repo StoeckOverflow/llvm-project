@@ -1,6 +1,6 @@
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-equality))'
 
-func.func @same_seeds_different_names(
+func.func @same_dim_values_different_names(
     %m : index, %k : index)
     -> (tensor<?x?xf32>, tensor<?x?xf32>)
     attributes {test.expect_semantics_equal = true} {
@@ -9,7 +9,7 @@ func.func @same_seeds_different_names(
   return %a, %b : tensor<?x?xf32>, tensor<?x?xf32>
 }
 
-func.func @different_seeds_not_equal(
+func.func @different_dim_values_not_equal(
     %m : index, %k : index, %n : index)
     -> (tensor<?x?xf32>, tensor<?x?xf32>)
     attributes {test.expect_semantics_equal = false} {

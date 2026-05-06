@@ -17,6 +17,7 @@
 #include "mlir/Dialect/SCF/IR/DeviceMappingInterface.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/DependentTensorInterfaces.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/Operation.h"
@@ -38,6 +39,54 @@ using namespace mlir;
 using namespace mlir::scf;
 
 #include "mlir/Dialect/SCF/IR/SCFOpsDialect.cpp.inc"
+
+static FailureOr<DependentTensorValueSemantics>
+getDependentTensorSemanticsFromValue(Value value);
+
+static const DependentTensorValueSemantics *
+findDependentTensorSemantics(ArrayRef<DependentTensorValueSemantics> semantics,
+                             unsigned valueIndex) {
+  for (const DependentTensorValueSemantics &candidate : semantics)
+    if (candidate.valueIndex == valueIndex)
+      return &candidate;
+  return nullptr;
+}
+
+static FailureOr<DependentTensorValueSemantics>
+getDependentTensorSemanticsFromBlockArgument(BlockArgument arg) {
+  Block *block = arg.getOwner();
+  Operation *parentOp = block ? block->getParentOp() : nullptr;
+  auto iface = dyn_cast_or_null<DependentTensorPropertyOpInterface>(parentOp);
+  if (!iface)
+    return failure();
+  unsigned regionNumber = 0;
+  unsigned blockNumber = 0;
+  for (Region &region : parentOp->getRegions()) {
+    if (&region != block->getParent()) {
+      ++regionNumber;
+      continue;
+    }
+    for (Block &candidate : region) {
+      if (&candidate == block)
+        return iface.getDependentTensorBlockArgumentSemantics(
+            regionNumber, blockNumber, arg.getArgNumber());
+      ++blockNumber;
+    }
+  }
+  return failure();
+}
+
+static FailureOr<DependentTensorValueSemantics>
+getDependentTensorSemanticsFromValue(Value value) {
+  if (auto result = dyn_cast<OpResult>(value)) {
+    auto iface =
+        dyn_cast<DependentTensorPropertyOpInterface>(result.getOwner());
+    if (!iface)
+      return failure();
+    return iface.getDependentTensorResultSemantics(result.getResultNumber());
+  }
+  return getDependentTensorSemanticsFromBlockArgument(cast<BlockArgument>(value));
+}
 
 //===----------------------------------------------------------------------===//
 // SCFDialect Dialect Interfaces
@@ -347,6 +396,32 @@ void ForOp::build(OpBuilder &builder, OperationState &result, Value lb,
   }
 }
 
+static void populateDependentTensorLoopSemantics(ForOp forOp) {
+  auto &properties = forOp.getProperties();
+  properties.dependentTensorIterArgSemantics.clear();
+  properties.dependentTensorResultSemantics.clear();
+
+  for (auto [i, init] : llvm::enumerate(forOp.getInitArgs())) {
+    auto rankedType = dyn_cast<RankedTensorType>(forOp.getResultTypes()[i]);
+    if (!rankedType)
+      continue;
+    FailureOr<DependentTensorValueSemantics> initSemantics =
+        getDependentTensorSemanticsFromValue(init);
+    if (failed(initSemantics))
+      continue;
+
+    DependentTensorValueSemantics iterArgSemantics = *initSemantics;
+    iterArgSemantics.valueIndex = forOp.getRegionIterArg(i).getArgNumber();
+    iterArgSemantics.rank = rankedType.getRank();
+    properties.dependentTensorIterArgSemantics.push_back(iterArgSemantics);
+
+    DependentTensorValueSemantics resultSemantics = *initSemantics;
+    resultSemantics.valueIndex = i;
+    resultSemantics.rank = rankedType.getRank();
+    properties.dependentTensorResultSemantics.push_back(resultSemantics);
+  }
+}
+
 LogicalResult ForOp::verify() {
   // Check that the body block has at least the induction variable argument.
   // This must be checked before verifyRegions() and before any region trait
@@ -363,6 +438,7 @@ LogicalResult ForOp::verify() {
     return emitOpError(
         "mismatch in number of loop-carried values and defined values");
 
+  populateDependentTensorLoopSemantics(*this);
   return success();
 }
 
@@ -605,6 +681,32 @@ ParseResult ForOp::parse(OpAsmParser &parser, OperationState &result) {
   if (parser.parseOptionalAttrDict(result.attributes))
     return failure();
 
+  auto &properties = result.getOrAddProperties<ForOp::Properties>();
+  properties.dependentTensorIterArgSemantics.clear();
+  properties.dependentTensorResultSemantics.clear();
+  if (hasIterArgs) {
+    ValueRange initOperands = ArrayRef<Value>(result.operands).drop_front(3);
+    for (auto [i, init] : llvm::enumerate(initOperands)) {
+      auto rankedType = dyn_cast<RankedTensorType>(result.types[i]);
+      if (!rankedType)
+        continue;
+      FailureOr<DependentTensorValueSemantics> initSemantics =
+          getDependentTensorSemanticsFromValue(init);
+      if (failed(initSemantics))
+        continue;
+
+      DependentTensorValueSemantics iterArgSemantics = *initSemantics;
+      iterArgSemantics.valueIndex = i + 1;
+      iterArgSemantics.rank = rankedType.getRank();
+      properties.dependentTensorIterArgSemantics.push_back(iterArgSemantics);
+
+      DependentTensorValueSemantics resultSemantics = *initSemantics;
+      resultSemantics.valueIndex = i;
+      resultSemantics.rank = rankedType.getRank();
+      properties.dependentTensorResultSemantics.push_back(resultSemantics);
+    }
+  }
+
   return success();
 }
 
@@ -612,6 +714,44 @@ SmallVector<Region *> ForOp::getLoopRegions() { return {&getRegion()}; }
 
 Block::BlockArgListType ForOp::getRegionIterArgs() {
   return getBody()->getArguments().drop_front(getNumInductionVars());
+}
+
+FailureOr<DependentTensorValueSemantics>
+ForOp::getDependentTensorResultSemantics(unsigned resultNumber) {
+  populateDependentTensorLoopSemantics(*this);
+  if (const DependentTensorValueSemantics *semantics =
+          findDependentTensorSemantics(
+              getProperties().dependentTensorResultSemantics, resultNumber))
+    return *semantics;
+  return failure();
+}
+
+FailureOr<DependentTensorValueSemantics>
+ForOp::getDependentTensorBlockArgumentSemantics(unsigned regionNumber,
+                                                unsigned blockNumber,
+                                                unsigned argumentNumber) {
+  if (regionNumber != 0 || blockNumber != 0)
+    return failure();
+  populateDependentTensorLoopSemantics(*this);
+  if (const DependentTensorValueSemantics *semantics =
+          findDependentTensorSemantics(
+              getProperties().dependentTensorIterArgSemantics,
+              argumentNumber))
+    return *semantics;
+  return failure();
+}
+
+void ForOp::walkDependentTensorPropertyValues(
+    function_ref<void(Value &)> callback) {
+  populateDependentTensorLoopSemantics(*this);
+  for (DependentTensorValueSemantics &semantics :
+       getProperties().dependentTensorIterArgSemantics)
+    for (Value &value : semantics.dimValues)
+      callback(value);
+  for (DependentTensorValueSemantics &semantics :
+       getProperties().dependentTensorResultSemantics)
+    for (Value &value : semantics.dimValues)
+      callback(value);
 }
 
 MutableArrayRef<OpOperand> ForOp::getInitsMutable() {

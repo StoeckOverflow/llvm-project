@@ -251,7 +251,9 @@ def ConstantOp : Func_Op<"constant",
 def FuncOp : Func_Op<"func", [
   AffineScope, AutomaticAllocationScope,
   FunctionOpInterface, IsolatedFromAbove, OpAsmOpInterface,
-  DeclareOpInterfaceMethods<DependentTensorScopeOwnerOpInterface>
+  DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
+    ["getDependentTensorBlockArgumentSemantics",
+     "walkDependentTensorPropertyValues"]>
 ]> {
   let summary = "An operation with a name containing a single `SSACFG` region";
   let description = [{
@@ -298,11 +300,10 @@ def FuncOp : Func_Op<"func", [
                        OptionalAttr<DictArrayAttr>:$arg_attrs,
                        OptionalAttr<DictArrayAttr>:$res_attrs,
                        UnitAttr:$no_inline,
-                       OptionalProp<DependentTensorDistinctAttrProp>:
-                           $dependentTensorOwnerTag,
-                       OptionalProp<DependentTensorArrayAttrProp>:
-                           $dependentTensorAnchorSlots,
-                       DefaultValuedProp<I32Prop, "0">:$dependentTensorNextSlot);
+                       ArrayProp<DependentTensorValueSemanticsProp>:
+                           $dependentTensorArgSemantics,
+                       ArrayProp<DependentTensorValueSemanticsProp>:
+                           $dependentTensorResultSemantics);
   let regions = (region AnyRegion:$body);
 
   let builders = [OpBuilder<(ins

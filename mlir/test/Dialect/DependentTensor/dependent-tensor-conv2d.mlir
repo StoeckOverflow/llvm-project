@@ -1,0 +1,46 @@
+// RUN: mlir-opt %s | FileCheck %s
+
+func.func @conv2d_nhwc_hwcf_written_with_primitives(
+    %n : index, %h : index, %w : index, %c : index,
+    %kh : index, %kw : index, %f : index, %oh : index, %ow : index) {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %input = dependent_tensor.make %n, %h, %w, %c dims[n, h, w, c] : tensor<?x?x?x?xf32>
+  %filter = dependent_tensor.make %kh, %kw, %c, %f dims[kh, kw, c, f] : tensor<?x?x?x?xf32>
+  %init = dependent_tensor.make %n, %oh, %ow, %f dims[n, oh, ow, f] : tensor<?x?x?x?xf32>
+  %out_n = scf.for %ni = %c0 to %n step %c1 iter_args(%out0 = %init) -> (tensor<?x?x?x?xf32>) {
+    %out_oh = scf.for %ohi = %c0 to %oh step %c1 iter_args(%out1 = %out0) -> (tensor<?x?x?x?xf32>) {
+      %out_ow = scf.for %owi = %c0 to %ow step %c1 iter_args(%out2 = %out1) -> (tensor<?x?x?x?xf32>) {
+        %out_f = scf.for %fi = %c0 to %f step %c1 iter_args(%out3 = %out2) -> (tensor<?x?x?x?xf32>) {
+          %sum0 = dependent_tensor.extract %out3[%ni, %ohi, %owi, %fi] : tensor<?x?x?x?xf32>
+          %sum_kh = scf.for %khi = %c0 to %kh step %c1 iter_args(%acc0 = %sum0) -> (f32) {
+            %sum_kw = scf.for %kwi = %c0 to %kw step %c1 iter_args(%acc1 = %acc0) -> (f32) {
+              %sum_c = scf.for %ci = %c0 to %c step %c1 iter_args(%acc2 = %acc1) -> (f32) {
+                %iv = dependent_tensor.extract %input[%ni, %ohi, %owi, %ci] : tensor<?x?x?x?xf32>
+                %fv = dependent_tensor.extract %filter[%khi, %kwi, %ci, %fi] : tensor<?x?x?x?xf32>
+                %prod = arith.mulf %iv, %fv : f32
+                %next = arith.addf %acc2, %prod : f32
+                scf.yield %next : f32
+              }
+              scf.yield %sum_c : f32
+            }
+            scf.yield %sum_kw : f32
+          }
+          %updated = dependent_tensor.insert %sum_kh into %out3[%ni, %ohi, %owi, %fi] result_dims[%n, %oh, %ow, %f] dims[n, oh, ow, f] : f32 into tensor<?x?x?x?xf32>
+          scf.yield %updated : tensor<?x?x?x?xf32>
+        }
+        scf.yield %out_f : tensor<?x?x?x?xf32>
+      }
+      scf.yield %out_ow : tensor<?x?x?x?xf32>
+    }
+    scf.yield %out_oh : tensor<?x?x?x?xf32>
+  }
+  return
+}
+
+// CHECK-LABEL: func.func @conv2d_nhwc_hwcf_written_with_primitives
+// CHECK: dependent_tensor.make
+// CHECK: scf.for
+// CHECK: dependent_tensor.extract
+// CHECK: dependent_tensor.insert
+// CHECK-NOT: dependent_tensor.conv2d_nhwc_hwcf

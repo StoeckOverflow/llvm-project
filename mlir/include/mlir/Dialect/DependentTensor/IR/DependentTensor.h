@@ -13,6 +13,7 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dialect.h"
+#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/Interfaces/FunctionInterfaces.h"
 
@@ -21,17 +22,23 @@ namespace dependent_tensor {
 
 struct TensorValueSemantics {
   RankedTensorType type;
-  SmallVector<Value, 4> dimSeeds;
+  SmallVector<Value, 4> dimValues;
   SmallVector<std::string, 4> dimNames;
 };
 
-StringAttr getSeedArgsAttrName(MLIRContext *context);
 FailureOr<TensorValueSemantics> getValueSemantics(Value value);
 FailureOr<bool> haveEqualSemantics(Value lhs, Value rhs);
 bool haveEqualSemantics(const TensorValueSemantics &lhs,
                         const TensorValueSemantics &rhs);
 FailureOr<bool> haveEqualDimSemantics(Value lhs, unsigned lhsDim, Value rhs,
                                       unsigned rhsDim);
+DependentTensorValueSemantics
+buildStoredSemantics(unsigned valueIndex, RankedTensorType type,
+                     ArrayRef<Value> dimValues,
+                     ArrayRef<std::string> dimNames = {});
+FailureOr<TensorValueSemantics>
+decodeStoredSemantics(Value value,
+                      const DependentTensorValueSemantics &stored);
 
 } // namespace dependent_tensor
 } // namespace mlir

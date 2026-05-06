@@ -35,7 +35,6 @@ namespace mlir {
 void registerCloneTestPasses();
 void registerConvertToTargetEnvPass();
 void registerDependentTensorEqualityTestPasses();
-void registerDependentTensorTestPasses();
 void registerLazyLoadingTestPasses();
 void registerLoopLikeInterfaceTestPasses();
 void registerPassManagerTestPass();
@@ -186,7 +185,6 @@ static void registerTestPasses() {
   registerCloneTestPasses();
   registerConvertToTargetEnvPass();
   registerDependentTensorEqualityTestPasses();
-  registerDependentTensorTestPasses();
   registerPrintTosaAvailabilityPass();
   registerLazyLoadingTestPasses();
   registerLoopLikeInterfaceTestPasses();

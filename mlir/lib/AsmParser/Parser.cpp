@@ -649,23 +649,6 @@ public:
   /// returns null on failure.
   Value resolveSSAUse(UnresolvedOperand useInfo, Type type);
 
-  FailureOr<AnchorKey> parseDependentTypeAnchorKey() override;
-  void pushDependentTensorAnchorAliasScope() override {
-    dependentTensorAnchorAliasScopes.emplace_back();
-  }
-  void popDependentTensorAnchorAliasScope() override {
-    assert(!dependentTensorAnchorAliasScopes.empty() &&
-           "missing dependent tensor anchor alias scope");
-    dependentTensorAnchorAliasScopes.pop_back();
-  }
-  void addDependentTensorAnchorAlias(StringRef name, AnchorKey key) override {
-    assert(!dependentTensorAnchorAliasScopes.empty() &&
-           "missing dependent tensor anchor alias scope");
-    dependentTensorAnchorAliasScopes.back()[name] = key;
-    if (name.consume_front("%"))
-      dependentTensorAnchorAliasScopes.back()[name] = key;
-  }
-
   ParseResult parseSSADefOrUseAndType(
       function_ref<ParseResult(UnresolvedOperand, Type)> action);
 
@@ -866,11 +849,6 @@ private:
 
   /// A list of isolated name scopes.
   SmallVector<IsolatedSSANameScope, 2> isolatedNameScopes;
-
-  /// Parser-local dependent tensor anchor aliases used in contexts such as
-  /// function signatures where a dependent tensor type may reference a
-  /// previously parsed argument before a live SSA value exists in the body.
-  SmallVector<llvm::StringMap<AnchorKey>, 2> dependentTensorAnchorAliasScopes;
 
   /// This keeps track of the block names as well as the location of the first
   /// reference for each nested name scope. This is used to diagnose invalid
@@ -1089,11 +1067,6 @@ ParseResult OperationParser::addDefinition(UnresolvedOperand useInfo,
   return success();
 }
 
-FailureOr<AnchorKey> Parser::parseDependentTypeAnchorKey() {
-  emitError("dependent tensor anchors require an operation parsing context");
-  return failure();
-}
-
 /// Parse a (possibly empty) list of SSA operands.
 ///
 ///   ssa-use-list ::= ssa-use (`,` ssa-use)*
@@ -1186,42 +1159,6 @@ Value OperationParser::resolveSSAUse(UnresolvedOperand useInfo, Type type) {
   Value result = createForwardRefPlaceholder(useInfo.location, type);
   entries[useInfo.number] = {result, useInfo.location};
   return maybeRecordUse(result);
-}
-
-FailureOr<AnchorKey> OperationParser::parseDependentTypeAnchorKey() {
-  UnresolvedOperand useInfo;
-  if (parseSSAUse(useInfo))
-    return failure();
-
-  if (useInfo.number == 0) {
-    for (auto scope = dependentTensorAnchorAliasScopes.rbegin(),
-              e = dependentTensorAnchorAliasScopes.rend();
-         scope != e; ++scope) {
-      auto it = scope->find(useInfo.name);
-      if (it != scope->end())
-        return it->second;
-    }
-  }
-
-  auto &entries = getSSAValueEntry(useInfo.name);
-  if (useInfo.number >= entries.size() || !entries[useInfo.number].value ||
-      isForwardRefPlaceholder(entries[useInfo.number].value)) {
-    emitError(useInfo.location,
-              "dependent tensor anchors do not support forward references");
-    return failure();
-  }
-
-  Value value = entries[useInfo.number].value;
-  if (!value.getType().isIndex()) {
-    emitError(useInfo.location, "dependent tensor anchors require index values");
-    return failure();
-  }
-  if (state.asmState)
-    state.asmState->addUses(value, useInfo.location);
-  FailureOr<AnchorKey> key = createAnchorKeyForValue(value);
-  if (failed(key))
-    emitError(useInfo.location, "failed to materialize dependent tensor anchor");
-  return key;
 }
 
 /// Parse an SSA use with an associated type.
@@ -1965,16 +1902,6 @@ public:
                                    " in argument list");
   }
 
-  void pushDependentTensorAnchorAliasScope() override {
-    parser.pushDependentTensorAnchorAliasScope();
-  }
-  void popDependentTensorAnchorAliasScope() override {
-    parser.popDependentTensorAnchorAliasScope();
-  }
-  void addDependentTensorAnchorAlias(StringRef name, AnchorKey key) override {
-    parser.addDependentTensorAnchorAlias(name, key);
-  }
-
   //===--------------------------------------------------------------------===//
   // Region Parsing
   //===--------------------------------------------------------------------===//
@@ -2397,10 +2324,6 @@ ParseResult OperationParser::parseRegionBody(Region &region, SMLoc startLoc,
     }
   });
   Block *block = owningBlock.get();
-  registerProvisionalDependentTensorBlock(&region, block, /*blockIndex=*/0);
-  auto provisionalBlockCleanup =
-      llvm::scope_exit([&] { unregisterProvisionalDependentTensorBlock(block); });
-
   // If this block is not defined in the source file, add a definition for it
   // now in the assembly state. Blocks with a name will be defined when the name
   // is parsed.

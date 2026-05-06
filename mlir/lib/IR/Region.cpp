@@ -104,16 +104,7 @@ void Region::cloneInto(Region *dest, Region::iterator destPos,
     // argument to the cloned block.
     for (auto arg : block.getArguments())
       if (!mapper.contains(arg))
-        mapper.map(arg, newBlock->addArgument(
-                            arg.getType().replace([&](Type nested)
-                                                      -> std::optional<Type> {
-                              if (!isDependentTensorType(nested))
-                                return std::nullopt;
-                              Operation *anchorRoot = block.getParentOp();
-                              return remapDependentTensorType(nested, mapper,
-                                                              anchorRoot);
-                            }),
-                            arg.getLoc()));
+        mapper.map(arg, newBlock->addArgument(arg.getType(), arg.getLoc()));
 
     dest->getBlocks().insert(destPos, newBlock);
   }
@@ -151,6 +142,7 @@ void Region::cloneInto(Region *dest, Region::iterator destPos,
           source.getOperands(), operands.begin(),
           [&](Value operand) { return mapper.lookupOrDefault(operand); });
       clone.setOperands(operands);
+      remapDependentTensorPropertyValues(&clone, mapper);
 
       for (auto regions : llvm::zip(source.getRegions(), clone.getRegions()))
         std::get<0>(regions).cloneInto(&std::get<1>(regions), mapper);

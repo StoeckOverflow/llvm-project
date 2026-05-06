@@ -1,4 +1,4 @@
-//===- DependentTensorInterfaces.td - Dependent tensor owner interfaces ---===//
+//===- DependentTensorInterfaces.td - Dependent tensor properties ---------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -11,171 +11,54 @@
 
 include "mlir/IR/OpBase.td"
 
-def DependentTensorDistinctAttrProp
-    : Property<"::mlir::DistinctAttr", "distinct attribute"> {
+def DependentTensorValueSemanticsProp
+    : Property<"::mlir::DependentTensorValueSemantics",
+               "dependent tensor value semantics"> {
+  // Value-bearing properties are contextual and intentionally not serializable
+  // through attributes/bytecode in this prototype. Custom assembly owns parsing
+  // and printing of the SSA references.
   let convertToAttribute = [{
-    return $_storage;
+    (void)$_storage;
+    return ::mlir::ArrayAttr::get($_ctxt, {});
   }];
   let convertFromAttribute = [{
-    auto attr = ::llvm::dyn_cast<::mlir::DistinctAttr>($_attr);
-    if (!attr)
-      return $_diag() << "expected distinct attribute";
-    $_storage = attr;
+    $_storage = {};
     return ::mlir::success();
   }];
-  let parser = [{
-    ::mlir::Attribute attr;
-    if (::mlir::failed($_parser.parseAttribute(attr)))
-      return ::mlir::failure();
-    auto distinct = ::llvm::dyn_cast<::mlir::DistinctAttr>(attr);
-    if (!distinct)
-      return ::mlir::failure();
-    $_storage = distinct;
-  }];
-  let optionalParser = [{
-    ::mlir::Attribute attr;
-    auto result = $_parser.parseOptionalAttribute(attr);
-    if (!result.has_value())
-      return std::nullopt;
-    if (::mlir::failed(*result))
-      return ::mlir::failure();
-    auto distinct = ::llvm::dyn_cast<::mlir::DistinctAttr>(attr);
-    if (!distinct)
-      return ::mlir::failure();
-    $_storage = distinct;
-    return ::mlir::success();
-  }];
-  let printer = "$_printer.printAttribute($_storage)";
   let readFromMlirBytecode = [{
-    ::mlir::Attribute attr;
-    if (::mlir::failed($_reader.readAttribute(attr)))
-      return ::mlir::failure();
-    auto distinct = ::llvm::dyn_cast<::mlir::DistinctAttr>(attr);
-    if (!distinct)
-      return ::mlir::failure();
-    $_storage = distinct;
+    $_storage = {};
   }];
   let writeToMlirBytecode = [{
-    $_writer.writeAttribute($_storage);
+    (void)$_storage;
   }];
-  let hashProperty = "::llvm::hash_value($_storage.getAsOpaquePointer())";
+  let hashProperty = "::mlir::hash_value($_storage)";
 }
 
-def DependentTensorArrayAttrProp
-    : Property<"::mlir::ArrayAttr", "array attribute"> {
-  let convertToAttribute = [{
-    return $_storage;
-  }];
-  let convertFromAttribute = [{
-    auto attr = ::llvm::dyn_cast<::mlir::ArrayAttr>($_attr);
-    if (!attr)
-      return $_diag() << "expected array attribute";
-    $_storage = attr;
-    return ::mlir::success();
-  }];
-  let parser = [{
-    ::mlir::Attribute attr;
-    if (::mlir::failed($_parser.parseAttribute(attr)))
-      return ::mlir::failure();
-    auto arrayAttr = ::llvm::dyn_cast<::mlir::ArrayAttr>(attr);
-    if (!arrayAttr)
-      return ::mlir::failure();
-    $_storage = arrayAttr;
-  }];
-  let optionalParser = [{
-    ::mlir::Attribute attr;
-    auto result = $_parser.parseOptionalAttribute(attr);
-    if (!result.has_value())
-      return std::nullopt;
-    if (::mlir::failed(*result))
-      return ::mlir::failure();
-    auto arrayAttr = ::llvm::dyn_cast<::mlir::ArrayAttr>(attr);
-    if (!arrayAttr)
-      return ::mlir::failure();
-    $_storage = arrayAttr;
-    return ::mlir::success();
-  }];
-  let printer = "$_printer.printAttribute($_storage)";
-  let readFromMlirBytecode = [{
-    ::mlir::Attribute attr;
-    if (::mlir::failed($_reader.readAttribute(attr)))
-      return ::mlir::failure();
-    auto arrayAttr = ::llvm::dyn_cast<::mlir::ArrayAttr>(attr);
-    if (!arrayAttr)
-      return ::mlir::failure();
-    $_storage = arrayAttr;
-  }];
-  let writeToMlirBytecode = [{
-    $_writer.writeAttribute($_storage);
-  }];
-  let hashProperty = "::llvm::hash_value($_storage.getAsOpaquePointer())";
-}
-
-class DependentTensorOwnerInterface<string name>
-    : OpInterface<name> {
+def DependentTensorPropertyOpInterface
+    : OpInterface<"DependentTensorPropertyOpInterface"> {
   let cppNamespace = "::mlir";
   let methods = [
-    InterfaceMethod<"Get the symbolic owner tag for dependent tensor anchors.",
-      "::mlir::DistinctAttr", "getDependentTensorOwnerTagValue", (ins), [{}],
+    InterfaceMethod<"Get dependent tensor semantics for an op result.",
+      "::mlir::FailureOr<::mlir::DependentTensorValueSemantics>",
+      "getDependentTensorResultSemantics",
+      (ins "unsigned":$resultNumber), [{}],
       /*defaultImplementation=*/[{
-        auto tag = cast<ConcreteOp>(this->getOperation())
-                       .getProperties()
-                       .dependentTensorOwnerTag;
-        return tag ? *tag : ::mlir::DistinctAttr();
+        return ::mlir::failure();
       }]
     >,
-    InterfaceMethod<"Set the symbolic owner tag for dependent tensor anchors.",
-      "void", "setDependentTensorOwnerTagValue",
-      (ins "::mlir::DistinctAttr":$tag), [{}],
+    InterfaceMethod<"Get dependent tensor semantics for a region block argument.",
+      "::mlir::FailureOr<::mlir::DependentTensorValueSemantics>",
+      "getDependentTensorBlockArgumentSemantics",
+      (ins "unsigned":$regionNumber, "unsigned":$blockNumber,
+           "unsigned":$argumentNumber), [{}],
       /*defaultImplementation=*/[{
-        cast<ConcreteOp>(this->getOperation())
-            .getProperties()
-            .dependentTensorOwnerTag =
-                tag ? std::optional<::mlir::DistinctAttr>(tag) : std::nullopt;
+        return ::mlir::failure();
       }]
     >,
-    InterfaceMethod<"Get the durable slot payload for dependent tensor anchors.",
-      "::mlir::ArrayAttr", "getDependentTensorAnchorSlotsValue", (ins), [{}],
-      /*defaultImplementation=*/[{
-        auto slots = cast<ConcreteOp>(this->getOperation())
-                         .getProperties()
-                         .dependentTensorAnchorSlots;
-        return slots ? *slots : ::mlir::ArrayAttr();
-      }]
-    >,
-    InterfaceMethod<"Set the durable slot payload for dependent tensor anchors.",
-      "void", "setDependentTensorAnchorSlotsValue",
-      (ins "::mlir::ArrayAttr":$slots), [{}],
-      /*defaultImplementation=*/[{
-        cast<ConcreteOp>(this->getOperation())
-            .getProperties()
-            .dependentTensorAnchorSlots =
-                slots ? std::optional<::mlir::ArrayAttr>(slots) : std::nullopt;
-      }]
-    >,
-    InterfaceMethod<"Get the next owner-local dependent tensor slot id.",
-      "uint32_t", "getDependentTensorNextSlotValue", (ins), [{}],
-      /*defaultImplementation=*/[{
-        return static_cast<uint32_t>(cast<ConcreteOp>(this->getOperation())
-                                         .getProperties()
-                                         .dependentTensorNextSlot);
-      }]
-    >,
-    InterfaceMethod<"Set the next owner-local dependent tensor slot id.",
-      "void", "setDependentTensorNextSlotValue", (ins "uint32_t":$nextSlot), [{}],
-      /*defaultImplementation=*/[{
-        cast<ConcreteOp>(this->getOperation())
-            .getProperties()
-            .dependentTensorNextSlot = static_cast<int32_t>(nextSlot);
-      }]
-    >
+    InterfaceMethod<"Walk SSA values stored in dependent tensor properties.",
+      "void", "walkDependentTensorPropertyValues",
+      (ins "::llvm::function_ref<void(::mlir::Value &)>":$callback), [{}]>
   ];
 }
-
-def DependentTensorScopeOwnerOpInterface
-    : DependentTensorOwnerInterface<"DependentTensorScopeOwnerOpInterface">;
-
-def DependentTensorResultOwnerOpInterface
-    : DependentTensorOwnerInterface<"DependentTensorResultOwnerOpInterface">;
 
 #endif // MLIR_IR_DEPENDENTTENSORINTERFACES

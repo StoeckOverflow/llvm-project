@@ -395,41 +395,6 @@ Type Parser::parseTensorType() {
   if (parseToken(Token::less, "expected '<' in tensor type"))
     return nullptr;
 
-  if (consumeIf(Token::l_square)) {
-    SmallVector<DependentDimExpr> dims;
-    auto parseOneDim = [&]() -> ParseResult {
-      if (getToken().is(Token::percent_identifier)) {
-        FailureOr<AnchorKey> key = parseDependentTypeAnchorKey();
-        if (failed(key))
-          return failure();
-        dims.push_back(DependentDimExpr::getAnchor(*key));
-        return success();
-      }
-
-      APInt constantDim;
-      OptionalParseResult intResult = parseOptionalInteger(constantDim);
-      if (!intResult.has_value() || failed(*intResult) ||
-          !constantDim.isSignedIntN(64))
-        return failure();
-      dims.push_back(
-          DependentDimExpr::getConstant(constantDim.getSExtValue()));
-      return success();
-    };
-
-    if (parseCommaSeparatedListUntil(Token::r_square, parseOneDim) ||
-        parseToken(Token::comma, "expected ',' after dependent dimensions"))
-      return nullptr;
-
-    auto elementTypeLoc = getToken().getLoc();
-    Type elementType = parseType();
-    if (!elementType ||
-        parseToken(Token::greater, "expected '>' in tensor type"))
-      return nullptr;
-    if (!TensorType::isValidElementType(elementType))
-      return emitError(elementTypeLoc, "invalid tensor element type"), nullptr;
-    return DependentTensorType::get(getContext(), dims, elementType);
-  }
-
   bool isUnranked;
   SmallVector<int64_t, 4> dimensions;
 

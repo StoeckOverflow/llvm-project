@@ -20,7 +20,6 @@
 #include "mlir/IR/BuiltinDialect.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
-#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/DialectResourceBlobManager.h"
@@ -2858,29 +2857,6 @@ void AsmPrinter::Impl::printTypeImpl(Type type) {
           os << ", ";
           printAttribute(tensorTy.getEncoding());
         }
-        os << '>';
-      })
-      .Case([&](DependentTensorType tensorTy) {
-        os << "tensor<[";
-        llvm::interleaveComma(tensorTy.getDimensionExprs(), os,
-                              [&](DependentDimExpr expr) {
-                                if (expr.isConstant()) {
-                                  os << expr.constantValue;
-                                  return;
-                                }
-                                FailureOr<Value> value =
-                                    resolveAnchorKey(expr.anchor,
-                                                     state.getTopLevelOp());
-                                if (failed(value)) {
-                                  os << "<<anchor:" << expr.anchor.slot << ":"
-                                     << expr.anchor.generation << ">>";
-                                  return;
-                                }
-                                state.getSSANameState().printValueID(
-                                    *value, /*printResultNo=*/true, os);
-                              });
-        os << "], ";
-        printType(tensorTy.getElementType());
         os << '>';
       })
       .Case([&](UnrankedTensorType tensorTy) {

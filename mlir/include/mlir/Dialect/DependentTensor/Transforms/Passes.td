@@ -21,9 +21,9 @@ def DependentTensorCloneLocalProducerPass
   let summary = "Clone local dependent_tensor producers in a function";
 }
 
-def DependentTensorReplaceSeedPass
-    : Pass<"dependent-tensor-replace-seed", "mlir::func::FuncOp"> {
-  let summary = "Replace the first index seed producer in a function";
+def DependentTensorReplaceDimValuePass
+    : Pass<"dependent-tensor-replace-dim-value", "mlir::func::FuncOp"> {
+  let summary = "Replace the first index dimension producer in a function";
 }
 
 #endif // MLIR_DIALECT_DEPENDENTTENSOR_TRANSFORMS_PASSES_TD

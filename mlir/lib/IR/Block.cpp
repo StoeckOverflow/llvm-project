@@ -16,6 +16,26 @@
 
 using namespace mlir;
 
+#ifndef NDEBUG
+static bool isReferencedFromDependentTensorProperties(Value value) {
+  Operation *root = nullptr;
+  if (Operation *parentOp = value.getParentBlock()->getParentOp()) {
+    root = parentOp;
+    while (Operation *ancestor = root->getParentOp())
+      root = ancestor;
+  }
+  if (!root)
+    return false;
+  bool referenced = false;
+  root->walk([&](Operation *op) {
+    walkDependentTensorPropertyValues(op, [&](Value &propertyValue) {
+      referenced |= propertyValue == value;
+    });
+  });
+  return referenced;
+}
+#endif
+
 //===----------------------------------------------------------------------===//
 // Block
 //===----------------------------------------------------------------------===//
@@ -23,10 +43,8 @@ using namespace mlir;
 Block::~Block() {
   assert(!verifyOpOrder() && "Expected valid operation ordering.");
   clear();
-  for (BlockArgument arg : arguments) {
-    unregisterDependentTypeUse(arg);
+  for (BlockArgument arg : arguments)
     arg.destroy();
-  }
 }
 
 Region *Block::getParent() const { return parentValidOpOrderPair.getPointer(); }
@@ -163,8 +181,6 @@ auto Block::getArgumentTypes() -> ValueTypeRange<BlockArgListType> {
 BlockArgument Block::addArgument(Type type, Location loc) {
   BlockArgument arg = BlockArgument::create(type, this, arguments.size(), loc);
   arguments.push_back(arg);
-  if (isDependentTensorType(type))
-    registerDependentTypeUse(arg);
   return arg;
 }
 
@@ -186,8 +202,6 @@ BlockArgument Block::insertArgument(unsigned index, Type type, Location loc) {
 
   auto arg = BlockArgument::create(type, this, index, loc);
   arguments.insert(arguments.begin() + index, arg);
-  if (isDependentTensorType(type))
-    registerDependentTypeUse(arg);
   // Update the cached position for all the arguments after the newly inserted
   // one.
   ++index;
@@ -206,12 +220,9 @@ BlockArgument Block::insertArgument(args_iterator it, Type type, Location loc) {
 
 void Block::eraseArgument(unsigned index) {
   assert(index < arguments.size());
-  if (failed(checkDependentAnchorValueCanErase(
-          arguments[index], [&]() { return emitError(arguments[index].getLoc()); })))
-    llvm::report_fatal_error(
-        "attempted to erase anchor value with live dependent tensor references");
-  unregisterDependentTypeUse(arguments[index]);
-  (void)markDependentAnchorDead(arguments[index]);
+  assert(!isReferencedFromDependentTensorProperties(arguments[index]) &&
+         "cannot erase block argument referenced from dependent tensor "
+         "properties");
   arguments[index].destroy();
   arguments.erase(arguments.begin() + index);
   for (BlockArgument arg : llvm::drop_begin(arguments, index))

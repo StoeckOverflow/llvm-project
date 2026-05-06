@@ -10,9 +10,23 @@
 #include "mlir/IR/Block.h"
 #include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/Operation.h"
+#include "llvm/ADT/SmallPtrSet.h"
 
 using namespace mlir;
 using namespace mlir::detail;
+
+static Operation *getDependentTensorPropertySearchRoot(Value value) {
+  Operation *op = value.getDefiningOp();
+  if (!op) {
+    auto arg = dyn_cast<BlockArgument>(value);
+    op = arg && arg.getOwner() ? arg.getOwner()->getParentOp() : nullptr;
+  }
+  if (!op)
+    return nullptr;
+  while (Operation *parent = op->getParentOp())
+    op = parent;
+  return op;
+}
 
 /// If this value is the result of an Operation, return the operation that
 /// defines it.
@@ -55,11 +69,7 @@ void Value::setType(Type newType) {
   if (oldType == newType)
     return;
 
-  if (isDependentTensorType(oldType))
-    unregisterDependentTypeUse(*this);
   impl->setType(newType);
-  if (isDependentTensorType(newType))
-    registerDependentTypeUse(*this);
 }
 
 unsigned Value::getNumUses() const {
@@ -79,7 +89,8 @@ bool Value::hasNUsesOrMore(unsigned n) const {
 //===----------------------------------------------------------------------===//
 
 void Value::replaceAllUsesWith(Value newValue) {
-  remapDependentTypeUsesOnValueChange(*this, newValue);
+  replaceDependentTensorPropertyValue(
+      getDependentTensorPropertySearchRoot(*this), *this, newValue);
   impl->replaceAllUsesWith(newValue);
 }
 
@@ -88,7 +99,9 @@ void Value::replaceAllUsesWith(Value newValue) {
 /// listed in 'exceptions' .
 void Value::replaceAllUsesExcept(
     Value newValue, const SmallPtrSetImpl<Operation *> &exceptions) {
-  remapDependentTypeUsesOnValueChange(*this, newValue);
+  replaceDependentTensorPropertyValueIf(
+      getDependentTensorPropertySearchRoot(*this), *this, newValue,
+      [&](Operation *op) { return exceptions.count(op) == 0; });
   for (OpOperand &use : llvm::make_early_inc_range(getUses())) {
     if (exceptions.count(use.getOwner()) == 0)
       use.set(newValue);
@@ -99,7 +112,9 @@ void Value::replaceAllUsesExcept(
 /// IR that uses 'this' to use the other value instead except if the user is
 /// 'exceptedUser'.
 void Value::replaceAllUsesExcept(Value newValue, Operation *exceptedUser) {
-  remapDependentTypeUsesOnValueChange(*this, newValue);
+  replaceDependentTensorPropertyValueIf(
+      getDependentTensorPropertySearchRoot(*this), *this, newValue,
+      [&](Operation *op) { return op != exceptedUser; });
   for (OpOperand &use : llvm::make_early_inc_range(getUses())) {
     if (use.getOwner() != exceptedUser)
       use.set(newValue);
@@ -110,9 +125,19 @@ void Value::replaceAllUsesExcept(Value newValue, Operation *exceptedUser) {
 /// returns true.
 void Value::replaceUsesWithIf(Value newValue,
                               function_ref<bool(OpOperand &)> shouldReplace) {
-  remapDependentTypeUsesOnValueChange(*this, newValue);
-  for (OpOperand &use : llvm::make_early_inc_range(getUses()))
+  llvm::SmallPtrSet<OpOperand *, 8> replacedUses;
+  for (OpOperand &use : getUses())
     if (shouldReplace(use))
+      replacedUses.insert(&use);
+  replaceDependentTensorPropertyValueIf(
+      getDependentTensorPropertySearchRoot(*this), *this, newValue,
+      [&](Operation *owner) {
+        return llvm::any_of(owner->getOpOperands(), [&](OpOperand &operand) {
+          return replacedUses.contains(&operand);
+        });
+      });
+  for (OpOperand &use : llvm::make_early_inc_range(getUses()))
+    if (replacedUses.contains(&use))
       use.set(newValue);
 }
 

@@ -27,6 +27,23 @@
 
 using namespace mlir;
 
+#ifndef NDEBUG
+static bool isResultReferencedFromDependentTensorProperties(Operation *op) {
+  Operation *root = op;
+  while (Operation *ancestor = root->getParentOp())
+    root = ancestor;
+
+  bool referenced = false;
+  root->walk([&](Operation *candidate) {
+    walkDependentTensorPropertyValues(candidate, [&](Value &propertyValue) {
+      if (auto result = dyn_cast<OpResult>(propertyValue))
+        referenced |= result.getOwner() == op;
+    });
+  });
+  return referenced;
+}
+#endif
+
 //===----------------------------------------------------------------------===//
 // Operation
 //===----------------------------------------------------------------------===//
@@ -131,10 +148,6 @@ Operation *Operation::create(Location location, OperationName name,
     new (op->getOutOfLineOpResult(i))
         detail::OutOfLineOpResult(*resultTypeIt, i);
   }
-  for (OpResult result : op->getResults())
-    if (isDependentTensorType(result.getType()))
-      registerDependentTypeUse(Value(result));
-
   // Initialize the regions.
   for (unsigned i = 0; i != numRegions; ++i)
     new (&op->getRegion(i)) Region(op);
@@ -193,8 +206,6 @@ Operation::~Operation() {
     llvm::report_fatal_error("operation destroyed but still has uses");
   }
 #endif
-  for (OpResult result : getResults())
-    unregisterDependentTypeUse(Value(result));
   // Explicitly run the destructors for the operands.
   if (hasOperandStorage)
     getOperandStorage().~OperandStorage();
@@ -538,10 +549,9 @@ void llvm::ilist_traits<::mlir::Operation>::transferNodesFromList(
 /// Remove this operation (and its descendants) from its Block and delete
 /// all of them.
 void Operation::erase() {
-  if (failed(checkDependentAnchorOwnerCanErase(
-          this, [&]() { return emitOpError(); })))
-    llvm::report_fatal_error(
-        "attempted to erase anchor owner with live dependent tensor references");
+  assert(!isResultReferencedFromDependentTensorProperties(this) &&
+         "cannot erase operation with results referenced from dependent tensor "
+         "properties");
   if (auto *parent = getBlock())
     parent->getOperations().erase(this);
   else
@@ -567,12 +577,6 @@ void Operation::moveBefore(Block *block,
                            llvm::iplist<Operation>::iterator iterator) {
   assert(getBlock() &&
          "cannot move an operation that isn't contained in a block");
-  for (OpResult result : getResults())
-    if (failed(checkDependentAnchorValueCanMove(
-            Value(result), [&]() { return emitOpError(); })))
-      llvm::report_fatal_error(
-          "attempted to move scope-owned anchor value with live dependent tensor "
-          "references");
   block->getOperations().splice(iterator, getBlock()->getOperations(),
                                 getIterator());
 }
@@ -741,7 +745,6 @@ Operation *Operation::cloneWithoutRegions() {
 Operation *Operation::clone(IRMapping &mapper, const CloneOptions &options) {
   SmallVector<Value, 8> operands;
   SmallVector<Block *, 2> successors;
-  SmallVector<Type, 4> resultTypes;
 
   // Remap the operands.
   if (options.shouldCloneOperands()) {
@@ -756,23 +759,14 @@ Operation *Operation::clone(IRMapping &mapper, const CloneOptions &options) {
     successors.push_back(mapper.lookupOrDefault(successor));
 
   TypeRange clonedResultTypes = options.resultTypesOr(getResultTypes());
-  if (options.shouldCloneResults()) {
-    resultTypes.reserve(getNumResults());
-    for (Type type : getResultTypes()) {
-      resultTypes.push_back(type.replace([&](Type nested) -> std::optional<Type> {
-        if (!isDependentTensorType(nested))
-          return std::nullopt;
-        return remapDependentTensorType(nested, mapper, this);
-      }));
-    }
-    clonedResultTypes = resultTypes;
-  }
+  if (options.shouldCloneResults())
+    clonedResultTypes = getResultTypes();
 
   // Create the new operation.
   auto *newOp = create(getLoc(), getName(),
                        clonedResultTypes, operands, attrs,
                        getPropertiesStorage(), successors, getNumRegions());
-  resetDependentTensorOwnerProperties(newOp);
+  remapDependentTensorPropertyValues(newOp, mapper);
   mapper.map(this, newOp);
 
   // Clone the regions.
