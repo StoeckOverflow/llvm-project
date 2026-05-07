@@ -78,6 +78,8 @@ getDependentTensorSemanticsFromBlockArgument(BlockArgument arg) {
 
 static FailureOr<DependentTensorValueSemantics>
 getDependentTensorSemanticsFromValue(Value value) {
+  if (!value)
+    return failure();
   if (auto result = dyn_cast<OpResult>(value)) {
     auto iface =
         dyn_cast<DependentTensorPropertyOpInterface>(result.getOwner());
@@ -400,6 +402,12 @@ static void populateDependentTensorLoopSemantics(ForOp forOp) {
   auto &properties = forOp.getProperties();
   properties.dependentTensorIterArgSemantics.clear();
   properties.dependentTensorResultSemantics.clear();
+
+  if (forOp.getInitArgs().size() != forOp.getNumResults())
+    return;
+  if (forOp.getBody()->getNumArguments() <
+      forOp.getNumInductionVars() + forOp.getInitArgs().size())
+    return;
 
   for (auto [i, init] : llvm::enumerate(forOp.getInitArgs())) {
     auto rankedType = dyn_cast<RankedTensorType>(forOp.getResultTypes()[i]);
@@ -743,7 +751,6 @@ ForOp::getDependentTensorBlockArgumentSemantics(unsigned regionNumber,
 
 void ForOp::walkDependentTensorPropertyValues(
     function_ref<void(Value &)> callback) {
-  populateDependentTensorLoopSemantics(*this);
   for (DependentTensorValueSemantics &semantics :
        getProperties().dependentTensorIterArgSemantics)
     for (Value &value : semantics.dimValues)

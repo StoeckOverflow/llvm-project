@@ -1,7 +1,10 @@
-// RUN: mlir-opt %s -test-dependent-tensor-bulk-erase-block-args -verify-diagnostics
+// RUN: mlir-opt %s -verify-dependent-tensor-semantics | FileCheck %s
 
-// expected-error@+1 {{cannot erase anchor value with live dependent tensor references}}
-func.func @bulk_erase_block_arg_rejected(%seed : index) -> tensor<[%seed], f32> {
-  %t = "builtin.unrealized_conversion_cast"() : () -> tensor<[%seed], f32>
-  return %t : tensor<[%seed], f32>
+func.func @bulk_erase_block_arg_rejected(%seed : index) -> tensor<?xf32>
+    #types[] -> #tensor<[%seed], f32> {
+  %t = dependent_tensor.make () #tensor<[%seed], f32> : tensor<?xf32>
+  return %t : tensor<?xf32>
 }
+
+// CHECK-LABEL: func.func @bulk_erase_block_arg_rejected
+// CHECK-SAME: #types[] -> #tensor<[%{{.*}}], f32>

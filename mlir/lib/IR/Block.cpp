@@ -21,8 +21,12 @@ static bool isReferencedFromDependentTensorProperties(Value value) {
   Operation *root = nullptr;
   if (Operation *parentOp = value.getParentBlock()->getParentOp()) {
     root = parentOp;
-    while (Operation *ancestor = root->getParentOp())
+    while (!root->hasTrait<OpTrait::IsIsolatedFromAbove>()) {
+      Operation *ancestor = root->getParentOp();
+      if (!ancestor)
+        break;
       root = ancestor;
+    }
   }
   if (!root)
     return false;

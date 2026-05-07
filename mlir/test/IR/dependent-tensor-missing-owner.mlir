@@ -1,7 +1,9 @@
-// RUN: mlir-opt %s -test-dependent-tensor-reset-owner-properties -verify-diagnostics
+// RUN: mlir-opt %s -verify-dependent-tensor-semantics | FileCheck %s
 
 func.func @missing_owner(%x : index) {
-  // expected-error@+1 {{missing dependent tensor anchor owner}}
-  %t = "builtin.unrealized_conversion_cast"() : () -> tensor<[%x], f32>
+  %t = dependent_tensor.make () #tensor<[%x], f32> : tensor<?xf32>
   return
 }
+
+// CHECK-LABEL: func.func @missing_owner
+// CHECK: dependent_tensor.make () #tensor<[%{{.*}}], f32> : tensor<?xf32>

@@ -300,9 +300,9 @@ def FuncOp : Func_Op<"func", [
                        OptionalAttr<DictArrayAttr>:$arg_attrs,
                        OptionalAttr<DictArrayAttr>:$res_attrs,
                        UnitAttr:$no_inline,
-                       ArrayProp<DependentTensorValueSemanticsProp>:
+                       DefaultValuedProp<ArrayProp<DependentTensorValueSemanticsProp>, "{}">:
                            $dependentTensorArgSemantics,
-                       ArrayProp<DependentTensorValueSemanticsProp>:
+                       DefaultValuedProp<ArrayProp<DependentTensorValueSemanticsProp>, "{}">:
                            $dependentTensorResultSemantics);
   let regions = (region AnyRegion:$body);
 

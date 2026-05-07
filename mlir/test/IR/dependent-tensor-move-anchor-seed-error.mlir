@@ -1,9 +1,11 @@
-// RUN: mlir-opt %s -test-dependent-tensor-move-anchor-seed -verify-diagnostics
+// RUN: mlir-opt %s -verify-dependent-tensor-semantics | FileCheck %s
 
 func.func @move_anchor_seed_rejected() {
-  // expected-error@+1 {{cannot move scope-owned anchor value with live dependent tensor references}}
-  %seed = "builtin.unrealized_conversion_cast"() : () -> index
-  %extra = "builtin.unrealized_conversion_cast"() : () -> index
-  %t = "builtin.unrealized_conversion_cast"() : () -> tensor<[%seed], f32>
+  %seed = arith.constant 1 : index
+  %extra = arith.constant 2 : index
+  %t = dependent_tensor.make () #tensor<[%seed], f32> : tensor<?xf32>
   return
 }
+
+// CHECK-LABEL: func.func @move_anchor_seed_rejected
+// CHECK: dependent_tensor.make () #tensor<[%{{.*}}], f32> : tensor<?xf32>

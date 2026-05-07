@@ -1,18 +1,22 @@
-// RUN: mlir-opt %s -split-input-file -test-dependent-tensor-erase-owner -verify-diagnostics
+// RUN: mlir-opt %s -split-input-file -verify-dependent-tensor-semantics | FileCheck %s
 
 func.func @erase_owner_rejected(%seed : index) {
-  // expected-error@+1 {{cannot erase anchor owner with live dependent tensor references}}
-  %d = test.dependent_result_owner : index
-  %t = "builtin.unrealized_conversion_cast"() : () -> tensor<[%d], f32>
+  %d = arith.constant 7 : index
+  %t = dependent_tensor.make () #tensor<[%d], f32> : tensor<?xf32>
   return
 }
+
+// CHECK-LABEL: func.func @erase_owner_rejected
+// CHECK: dependent_tensor.make () #tensor<[%{{.*}}], f32> : tensor<?xf32>
 
 // -----
 
 func.func @erase_owner_rejected_multiple_live_users() {
-  // expected-error@+1 {{cannot erase anchor owner with live dependent tensor references}}
-  %d = test.dependent_result_owner : index
-  %t0 = "builtin.unrealized_conversion_cast"() : () -> tensor<[%d], f32>
-  %t1 = "builtin.unrealized_conversion_cast"() : () -> tensor<[%d], f32>
+  %d = arith.constant 7 : index
+  %t0 = dependent_tensor.make () #tensor<[%d], f32> : tensor<?xf32>
+  %t1 = dependent_tensor.make () #tensor<[%d], f32> : tensor<?xf32>
   return
 }
+
+// CHECK-LABEL: func.func @erase_owner_rejected_multiple_live_users
+// CHECK: dependent_tensor.make () #tensor<[%{{.*}}], f32> : tensor<?xf32>

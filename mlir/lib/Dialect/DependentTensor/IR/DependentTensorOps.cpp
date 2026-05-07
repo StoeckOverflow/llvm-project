@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/DependentTensor/IR/DependentTensor.h"
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 
 using namespace mlir;
@@ -206,43 +205,11 @@ FailureOr<bool> dependent_tensor::haveEqualDimSemantics(Value lhs,
 }
 
 namespace {
-static ParseResult parseDimNames(OpAsmParser &parser,
-                                 SmallVectorImpl<std::string> &dimNames) {
-  if (parser.parseKeyword("dims"))
-    return failure();
-  return parser.parseCommaSeparatedList(
-      OpAsmParser::Delimiter::Square, [&]() -> ParseResult {
-        std::string name;
-        if (parser.parseKeywordOrString(&name))
-          return failure();
-        dimNames.push_back(name);
-        return success();
-      });
-}
-
-static void printDimNames(OpAsmPrinter &printer, ArrayRef<std::string> dimNames) {
-  printer << " dims[";
-  llvm::interleaveComma(dimNames, printer, [&](const std::string &name) {
-    printer << name;
-  });
-  printer << "]";
-}
-
 static void printValueList(OpAsmPrinter &printer, ValueRange values) {
   printer << "[";
   llvm::interleaveComma(values, printer,
                         [&](Value value) { printer.printOperand(value); });
   printer << "]";
-}
-
-static LogicalResult verifyUniqueDimNames(Operation *op,
-                                          ArrayRef<std::string> dimNames) {
-  llvm::SmallDenseSet<StringRef> seen;
-  for (const std::string &name : dimNames) {
-    if (!seen.insert(name).second)
-      return op->emitOpError("requires unique dimension names");
-  }
-  return success();
 }
 
 static LogicalResult
@@ -258,11 +225,6 @@ verifyStoredSemantics(Operation *op, Value value,
     return op->emitOpError("requires dependent tensor rank to match result rank");
   if (stored.dimValues.size() != static_cast<size_t>(rankedType.getRank()))
     return op->emitOpError("requires one dependent dimension value per result dimension");
-  if (!stored.dimNames.empty() &&
-      stored.dimNames.size() != static_cast<size_t>(rankedType.getRank()))
-    return op->emitOpError("requires one dependent dimension name per result dimension");
-  if (!stored.dimNames.empty() && failed(verifyUniqueDimNames(op, stored.dimNames)))
-    return failure();
   if (!dimOperands.empty() && !llvm::equal(stored.dimValues, dimOperands))
     return op->emitOpError("requires dependent dimension operands to match stored semantics");
   for (auto [dim, dimValue] : llvm::enumerate(stored.dimValues)) {
@@ -277,11 +239,11 @@ verifyStoredSemantics(Operation *op, Value value,
 
 ParseResult MakeOp::parse(OpAsmParser &parser, OperationState &result) {
   SmallVector<OpAsmParser::UnresolvedOperand> dims;
-  if (parser.parseOperandList(dims))
-    return failure();
+  Type specElementType;
 
-  SmallVector<std::string> dimNames;
-  if (parseDimNames(parser, dimNames))
+  SMLoc specLoc = parser.getCurrentLocation();
+  if (parser.parseLParen() || parser.parseRParen() ||
+      dependent_tensor::parseTensorSpec(parser, dims, specElementType))
     return failure();
 
   Type resultType;
@@ -292,6 +254,11 @@ ParseResult MakeOp::parse(OpAsmParser &parser, OperationState &result) {
   if (!rankedType)
     return parser.emitError(parser.getCurrentLocation(),
                             "expected ranked tensor result type");
+  if (static_cast<int64_t>(dims.size()) != rankedType.getRank())
+    return parser.emitError(specLoc, "dependent tensor rank mismatch");
+  if (rankedType.getElementType() != specElementType)
+    return parser.emitError(specLoc,
+                            "dependent tensor element type must match result type");
 
   SmallVector<Type> dimTypes(dims.size(), parser.getBuilder().getIndexType());
   if (parser.resolveOperands(dims, dimTypes, parser.getCurrentLocation(),
@@ -300,16 +267,16 @@ ParseResult MakeOp::parse(OpAsmParser &parser, OperationState &result) {
 
   result.addTypes(resultType);
   auto &props = result.getOrAddProperties<MakeOp::Properties>();
-  props.dim_names.assign(dimNames.begin(), dimNames.end());
   props.result_semantics = buildStored(
-      /*valueIndex=*/0, rankedType, ArrayRef<Value>(result.operands), dimNames);
+      /*valueIndex=*/0, rankedType, ArrayRef<Value>(result.operands));
   return success();
 }
 
 void MakeOp::print(OpAsmPrinter &p) {
-  p << ' ';
-  p.printOperands(getDimValues());
-  printDimNames(p, getDimNames());
+  p << " () ";
+  auto rankedType = cast<RankedTensorType>(getResult().getType());
+  dependent_tensor::printTensorSpec(p, getDimValues(),
+                                    rankedType.getElementType());
   p << " : ";
   p.printType(getResult().getType());
 }
@@ -322,15 +289,10 @@ LogicalResult MakeOp::verify() {
   if (static_cast<int64_t>(getDimValues().size()) != rankedType.getRank())
     return emitOpError("requires one index dimension operand per result dimension");
 
-  if (static_cast<int64_t>(getDimNames().size()) != rankedType.getRank())
-    return emitOpError("requires one dimension name per result dimension");
-
   if (failed(verifyStoredSemantics(*this, getResult(),
                                    getProperties().result_semantics,
                                    getDimValues())))
     return failure();
-  if (getProperties().result_semantics.dimNames != getDimNames())
-    return emitOpError("requires stored dimension names to match printed names");
   return success();
 }
 
@@ -429,21 +391,17 @@ ParseResult InsertOp::parse(OpAsmParser &parser, OperationState &result) {
   OpAsmParser::UnresolvedOperand dest;
   SmallVector<OpAsmParser::UnresolvedOperand> indices;
   SmallVector<OpAsmParser::UnresolvedOperand> resultDims;
-  SmallVector<std::string> resultDimNames;
+  Type resultElementType;
   Type scalarType;
   Type destType;
+  SMLoc specLoc;
   if (parser.parseOperand(scalar) || parser.parseKeyword("into") ||
       parser.parseOperand(dest) ||
-      parser.parseOperandList(indices, OpAsmParser::Delimiter::Square) ||
-      parser.parseKeyword("result_dims") || parser.parseCommaSeparatedList(
-          OpAsmParser::Delimiter::Square, [&]() -> ParseResult {
-            OpAsmParser::UnresolvedOperand dim;
-            if (parser.parseOperand(dim))
-              return failure();
-            resultDims.push_back(dim);
-            return success();
-          }) ||
-      parseDimNames(parser, resultDimNames) ||
+      parser.parseOperandList(indices, OpAsmParser::Delimiter::Square))
+    return failure();
+  specLoc = parser.getCurrentLocation();
+  if (dependent_tensor::parseTensorSpec(parser, resultDims,
+                                        resultElementType) ||
       parser.parseColonType(scalarType) || parser.parseKeyword("into") ||
       parser.parseType(destType))
     return failure();
@@ -452,6 +410,11 @@ ParseResult InsertOp::parse(OpAsmParser &parser, OperationState &result) {
   if (!tensorType)
     return parser.emitError(parser.getCurrentLocation(),
                             "expected ranked tensor destination type");
+  if (static_cast<int64_t>(resultDims.size()) != tensorType.getRank())
+    return parser.emitError(specLoc, "dependent tensor rank mismatch");
+  if (resultElementType != tensorType.getElementType())
+    return parser.emitError(specLoc,
+                            "dependent tensor element type must match value type");
   if (parser.resolveOperand(scalar, scalarType, result.operands) ||
       parser.resolveOperand(dest, destType, result.operands))
     return failure();
@@ -474,8 +437,7 @@ ParseResult InsertOp::parse(OpAsmParser &parser, OperationState &result) {
   ValueRange dimValues =
       ArrayRef<Value>(result.operands).drop_front(2 + indices.size());
   props.result_semantics =
-      buildStoredFromRange(/*valueIndex=*/0, tensorType, dimValues,
-                           resultDimNames);
+      buildStoredFromRange(/*valueIndex=*/0, tensorType, dimValues);
   return success();
 }
 
@@ -485,9 +447,10 @@ void InsertOp::print(OpAsmPrinter &p) {
   p << " into ";
   p.printOperand(getDest());
   printValueList(p, getIndices());
-  p << " result_dims";
-  printValueList(p, getResultDimValues());
-  printDimNames(p, getProperties().result_semantics.dimNames);
+  p << " ";
+  auto rankedType = cast<RankedTensorType>(getResult().getType());
+  dependent_tensor::printTensorSpec(p, getResultDimValues(),
+                                    rankedType.getElementType());
   p << " : ";
   p.printType(getScalar().getType());
   p << " into ";
@@ -515,9 +478,6 @@ LogicalResult InsertOp::verify() {
     return failure();
   if (getProperties().result_semantics.dimValues != destInfo->dimValues)
     return emitOpError("stored result semantics must match destination semantics");
-  if (!destInfo->dimNames.empty() &&
-      getProperties().result_semantics.dimNames != destInfo->dimNames)
-    return emitOpError("stored result dimension names must match destination semantics");
   return success();
 }
 

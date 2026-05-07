@@ -357,6 +357,22 @@ public:
     return success();
   }
 
+  ParseResult parseOptionalHashKeyword(StringRef keyword) override {
+    if (parser.getToken().isCodeCompletion()) {
+      std::string completed = ("#" + keyword).str();
+      StringRef completedRef(completed);
+      return parser.codeCompleteOptionalTokens(completedRef);
+    }
+
+    if (parser.getToken().isNot(Token::hash_identifier))
+      return failure();
+    StringRef spelling = parser.getTokenSpelling();
+    if (!spelling.consume_front("#") || spelling != keyword)
+      return failure();
+    parser.consumeToken();
+    return success();
+  }
+
   /// Parse a keyword, if present, into 'keyword'.
   ParseResult parseOptionalKeyword(StringRef *keyword) override {
     return parser.parseOptionalKeyword(keyword);

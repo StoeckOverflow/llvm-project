@@ -92,93 +92,79 @@ static bool hasDependentTensorSeedArgsAttr(DictionaryAttr attrs) {
   return attrs && attrs.get("dependent_tensor.seed_args");
 }
 
-static ParseResult parseBoundaryDimNames(
-    OpAsmParser &parser, SmallVectorImpl<std::string> &dimNames) {
-  if (parser.parseKeyword("names"))
-    return failure();
-  return parser.parseCommaSeparatedList(
-      OpAsmParser::Delimiter::Square, [&]() -> ParseResult {
-        std::string name;
-        if (parser.parseKeywordOrString(&name))
-          return failure();
-        dimNames.push_back(name);
-        return success();
-      });
-}
+struct PendingDependentTensorValueSemantics {
+  uint32_t valueIndex = 0;
+  RankedTensorType type;
+  SmallVector<OpAsmParser::UnresolvedOperand> dims;
+};
 
-static void printBoundaryDimNames(OpAsmPrinter &printer,
-                                  ArrayRef<std::string> dimNames) {
-  printer << " names[";
-  llvm::interleaveComma(dimNames, printer, [&](const std::string &name) {
-    printer << name;
-  });
-  printer << "]";
-}
-
-static ParseResult parseBoundarySemanticsList(
-    OpAsmParser &parser, StringRef keyword, ArrayRef<Type> valueTypes,
-    const DenseMap<StringRef, Value> &functionArgNames,
-    SmallVectorImpl<DependentTensorValueSemantics> &semantics) {
-  if (parser.parseKeyword(keyword))
-    return failure();
-  return parser.parseCommaSeparatedList(
-      OpAsmParser::Delimiter::Square, [&]() -> ParseResult {
-        uint32_t valueIndex;
-        if (parser.parseInteger(valueIndex))
-          return failure();
-        if (valueIndex >= valueTypes.size())
-          return parser.emitError(parser.getCurrentLocation(),
-                                  "dependent tensor boundary index out of range");
-        auto rankedType = dyn_cast<RankedTensorType>(valueTypes[valueIndex]);
-        if (!rankedType)
-          return parser.emitError(parser.getCurrentLocation(),
-                                  "dependent tensor boundary requires ranked tensor");
-        if (parser.parseKeyword("dims"))
-          return failure();
-
-        SmallVector<OpAsmParser::UnresolvedOperand> dims;
-        if (parser.parseCommaSeparatedList(
-                OpAsmParser::Delimiter::Square, [&]() -> ParseResult {
-                  OpAsmParser::UnresolvedOperand dim;
-                  if (parser.parseOperand(dim))
-                    return failure();
-                  dims.push_back(dim);
-                  return success();
-                }))
-          return failure();
-        if (static_cast<int64_t>(dims.size()) != rankedType.getRank())
-          return parser.emitError(parser.getCurrentLocation(),
-                                  "dependent tensor boundary rank mismatch");
-
-        SmallVector<std::string> dimNames;
-        if (parseBoundaryDimNames(parser, dimNames))
-          return failure();
-
-        DependentTensorValueSemantics info;
-        info.valueIndex = valueIndex;
-        info.rank = rankedType.getRank();
-        info.dimNames.assign(dimNames.begin(), dimNames.end());
-        for (OpAsmParser::UnresolvedOperand dim : dims) {
-          auto it = functionArgNames.find(normalizeSSAName(dim.name));
-          if (it == functionArgNames.end())
-            return parser.emitError(dim.location,
-                                    "dependent tensor boundary dims must be function arguments");
-          if (!it->second.getType().isIndex())
-            return parser.emitError(dim.location,
-                                    "dependent tensor boundary dims must be index values");
-          info.dimValues.push_back(it->second);
-        }
-        semantics.push_back(std::move(info));
-        return success();
-      });
-}
-
-static ParseResult parseDependentTensorBoundary(
+static ParseResult parseDependentTensorTypesBoundary(
     OpAsmParser &parser, ArrayRef<OpAsmParser::Argument> entryArgs,
-    ArrayRef<Type> argTypes, ArrayRef<Type> resultTypes, Region &body,
+    ArrayRef<Type> argTypes, ArrayRef<Type> resultTypes,
+    SmallVectorImpl<PendingDependentTensorValueSemantics> &argSemantics,
+    SmallVectorImpl<PendingDependentTensorValueSemantics> &resultSemantics) {
+  if (failed(parser.parseOptionalHashKeyword("types")))
+    return success();
+
+  DenseMap<StringRef, unsigned> functionArgIndices;
+  functionArgIndices.reserve(entryArgs.size());
+  for (auto [index, arg] : llvm::enumerate(entryArgs)) {
+    StringRef name = normalizeSSAName(arg.ssaName.name);
+    if (!name.empty())
+      functionArgIndices.try_emplace(name, index);
+  }
+
+  if (parser.parseLSquare())
+    return failure();
+  while (failed(parser.parseOptionalRSquare())) {
+    OpAsmParser::UnresolvedOperand arg;
+    if (parser.parseOperand(arg))
+      return failure();
+    auto it = functionArgIndices.find(normalizeSSAName(arg.name));
+    if (it == functionArgIndices.end())
+      return parser.emitError(arg.location,
+                              "dependent tensor boundary values must be function arguments");
+    unsigned argIndex = it->second;
+    auto rankedType = dyn_cast<RankedTensorType>(argTypes[argIndex]);
+    if (!rankedType)
+      return parser.emitError(arg.location,
+                              "dependent tensor boundary requires ranked tensor");
+    PendingDependentTensorValueSemantics info;
+    info.valueIndex = argIndex;
+    info.type = rankedType;
+    if (parser.parseColon() ||
+        dependent_tensor::parseTensorSpec(parser, rankedType, info.dims))
+      return failure();
+    argSemantics.push_back(std::move(info));
+    (void)parser.parseOptionalComma();
+  }
+
+  if (failed(parser.parseOptionalArrow()))
+    return success();
+  if (resultTypes.size() != 1)
+    return parser.emitError(parser.getCurrentLocation(),
+                            "dependent tensor result boundary requires one result");
+  auto resultType = dyn_cast<RankedTensorType>(resultTypes.front());
+  if (!resultType)
+    return parser.emitError(parser.getCurrentLocation(),
+                            "dependent tensor boundary requires ranked tensor");
+  PendingDependentTensorValueSemantics resultInfo;
+  resultInfo.valueIndex = 0;
+  resultInfo.type = resultType;
+  if (dependent_tensor::parseTensorSpec(parser, resultType, resultInfo.dims))
+    return failure();
+  resultSemantics.push_back(std::move(resultInfo));
+  return success();
+}
+
+static ParseResult resolveDependentTensorTypesBoundary(
+    OpAsmParser &parser, ArrayRef<OpAsmParser::Argument> entryArgs,
+    Region &body,
+    ArrayRef<PendingDependentTensorValueSemantics> pendingArgSemantics,
+    ArrayRef<PendingDependentTensorValueSemantics> pendingResultSemantics,
     SmallVectorImpl<DependentTensorValueSemantics> &argSemantics,
     SmallVectorImpl<DependentTensorValueSemantics> &resultSemantics) {
-  if (failed(parser.parseOptionalKeyword("dependent_tensor_boundary")))
+  if (pendingArgSemantics.empty() && pendingResultSemantics.empty())
     return success();
   if (body.empty())
     return parser.emitError(parser.getCurrentLocation(),
@@ -193,11 +179,35 @@ static ParseResult parseDependentTensorBoundary(
       functionArgNames.try_emplace(name, value);
   }
 
-  return failure(
-      failed(parseBoundarySemanticsList(parser, "args", argTypes,
-                                        functionArgNames, argSemantics)) ||
-      failed(parseBoundarySemanticsList(parser, "results", resultTypes,
-                                        functionArgNames, resultSemantics)));
+  auto resolveOne = [&](const PendingDependentTensorValueSemantics &pending,
+                        SmallVectorImpl<DependentTensorValueSemantics> &out)
+      -> ParseResult {
+    DependentTensorValueSemantics info;
+    info.valueIndex = pending.valueIndex;
+    info.rank = pending.type.getRank();
+    for (const OpAsmParser::UnresolvedOperand &dim : pending.dims) {
+      auto it = functionArgNames.find(normalizeSSAName(dim.name));
+      if (it == functionArgNames.end())
+        return parser.emitError(dim.location,
+                                "dependent tensor boundary dims must be function arguments");
+      if (!it->second.getType().isIndex())
+        return parser.emitError(dim.location,
+                                "dependent tensor boundary dims must be index values");
+      info.dimValues.push_back(it->second);
+    }
+    out.push_back(std::move(info));
+    return success();
+  };
+
+  for (const PendingDependentTensorValueSemantics &pending :
+       pendingArgSemantics)
+    if (resolveOne(pending, argSemantics))
+      return failure();
+  for (const PendingDependentTensorValueSemantics &pending :
+       pendingResultSemantics)
+    if (resolveOne(pending, resultSemantics))
+      return failure();
+  return success();
 }
 
 static const DependentTensorValueSemantics *
@@ -448,6 +458,13 @@ ParseResult FuncOp::parse(OpAsmParser &parser, OperationState &result) {
       builder, result, entryArgs, resultAttrs, getArgAttrsAttrName(result.name),
       getResAttrsAttrName(result.name));
 
+  SmallVector<PendingDependentTensorValueSemantics> pendingArgSemantics;
+  SmallVector<PendingDependentTensorValueSemantics> pendingResultSemantics;
+  if (parseDependentTensorTypesBoundary(parser, entryArgs, argTypes, resultTypes,
+                                        pendingArgSemantics,
+                                        pendingResultSemantics))
+    return failure();
+
   SMLoc loc = parser.getCurrentLocation();
   OptionalParseResult parseResult =
       parser.parseOptionalRegion(*body, entryArgs,
@@ -462,8 +479,8 @@ ParseResult FuncOp::parse(OpAsmParser &parser, OperationState &result) {
   auto &properties = result.getOrAddProperties<FuncOp::Properties>();
   properties.dependentTensorArgSemantics.clear();
   properties.dependentTensorResultSemantics.clear();
-  if (parseDependentTensorBoundary(
-          parser, entryArgs, argTypes, resultTypes, *body,
+  if (resolveDependentTensorTypesBoundary(
+          parser, entryArgs, *body, pendingArgSemantics, pendingResultSemantics,
           properties.dependentTensorArgSemantics,
           properties.dependentTensorResultSemantics))
     return failure();
@@ -471,31 +488,49 @@ ParseResult FuncOp::parse(OpAsmParser &parser, OperationState &result) {
 }
 
 void FuncOp::print(OpAsmPrinter &p) {
-  function_interface_impl::printFunctionOp(
-      p, *this, /*isVariadic=*/false, getFunctionTypeAttrName(),
-      getArgAttrsAttrName(), getResAttrsAttrName());
+  p << ' ';
+  StringRef visibilityAttrName = SymbolTable::getVisibilityAttrName();
+  if (auto visibility = (*this)->getAttrOfType<StringAttr>(visibilityAttrName))
+    p << visibility.getValue() << ' ';
+  p.printSymbolName(getName());
+
+  ArrayRef<Type> argTypes = getArgumentTypes();
+  ArrayRef<Type> resultTypes = getResultTypes();
+  function_interface_impl::printFunctionSignature(
+      p, *this, argTypes, /*isVariadic=*/false, resultTypes);
+  function_interface_impl::printFunctionAttributes(
+      p, *this,
+      {visibilityAttrName, getFunctionTypeAttrName().getValue(),
+       getArgAttrsAttrName().getValue(), getResAttrsAttrName().getValue()});
+
   const auto &argSemantics = getProperties().dependentTensorArgSemantics;
   const auto &resultSemantics = getProperties().dependentTensorResultSemantics;
-  if (argSemantics.empty() && resultSemantics.empty())
-    return;
+  if (!argSemantics.empty() || !resultSemantics.empty()) {
+    p << " #types[";
+    llvm::interleaveComma(argSemantics, p, [&](const auto &semantics) {
+      p.printOperand(getArgument(semantics.valueIndex));
+      p << " : ";
+      auto type = cast<RankedTensorType>(getArgument(semantics.valueIndex).getType());
+      dependent_tensor::printTensorSpec(p, semantics.dimValues,
+                                        type.getElementType());
+    });
+    p << "]";
+    if (!resultSemantics.empty()) {
+      const auto &semantics = resultSemantics.front();
+      p << " -> ";
+      auto type = cast<RankedTensorType>(getFunctionType().getResult(semantics.valueIndex));
+      dependent_tensor::printTensorSpec(p, semantics.dimValues,
+                                        type.getElementType());
+    }
+  }
 
-  p << " dependent_tensor_boundary args[";
-  llvm::interleaveComma(argSemantics, p, [&](const auto &semantics) {
-    p << semantics.valueIndex << " dims[";
-    llvm::interleaveComma(semantics.dimValues, p,
-                          [&](Value value) { p.printOperand(value); });
-    p << "]";
-    printBoundaryDimNames(p, semantics.dimNames);
-  });
-  p << "] results[";
-  llvm::interleaveComma(resultSemantics, p, [&](const auto &semantics) {
-    p << semantics.valueIndex << " dims[";
-    llvm::interleaveComma(semantics.dimValues, p,
-                          [&](Value value) { p.printOperand(value); });
-    p << "]";
-    printBoundaryDimNames(p, semantics.dimNames);
-  });
-  p << "]";
+  Region &body = getBody();
+  if (!body.empty()) {
+    p << ' ';
+    p.printRegion(body, /*printEntryBlockArgs=*/false,
+                  /*printBlockTerminators=*/true);
+    return;
+  }
 }
 
 void FuncOp::walkDependentTensorPropertyValues(

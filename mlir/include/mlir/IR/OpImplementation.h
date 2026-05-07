@@ -941,6 +941,15 @@ public:
   /// Parse the given keyword if present.
   virtual ParseResult parseOptionalKeyword(StringRef keyword) = 0;
 
+  /// Parse a hash-prefixed keyword, e.g. `#foo`.
+  ParseResult parseHashKeyword(StringRef keyword) {
+    auto loc = getCurrentLocation();
+    if (parseOptionalHashKeyword(keyword))
+      return emitError(loc, "expected '#") << keyword << "'";
+    return success();
+  }
+  virtual ParseResult parseOptionalHashKeyword(StringRef keyword) = 0;
+
   /// Parse a keyword, if present, into 'keyword'.
   virtual ParseResult parseOptionalKeyword(StringRef *keyword) = 0;
 

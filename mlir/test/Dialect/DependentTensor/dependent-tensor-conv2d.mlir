@@ -5,9 +5,9 @@ func.func @conv2d_nhwc_hwcf_written_with_primitives(
     %kh : index, %kw : index, %f : index, %oh : index, %ow : index) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
-  %input = dependent_tensor.make %n, %h, %w, %c dims[n, h, w, c] : tensor<?x?x?x?xf32>
-  %filter = dependent_tensor.make %kh, %kw, %c, %f dims[kh, kw, c, f] : tensor<?x?x?x?xf32>
-  %init = dependent_tensor.make %n, %oh, %ow, %f dims[n, oh, ow, f] : tensor<?x?x?x?xf32>
+  %input = dependent_tensor.make () #tensor<[%n, %h, %w, %c], f32> : tensor<?x?x?x?xf32>
+  %filter = dependent_tensor.make () #tensor<[%kh, %kw, %c, %f], f32> : tensor<?x?x?x?xf32>
+  %init = dependent_tensor.make () #tensor<[%n, %oh, %ow, %f], f32> : tensor<?x?x?x?xf32>
   %out_n = scf.for %ni = %c0 to %n step %c1 iter_args(%out0 = %init) -> (tensor<?x?x?x?xf32>) {
     %out_oh = scf.for %ohi = %c0 to %oh step %c1 iter_args(%out1 = %out0) -> (tensor<?x?x?x?xf32>) {
       %out_ow = scf.for %owi = %c0 to %ow step %c1 iter_args(%out2 = %out1) -> (tensor<?x?x?x?xf32>) {
@@ -26,7 +26,7 @@ func.func @conv2d_nhwc_hwcf_written_with_primitives(
             }
             scf.yield %sum_kw : f32
           }
-          %updated = dependent_tensor.insert %sum_kh into %out3[%ni, %ohi, %owi, %fi] result_dims[%n, %oh, %ow, %f] dims[n, oh, ow, f] : f32 into tensor<?x?x?x?xf32>
+          %updated = dependent_tensor.insert %sum_kh into %out3[%ni, %ohi, %owi, %fi] #tensor<[%n, %oh, %ow, %f], f32> : f32 into tensor<?x?x?x?xf32>
           scf.yield %updated : tensor<?x?x?x?xf32>
         }
         scf.yield %out_f : tensor<?x?x?x?xf32>

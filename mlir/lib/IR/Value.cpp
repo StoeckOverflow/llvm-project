@@ -23,8 +23,13 @@ static Operation *getDependentTensorPropertySearchRoot(Value value) {
   }
   if (!op)
     return nullptr;
-  while (Operation *parent = op->getParentOp())
-    op = parent;
+  if (!op->hasTrait<OpTrait::IsIsolatedFromAbove>()) {
+    while (Operation *parent = op->getParentOp()) {
+      op = parent;
+      if (op->hasTrait<OpTrait::IsIsolatedFromAbove>())
+        break;
+    }
+  }
   return op;
 }
 

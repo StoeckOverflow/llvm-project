@@ -6,7 +6,12 @@ func.func @matmul_kernel(
     %n : index,
     %A : tensor<?x?xf32>,
     %B : tensor<?x?xf32>,
-    %Cinit : tensor<?x?xf32>) -> tensor<?x?xf32> {
+    %Cinit : tensor<?x?xf32>) -> tensor<?x?xf32>
+    #types[
+      %A : #tensor<[%m, %k], f32>,
+      %B : #tensor<[%k, %n], f32>,
+      %Cinit : #tensor<[%m, %n], f32>
+    ] -> #tensor<[%m, %n], f32> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %Cout = scf.for %i = %c0 to %m step %c1 iter_args(%row = %Cinit) -> (tensor<?x?xf32>) {
@@ -19,30 +24,22 @@ func.func @matmul_kernel(
         %acc_next = arith.addf %acc, %prod : f32
         scf.yield %acc_next : f32
       }
-      %updated = dependent_tensor.insert %sum into %col[%i, %j] result_dims[%m, %n] dims[m, n] : f32 into tensor<?x?xf32>
+      %updated = dependent_tensor.insert %sum into %col[%i, %j] #tensor<[%m, %n], f32> : f32 into tensor<?x?xf32>
       scf.yield %updated : tensor<?x?xf32>
     }
     scf.yield %next : tensor<?x?xf32>
   }
   return %Cout : tensor<?x?xf32>
-} dependent_tensor_boundary args[
-    3 dims[%m, %k] names[m, k],
-    4 dims[%k, %n] names[k, n],
-    5 dims[%m, %n] names[m, n]
-  ] results[0 dims[%m, %n] names[m, n]]
+}
 
 // CHECK-LABEL: func.func @matmul_kernel
 // CHECK-SAME: (%[[M:arg[0-9]+]]: index, %[[K:arg[0-9]+]]: index, %[[N:arg[0-9]+]]: index
+// CHECK-SAME: #types[%{{.*}} : #tensor<[%[[M]], %[[K]]], f32>, %{{.*}} : #tensor<[%[[K]], %[[N]]], f32>, %{{.*}} : #tensor<[%[[M]], %[[N]]], f32>] -> #tensor<[%[[M]], %[[N]]], f32>
 // CHECK: scf.for
 // CHECK: dependent_tensor.extract
 // CHECK: arith.mulf
 // CHECK: arith.addf
 // CHECK: dependent_tensor.insert
-// CHECK: dependent_tensor_boundary
-// CHECK-SAME: 3 dims[%[[M]], %[[K]]] names[m, k]
-// CHECK-SAME: 4 dims[%[[K]], %[[N]]] names[k, n]
-// CHECK-SAME: 5 dims[%[[M]], %[[N]]] names[m, n]
-// CHECK-SAME: results[0 dims[%[[M]], %[[N]]] names[m, n]]
 // CHECK-NOT: dependent_tensor.matmul
 // CHECK-NOT: dependent_tensor.gemm
 
@@ -54,7 +51,12 @@ func.func @gemm_kernel(
     %n : index,
     %A : tensor<?x?xf32>,
     %B : tensor<?x?xf32>,
-    %Cinit : tensor<?x?xf32>) -> tensor<?x?xf32> {
+    %Cinit : tensor<?x?xf32>) -> tensor<?x?xf32>
+    #types[
+      %A : #tensor<[%m, %k], f32>,
+      %B : #tensor<[%k, %n], f32>,
+      %Cinit : #tensor<[%m, %n], f32>
+    ] -> #tensor<[%m, %n], f32> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %Cout = scf.for %i = %c0 to %m step %c1 iter_args(%row = %Cinit) -> (tensor<?x?xf32>) {
@@ -67,22 +69,18 @@ func.func @gemm_kernel(
         %acc_next = arith.addf %acc, %prod : f32
         scf.yield %acc_next : f32
       }
-      %updated = dependent_tensor.insert %sum into %col[%i, %j] result_dims[%m, %n] dims[m, n] : f32 into tensor<?x?xf32>
+      %updated = dependent_tensor.insert %sum into %col[%i, %j] #tensor<[%m, %n], f32> : f32 into tensor<?x?xf32>
       scf.yield %updated : tensor<?x?xf32>
     }
     scf.yield %next : tensor<?x?xf32>
   }
   return %Cout : tensor<?x?xf32>
-} dependent_tensor_boundary args[
-    3 dims[%m, %k] names[m, k],
-    4 dims[%k, %n] names[k, n],
-    5 dims[%m, %n] names[m, n]
-  ] results[0 dims[%m, %n] names[m, n]]
+}
 
 // CHECK-LABEL: func.func @gemm_kernel
+// CHECK-SAME: #types[
 // CHECK: dependent_tensor.extract
 // CHECK: dependent_tensor.insert
-// CHECK: dependent_tensor_boundary
 // CHECK-NOT: dependent_tensor.matmul
 // CHECK-NOT: dependent_tensor.gemm
 
@@ -91,18 +89,19 @@ func.func @gemm_kernel(
 func.func @call_matmul_kernel(
     %m : index,
     %k : index,
-    %n : index) -> tensor<?x?xf32> {
-  %A = dependent_tensor.make %m, %k dims[m, k] : tensor<?x?xf32>
-  %B = dependent_tensor.make %k, %n dims[k, n] : tensor<?x?xf32>
-  %C = dependent_tensor.make %m, %n dims[m, n] : tensor<?x?xf32>
+    %n : index) -> tensor<?x?xf32>
+    #types[] -> #tensor<[%m, %n], f32> {
+  %A = dependent_tensor.make () #tensor<[%m, %k], f32> : tensor<?x?xf32>
+  %B = dependent_tensor.make () #tensor<[%k, %n], f32> : tensor<?x?xf32>
+  %C = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
   %R = func.call @matmul_kernel(%m, %k, %n, %A, %B, %C)
       : (index, index, index, tensor<?x?xf32>, tensor<?x?xf32>, tensor<?x?xf32>) -> tensor<?x?xf32>
   return %R : tensor<?x?xf32>
-} dependent_tensor_boundary args[] results[0 dims[%m, %n] names[m, n]]
+}
 
 // CHECK-LABEL: func.func @call_matmul_kernel
+// CHECK-SAME: #types[] -> #tensor<[%{{.*}}, %{{.*}}], f32>
 // CHECK: call @matmul_kernel
-// CHECK: dependent_tensor_boundary args[] results[0 dims[%{{.*}}, %{{.*}}] names[m, n]]
 
 // -----
 
@@ -118,7 +117,12 @@ func.func @conv2d_nhwc_hwcf_kernel(
     %ow : index,
     %X : tensor<?x?x?x?xf32>,
     %K : tensor<?x?x?x?xf32>,
-    %Yinit : tensor<?x?x?x?xf32>) -> tensor<?x?x?x?xf32> {
+    %Yinit : tensor<?x?x?x?xf32>) -> tensor<?x?x?x?xf32>
+    #types[
+      %X : #tensor<[%n, %h, %w, %c], f32>,
+      %K : #tensor<[%kh, %kw, %c, %f], f32>,
+      %Yinit : #tensor<[%n, %oh, %ow, %f], f32>
+    ] -> #tensor<[%n, %oh, %ow, %f], f32> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %Y0 = scf.for %ni = %c0 to %n step %c1 iter_args(%yn = %Yinit) -> (tensor<?x?x?x?xf32>) {
@@ -139,7 +143,7 @@ func.func @conv2d_nhwc_hwcf_kernel(
             }
             scf.yield %sum_kw : f32
           }
-          %updated = dependent_tensor.insert %sum_kh into %yf[%ni, %ohi, %owi, %fo] result_dims[%n, %oh, %ow, %f] dims[N, OH, OW, F] : f32 into tensor<?x?x?x?xf32>
+          %updated = dependent_tensor.insert %sum_kh into %yf[%ni, %ohi, %owi, %fo] #tensor<[%n, %oh, %ow, %f], f32> : f32 into tensor<?x?x?x?xf32>
           scf.yield %updated : tensor<?x?x?x?xf32>
         }
         scf.yield %Y3 : tensor<?x?x?x?xf32>
@@ -149,22 +153,14 @@ func.func @conv2d_nhwc_hwcf_kernel(
     scf.yield %Y1 : tensor<?x?x?x?xf32>
   }
   return %Y0 : tensor<?x?x?x?xf32>
-} dependent_tensor_boundary args[
-    9 dims[%n, %h, %w, %c] names[N, H, W, C],
-    10 dims[%kh, %kw, %c, %f] names[KH, KW, C, F],
-    11 dims[%n, %oh, %ow, %f] names[N, OH, OW, F]
-  ] results[0 dims[%n, %oh, %ow, %f] names[N, OH, OW, F]]
+}
 
 // CHECK-LABEL: func.func @conv2d_nhwc_hwcf_kernel
+// CHECK-SAME: {{#types\[%arg[0-9]+ : #tensor<\[%arg[0-9]+, %arg[0-9]+, %arg[0-9]+, %arg[0-9]+\], f32>, %arg[0-9]+ : #tensor<\[%arg[0-9]+, %arg[0-9]+, %arg[0-9]+, %arg[0-9]+\], f32>, %arg[0-9]+ : #tensor<\[%arg[0-9]+, %arg[0-9]+, %arg[0-9]+, %arg[0-9]+\], f32>\] -> #tensor<\[%arg[0-9]+, %arg[0-9]+, %arg[0-9]+, %arg[0-9]+\], f32>}}
 // CHECK: dependent_tensor.extract
 // CHECK: arith.mulf
 // CHECK: arith.addf
 // CHECK: dependent_tensor.insert
-// CHECK: dependent_tensor_boundary
-// CHECK-SAME: {{9 dims\[%arg[0-9]+, %arg[0-9]+, %arg[0-9]+, %arg[0-9]+\] names\[N, H, W, C\]}}
-// CHECK-SAME: {{10 dims\[%arg[0-9]+, %arg[0-9]+, %arg[0-9]+, %arg[0-9]+\] names\[KH, KW, C, F\]}}
-// CHECK-SAME: {{11 dims\[%arg[0-9]+, %arg[0-9]+, %arg[0-9]+, %arg[0-9]+\] names\[N, OH, OW, F\]}}
-// CHECK-SAME: {{results\[0 dims\[%arg[0-9]+, %arg[0-9]+, %arg[0-9]+, %arg[0-9]+\] names\[N, OH, OW, F\]\]}}
 
 // -----
 
@@ -177,15 +173,16 @@ func.func @call_conv2d_nhwc_hwcf_kernel(
     %kw : index,
     %f : index,
     %oh : index,
-    %ow : index) -> tensor<?x?x?x?xf32> {
-  %X = dependent_tensor.make %n, %h, %w, %c dims[N, H, W, C] : tensor<?x?x?x?xf32>
-  %K = dependent_tensor.make %kh, %kw, %c, %f dims[KH, KW, C, F] : tensor<?x?x?x?xf32>
-  %Y = dependent_tensor.make %n, %oh, %ow, %f dims[N, OH, OW, F] : tensor<?x?x?x?xf32>
+    %ow : index) -> tensor<?x?x?x?xf32>
+    #types[] -> #tensor<[%n, %oh, %ow, %f], f32> {
+  %X = dependent_tensor.make () #tensor<[%n, %h, %w, %c], f32> : tensor<?x?x?x?xf32>
+  %K = dependent_tensor.make () #tensor<[%kh, %kw, %c, %f], f32> : tensor<?x?x?x?xf32>
+  %Y = dependent_tensor.make () #tensor<[%n, %oh, %ow, %f], f32> : tensor<?x?x?x?xf32>
   %R = func.call @conv2d_nhwc_hwcf_kernel(%n, %h, %w, %c, %kh, %kw, %f, %oh, %ow, %X, %K, %Y)
       : (index, index, index, index, index, index, index, index, index, tensor<?x?x?x?xf32>, tensor<?x?x?x?xf32>, tensor<?x?x?x?xf32>) -> tensor<?x?x?x?xf32>
   return %R : tensor<?x?x?x?xf32>
-} dependent_tensor_boundary args[] results[0 dims[%n, %oh, %ow, %f] names[N, OH, OW, F]]
+}
 
 // CHECK-LABEL: func.func @call_conv2d_nhwc_hwcf_kernel
+// CHECK-SAME: #types[] -> #tensor<[%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}], f32>
 // CHECK: call @conv2d_nhwc_hwcf_kernel
-// CHECK: dependent_tensor_boundary args[] results[0 dims[%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}] names[N, OH, OW, F]]

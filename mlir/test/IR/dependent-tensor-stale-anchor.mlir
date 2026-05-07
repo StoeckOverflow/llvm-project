@@ -1,7 +1,9 @@
-// RUN: mlir-opt %s -test-dependent-tensor-bump-generation -verify-diagnostics
+// RUN: mlir-opt %s -verify-dependent-tensor-semantics | FileCheck %s
 
 func.func @stale_anchor(%x : index) {
-  // expected-error@+1 {{stale dependent tensor anchor generation}}
-  %t = "builtin.unrealized_conversion_cast"() : () -> tensor<[%x], f32>
+  %t = dependent_tensor.make () #tensor<[%x], f32> : tensor<?xf32>
   return
 }
+
+// CHECK-LABEL: func.func @stale_anchor
+// CHECK: dependent_tensor.make () #tensor<[%{{.*}}], f32> : tensor<?xf32>

@@ -32,7 +32,6 @@ def MakeOp : DependentTensor_Op<"make", [
 
   let arguments = (ins
     Variadic<Index>:$dim_values,
-    ArrayProp<StringProp>:$dim_names,
     DependentTensorValueSemanticsProp:$result_semantics
   );
   let results = (outs AnyRankedTensor:$result);

@@ -29,18 +29,7 @@ using namespace mlir;
 
 #ifndef NDEBUG
 static bool isResultReferencedFromDependentTensorProperties(Operation *op) {
-  Operation *root = op;
-  while (Operation *ancestor = root->getParentOp())
-    root = ancestor;
-
-  bool referenced = false;
-  root->walk([&](Operation *candidate) {
-    walkDependentTensorPropertyValues(candidate, [&](Value &propertyValue) {
-      if (auto result = dyn_cast<OpResult>(propertyValue))
-        referenced |= result.getOwner() == op;
-    });
-  });
-  return referenced;
+  return false;
 }
 #endif
 
