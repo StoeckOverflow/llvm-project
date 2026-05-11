@@ -33,6 +33,8 @@ add_mlir_library(MLIRIR
   OperationSupport.cpp
   PatternLoggingListener.cpp
   PatternMatch.cpp
+  PropertySSAUseInterfaces.cpp
+  PropertySSAUseSupport.cpp
   QuantStorageTypeInterface.cpp
   Region.cpp
   RegionKindInterface.cpp
@@ -68,6 +70,7 @@ add_mlir_library(MLIRIR
   MLIRDependentTensorInterfacesIncGen
   MLIRDialectFoldInterfaceIncGen
   MLIROpAsmInterfaceIncGen
+  MLIRPropertySSAUseInterfacesIncGen
   MLIRQuantStorageTypeInterfaceIncGen
   MLIRRegionKindInterfaceIncGen
   MLIRSideEffectInterfacesIncGen

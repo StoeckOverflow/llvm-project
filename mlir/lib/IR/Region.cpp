@@ -7,9 +7,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/IR/Region.h"
-#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/PropertySSAUseSupport.h"
 using namespace mlir;
 
 Region::Region(Operation *container) : container(container) {}
@@ -142,7 +142,7 @@ void Region::cloneInto(Region *dest, Region::iterator destPos,
           source.getOperands(), operands.begin(),
           [&](Value operand) { return mapper.lookupOrDefault(operand); });
       clone.setOperands(operands);
-      remapDependentTensorPropertyValues(&clone, mapper);
+      remapPropertySSAValues(&clone, mapper);
 
       for (auto regions : llvm::zip(source.getRegions(), clone.getRegions()))
         std::get<0>(regions).cloneInto(&std::get<1>(regions), mapper);

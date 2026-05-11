@@ -563,8 +563,7 @@ void FuncOp::print(OpAsmPrinter &p) {
   }
 }
 
-void FuncOp::walkDependentTensorPropertyValues(
-    function_ref<void(Value &)> callback) {
+void FuncOp::walkPropertySSAValues(function_ref<void(Value &)> callback) {
   for (DependentTensorValueSemantics &semantics :
        getProperties().dependentTensorArgSemantics)
     for (Value &value : semantics.dimValues)
@@ -573,6 +572,11 @@ void FuncOp::walkDependentTensorPropertyValues(
        getProperties().dependentTensorResultSemantics)
     for (Value &value : semantics.dimValues)
       callback(value);
+}
+
+void FuncOp::walkDependentTensorPropertyValues(
+    function_ref<void(Value &)> callback) {
+  walkPropertySSAValues(callback);
 }
 
 FailureOr<DependentTensorValueSemantics>

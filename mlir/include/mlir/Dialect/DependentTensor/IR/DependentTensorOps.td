@@ -19,7 +19,9 @@ class DependentTensor_Op<string mnemonic, list<Trait> traits = []>
     : Op<DependentTensor_Dialect, mnemonic, traits>;
 
 def MakeOp : DependentTensor_Op<"make", [
-    Pure, DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
+    Pure, DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
+      ["walkPropertySSAValues"]>,
+    DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
       ["getDependentTensorResultSemantics",
        "walkDependentTensorPropertyValues"]>]> {
   let summary = "construct a property-native dependent tensor value";
@@ -75,6 +77,8 @@ def ExtractOp : DependentTensor_Op<"extract", [Pure]> {
 
 def InsertOp : DependentTensor_Op<"insert", [
     Pure, AttrSizedOperandSegments,
+    DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
+      ["walkPropertySSAValues"]>,
     DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
       ["getDependentTensorResultSemantics",
        "walkDependentTensorPropertyValues"]>]> {

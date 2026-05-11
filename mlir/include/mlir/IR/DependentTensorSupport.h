@@ -6,19 +6,15 @@
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/OpImplementation.h"
+#include "mlir/IR/PropertySSAUseSupport.h"
 #include "mlir/IR/Value.h"
 
 namespace mlir {
 class Operation;
 
-/// Dependent tensor properties may contain SSA `Value` references. These
-/// references are semantic SSA edges, but they are not MLIR operands and are
-/// not visible through `Value::getUses()`.
-///
-/// Code that needs to inspect, update, remap, verify, or query these
-/// second-class uses must go through the helpers in this file. Operations that
-/// store such references expose their mutable slots with
-/// `DependentTensorPropertyOpInterface::walkDependentTensorPropertyValues`.
+/// Compatibility wrappers for the generic property SSA use layer. New generic
+/// IR code should use PropertySSAUseSupport directly; dependent_tensor-specific
+/// code may use these names when that reads more clearly.
 void walkDependentTensorPropertyValues(
     Operation *op, function_ref<void(Value &)> callback);
 void remapDependentTensorPropertyValues(Operation *op, IRMapping &mapping);

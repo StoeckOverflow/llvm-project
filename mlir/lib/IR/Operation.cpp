@@ -10,13 +10,13 @@
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
-#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/PropertySSAUseSupport.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "mlir/Interfaces/FoldInterfaces.h"
 #include "llvm/ADT/STLExtras.h"
@@ -28,7 +28,7 @@
 using namespace mlir;
 
 #ifndef NDEBUG
-static bool isResultReferencedFromDependentTensorProperties(Operation *op) {
+static bool isResultReferencedFromPropertySSAUses(Operation *op) {
   if (!op || op->getNumResults() == 0)
     return false;
   Operation *root = op;
@@ -41,7 +41,7 @@ static bool isResultReferencedFromDependentTensorProperties(Operation *op) {
 
   bool referenced = false;
   root->walk([&](Operation *candidate) {
-    walkDependentTensorPropertyValues(candidate, [&](Value &propertyValue) {
+    walkPropertySSAValues(candidate, [&](Value &propertyValue) {
       if (llvm::isa_and_present<OpResult>(propertyValue) &&
           propertyValue.getDefiningOp() == op)
         referenced = true;
@@ -556,9 +556,8 @@ void llvm::ilist_traits<::mlir::Operation>::transferNodesFromList(
 /// Remove this operation (and its descendants) from its Block and delete
 /// all of them.
 void Operation::erase() {
-  assert(!isResultReferencedFromDependentTensorProperties(this) &&
-         "cannot erase operation with results referenced from dependent tensor "
-         "properties");
+  assert(!isResultReferencedFromPropertySSAUses(this) &&
+         "cannot erase operation with results referenced from property SSA uses");
   if (auto *parent = getBlock())
     parent->getOperations().erase(this);
   else
@@ -773,7 +772,7 @@ Operation *Operation::clone(IRMapping &mapper, const CloneOptions &options) {
   auto *newOp = create(getLoc(), getName(),
                        clonedResultTypes, operands, attrs,
                        getPropertiesStorage(), successors, getNumRegions());
-  remapDependentTensorPropertyValues(newOp, mapper);
+  remapPropertySSAValues(newOp, mapper);
   mapper.map(this, newOp);
 
   // Clone the regions.
@@ -1412,10 +1411,29 @@ LogicalResult OpTrait::impl::verifyIsIsolatedFromAbove(Operation *isolatedOp) {
             return op.emitError("operation's operand is unlinked");
           if (!region.isAncestor(operandRegion)) {
             return op.emitOpError("using value defined outside the region")
-                       .attachNote(isolatedOp->getLoc())
+                   .attachNote(isolatedOp->getLoc())
                    << "required by region isolation constraints";
           }
         }
+        LogicalResult propertyIsolation = success();
+        walkPropertySSAValues(&op, [&](Value &propertyValue) {
+          if (failed(propertyIsolation))
+            return;
+          auto *valueRegion = propertyValue.getParentRegion();
+          if (!valueRegion) {
+            propertyIsolation =
+                op.emitError("operation's property SSA value is unlinked");
+            return;
+          }
+          if (!region.isAncestor(valueRegion)) {
+            propertyIsolation =
+                op.emitOpError("using property SSA value defined outside the region")
+                    .attachNote(isolatedOp->getLoc())
+                << "required by region isolation constraints";
+          }
+        });
+        if (failed(propertyIsolation))
+          return failure();
 
         // Schedule any regions in the operation for further checking.  Don't
         // recurse into other IsolatedFromAbove ops, because they will check

@@ -11,6 +11,7 @@
 
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/PropertySSAUseInterfaces.h"
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/SmallVector.h"

@@ -286,10 +286,14 @@ LogicalResult MakeOp::verify() {
   return success();
 }
 
-void MakeOp::walkDependentTensorPropertyValues(
-    function_ref<void(Value &)> callback) {
+void MakeOp::walkPropertySSAValues(function_ref<void(Value &)> callback) {
   for (Value &value : getProperties().result_semantics.dimValues)
     callback(value);
+}
+
+void MakeOp::walkDependentTensorPropertyValues(
+    function_ref<void(Value &)> callback) {
+  walkPropertySSAValues(callback);
 }
 
 FailureOr<DependentTensorValueSemantics>
@@ -471,10 +475,14 @@ LogicalResult InsertOp::verify() {
   return success();
 }
 
-void InsertOp::walkDependentTensorPropertyValues(
-    function_ref<void(Value &)> callback) {
+void InsertOp::walkPropertySSAValues(function_ref<void(Value &)> callback) {
   for (Value &value : getProperties().result_semantics.dimValues)
     callback(value);
+}
+
+void InsertOp::walkDependentTensorPropertyValues(
+    function_ref<void(Value &)> callback) {
+  walkPropertySSAValues(callback);
 }
 
 FailureOr<DependentTensorValueSemantics>

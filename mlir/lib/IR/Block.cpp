@@ -9,15 +9,15 @@
 #include "mlir/IR/Block.h"
 
 #include "mlir/IR/Builders.h"
-#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/PropertySSAUseSupport.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace mlir;
 
 #ifndef NDEBUG
-static bool isReferencedFromDependentTensorProperties(Value value) {
+static bool isReferencedFromPropertySSAUses(Value value) {
   Operation *root = nullptr;
   if (Operation *parentOp = value.getParentBlock()->getParentOp()) {
     root = parentOp;
@@ -32,7 +32,7 @@ static bool isReferencedFromDependentTensorProperties(Value value) {
     return false;
   bool referenced = false;
   root->walk([&](Operation *op) {
-    walkDependentTensorPropertyValues(op, [&](Value &propertyValue) {
+    walkPropertySSAValues(op, [&](Value &propertyValue) {
       referenced |= propertyValue == value;
     });
   });
@@ -224,9 +224,8 @@ BlockArgument Block::insertArgument(args_iterator it, Type type, Location loc) {
 
 void Block::eraseArgument(unsigned index) {
   assert(index < arguments.size());
-  assert(!isReferencedFromDependentTensorProperties(arguments[index]) &&
-         "cannot erase block argument referenced from dependent tensor "
-         "properties");
+  assert(!isReferencedFromPropertySSAUses(arguments[index]) &&
+         "cannot erase block argument referenced from property SSA uses");
   arguments[index].destroy();
   arguments.erase(arguments.begin() + index);
   for (BlockArgument arg : llvm::drop_begin(arguments, index))

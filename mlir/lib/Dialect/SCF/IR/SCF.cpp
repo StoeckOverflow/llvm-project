@@ -749,8 +749,7 @@ ForOp::getDependentTensorBlockArgumentSemantics(unsigned regionNumber,
   return failure();
 }
 
-void ForOp::walkDependentTensorPropertyValues(
-    function_ref<void(Value &)> callback) {
+void ForOp::walkPropertySSAValues(function_ref<void(Value &)> callback) {
   for (DependentTensorValueSemantics &semantics :
        getProperties().dependentTensorIterArgSemantics)
     for (Value &value : semantics.dimValues)
@@ -759,6 +758,11 @@ void ForOp::walkDependentTensorPropertyValues(
        getProperties().dependentTensorResultSemantics)
     for (Value &value : semantics.dimValues)
       callback(value);
+}
+
+void ForOp::walkDependentTensorPropertyValues(
+    function_ref<void(Value &)> callback) {
+  walkPropertySSAValues(callback);
 }
 
 MutableArrayRef<OpOperand> ForOp::getInitsMutable() {

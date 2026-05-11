@@ -29,6 +29,7 @@
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/Dominance.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/PropertySSAUseSupport.h"
 #include "mlir/IR/RegionKindInterface.h"
 #include "mlir/IR/Threading.h"
 #include "llvm/ADT/PointerIntPair.h"
@@ -75,6 +76,19 @@ private:
   bool verifyRecursively;
 };
 } // namespace
+
+/// Return true when a property SSA reference can be checked as an ordinary
+/// owner-site use of `owner`. Some operation properties describe boundary
+/// metadata for values defined in regions nested under the owner operation
+/// itself. Those references have dialect-specific semantics and are not
+/// ordinary uses at the owner operation location.
+static bool isOwnerSitePropertySSAUse(Operation &owner, Value value) {
+  if (Operation *defOp = value.getDefiningOp())
+    return !owner.isAncestor(defOp);
+  auto blockArg = cast<BlockArgument>(value);
+  Operation *argOwner = blockArg.getOwner()->getParentOp();
+  return !argOwner || !owner.isAncestor(argOwner);
+}
 
 LogicalResult OperationVerifier::verifyOpAndDominance(Operation &op) {
   // Verify the operation first, collecting any IsolatedFromAbove operations.
@@ -454,6 +468,20 @@ OperationVerifier::verifyDominanceOfContainedRegions(Operation &op,
               diagnoseInvalidOperandDominance(op, operand.index());
               return failure();
             }
+
+            LogicalResult propertyDominance = success();
+            walkPropertySSAValues(&op, [&](Value &value) {
+              if (failed(propertyDominance) ||
+                  !isOwnerSitePropertySSAUse(op, value))
+                return;
+              if (domInfo.properlyDominates(value, &op))
+                return;
+              propertyDominance =
+                  op.emitOpError()
+                  << "property SSA value does not dominate this operation";
+            });
+            if (failed(propertyDominance))
+              return failure();
           }
 
           // Recursively verify dominance within each operation in the block,

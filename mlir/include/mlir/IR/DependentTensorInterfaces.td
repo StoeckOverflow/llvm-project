@@ -10,6 +10,7 @@
 #define MLIR_IR_DEPENDENTTENSORINTERFACES
 
 include "mlir/IR/OpBase.td"
+include "mlir/IR/PropertySSAUseInterfaces.td"
 
 def DependentTensorValueSemanticsProp
     : Property<"::mlir::DependentTensorValueSemantics",

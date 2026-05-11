@@ -251,6 +251,8 @@ def ConstantOp : Func_Op<"constant",
 def FuncOp : Func_Op<"func", [
   AffineScope, AutomaticAllocationScope,
   FunctionOpInterface, IsolatedFromAbove, OpAsmOpInterface,
+  DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
+    ["walkPropertySSAValues"]>,
   DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
     ["getDependentTensorBlockArgumentSemantics",
      "walkDependentTensorPropertyValues"]>

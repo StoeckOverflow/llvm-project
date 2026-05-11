@@ -3,6 +3,7 @@ set(LLVM_TARGET_DEFINITIONS SymbolInterfaces.td)
 mlir_tablegen(SymbolInterfacesAttrInterface.h.inc -gen-attr-interface-decls)
 mlir_tablegen(SymbolInterfacesAttrInterface.cpp.inc -gen-attr-interface-defs)
 add_mlir_interface(RegionKindInterface)
+add_mlir_interface(PropertySSAUseInterfaces)
 add_mlir_interface(DependentTensorInterfaces)
 
 add_mlir_type_interface(QuantStorageTypeInterface)
@@ -19,6 +20,10 @@ add_mlir_generic_tablegen_target(MLIROpAsmInterfaceIncGen)
 set(LLVM_TARGET_DEFINITIONS DependentTensorInterfaces.td)
 mlir_tablegen(DependentTensorInterfaces.h.inc -gen-op-interface-decls)
 mlir_tablegen(DependentTensorInterfaces.cpp.inc -gen-op-interface-defs)
+
+set(LLVM_TARGET_DEFINITIONS PropertySSAUseInterfaces.td)
+mlir_tablegen(PropertySSAUseInterfaces.h.inc -gen-op-interface-decls)
+mlir_tablegen(PropertySSAUseInterfaces.cpp.inc -gen-op-interface-defs)
 
 set(LLVM_TARGET_DEFINITIONS BuiltinAttributes.td)
 mlir_tablegen(BuiltinAttributes.h.inc -gen-attrdef-decls)

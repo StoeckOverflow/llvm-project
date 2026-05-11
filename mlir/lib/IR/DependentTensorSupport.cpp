@@ -1,7 +1,6 @@
 #include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/Operation.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SmallPtrSet.h"
 
 using namespace mlir;
 
@@ -15,117 +14,52 @@ mlir::hash_value(const DependentTensorValueSemantics &semantics) {
 
 void mlir::walkDependentTensorPropertyValues(
     Operation *op, function_ref<void(Value &)> callback) {
-  if (!op)
-    return;
-  auto skipNullCallback = [&](Value &value) {
-    if (value)
-      callback(value);
-  };
-  if (std::optional<RegisteredOperationName> registeredInfo =
-          op->getName().getRegisteredInfo()) {
-    // Dependent tensor properties live in concrete op properties, so only ops
-    // that explicitly register the interface can expose mutable Value slots.
-    // Avoid consulting dialect fallback interfaces here: this helper is also
-    // used from teardown assertions, where a dialect may be destroying cached
-    // IR containing unrelated operations.
-    if (auto *iface =
-            registeredInfo->getInterface<DependentTensorPropertyOpInterface>())
-      iface->walkDependentTensorPropertyValues(iface, op, skipNullCallback);
-    return;
-  }
-  auto iface = dyn_cast<DependentTensorPropertyOpInterface>(op);
-  if (!iface)
-    return;
-  iface.walkDependentTensorPropertyValues(skipNullCallback);
+  walkPropertySSAValues(op, callback);
 }
 
 void mlir::remapDependentTensorPropertyValues(Operation *op,
                                               IRMapping &mapping) {
-  walkDependentTensorPropertyValues(op, [&](Value &value) {
-    if (Value mapped = mapping.lookupOrNull(value))
-      value = mapped;
-  });
+  remapPropertySSAValues(op, mapping);
 }
 
 void mlir::replaceDependentTensorPropertyValue(Operation *root, Value from,
                                                Value to) {
-  replaceDependentTensorPropertyValueIf(root, from, to,
-                                        [](Operation *) { return true; });
+  replacePropertySSAValue(root, from, to);
 }
 
 void mlir::replaceDependentTensorPropertyValueIf(
     Operation *root, Value from, Value to,
     function_ref<bool(Operation *)> shouldReplaceOwner) {
-  if (!root || !from || !to)
-    return;
-  root->walk([&](Operation *op) {
-    if (!shouldReplaceOwner(op))
-      return;
-    walkDependentTensorPropertyValues(op, [&](Value &value) {
-      if (value == from)
-        value = to;
-    });
-  });
+  replacePropertySSAValueIf(root, from, to, shouldReplaceOwner);
 }
 
 bool mlir::hasDependentTensorPropertyUses(Value value, Operation *root) {
-  if (!value || !root)
-    return false;
-  bool found = false;
-  root->walk([&](Operation *op) {
-    walkDependentTensorPropertyValues(op, [&](Value &propertyValue) {
-      found |= propertyValue == value;
-    });
-  });
-  return found;
+  return hasPropertySSAUses(value, root);
 }
 
 bool mlir::dependentTensorUseEmpty(Value value, Operation *root) {
-  return !hasDependentTensorPropertyUses(value, root);
+  return propertySSAUseEmpty(value, root);
 }
 
 SmallVector<Operation *>
 mlir::getDependentTensorPropertyUsers(Value value, Operation *root) {
-  SmallVector<Operation *> users;
-  if (!value || !root)
-    return users;
-  llvm::SmallPtrSet<Operation *, 8> seen;
-  root->walk([&](Operation *op) {
-    walkDependentTensorPropertyValues(op, [&](Value &propertyValue) {
-      if (propertyValue == value && seen.insert(op).second)
-        users.push_back(op);
-    });
-  });
-  return users;
+  return getPropertySSAUsers(value, root);
 }
 
 bool mlir::hasDependentTensorResultUses(Operation *op, Operation *root) {
-  if (!op || !root)
-    return false;
-  return llvm::any_of(op->getResults(), [&](Value result) {
-    return hasDependentTensorPropertyUses(result, root);
-  });
+  return hasPropertySSAResultUses(op, root);
 }
 
 LogicalResult mlir::verifyNoDependentTensorPropertyUses(Value value,
                                                         Operation *root,
                                                         Location loc) {
-  if (hasDependentTensorPropertyUses(value, root))
-    return emitError(loc) << "value is referenced from dependent tensor "
-                             "property uses";
-  return success();
+  return verifyNoPropertySSAUses(value, root, loc);
 }
 
 void mlir::replaceUsesOfWithIncludingDependentTensorProperties(Operation *op,
                                                                Value from,
                                                                Value to) {
-  if (!op || from == to)
-    return;
-  op->replaceUsesOfWith(from, to);
-  walkDependentTensorPropertyValues(op, [&](Value &propertyValue) {
-    if (propertyValue == from)
-      propertyValue = to;
-  });
+  replaceUsesOfWithIncludingPropertySSAUses(op, from, to);
 }
 
 ParseResult mlir::dependent_tensor::parseTensorSpec(
