@@ -33,6 +33,14 @@ static Operation *getDependentTensorPropertySearchRoot(Value value) {
   return op;
 }
 
+// Dependent tensor properties model second-class SSA edges. They are scoped to
+// the nearest IsolatedFromAbove operation containing the replaced value, then
+// updated before native operand uses so transient IR does not mix old property
+// refs with already-rewritten operands. For replaceUsesWithIf, property refs
+// cannot be matched against an OpOperand predicate directly; the approximation
+// is to update property refs owned by operations that had at least one selected
+// ordinary operand use.
+
 /// If this value is the result of an Operation, return the operation that
 /// defines it.
 Operation *Value::getDefiningOp() const {

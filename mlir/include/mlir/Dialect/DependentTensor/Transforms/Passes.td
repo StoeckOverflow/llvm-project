@@ -26,4 +26,19 @@ def DependentTensorReplaceDimValuePass
   let summary = "Replace the first index dimension producer in a function";
 }
 
+def DependentTensorReplaceFirstBlockArgPass
+    : Pass<"dependent-tensor-replace-first-block-arg", "mlir::func::FuncOp"> {
+  let summary = "Replace the first index function argument with the second";
+}
+
+def DependentTensorReplaceOpUsesPass
+    : Pass<"dependent-tensor-replace-op-uses", "mlir::func::FuncOp"> {
+  let summary = "Replace op-local operands and dependent tensor property uses";
+}
+
+def DependentTensorCheckPropertyUsesPass
+    : Pass<"dependent-tensor-check-property-uses", "mlir::func::FuncOp"> {
+  let summary = "Check dependent tensor second-class use query helpers";
+}
+
 #endif // MLIR_DIALECT_DEPENDENTTENSOR_TRANSFORMS_PASSES_TD

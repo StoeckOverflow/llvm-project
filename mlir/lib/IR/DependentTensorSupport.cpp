@@ -1,6 +1,7 @@
 #include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/Operation.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
 
 using namespace mlir;
 
@@ -64,6 +65,66 @@ void mlir::replaceDependentTensorPropertyValueIf(
       if (value == from)
         value = to;
     });
+  });
+}
+
+bool mlir::hasDependentTensorPropertyUses(Value value, Operation *root) {
+  if (!value || !root)
+    return false;
+  bool found = false;
+  root->walk([&](Operation *op) {
+    walkDependentTensorPropertyValues(op, [&](Value &propertyValue) {
+      found |= propertyValue == value;
+    });
+  });
+  return found;
+}
+
+bool mlir::dependentTensorUseEmpty(Value value, Operation *root) {
+  return !hasDependentTensorPropertyUses(value, root);
+}
+
+SmallVector<Operation *>
+mlir::getDependentTensorPropertyUsers(Value value, Operation *root) {
+  SmallVector<Operation *> users;
+  if (!value || !root)
+    return users;
+  llvm::SmallPtrSet<Operation *, 8> seen;
+  root->walk([&](Operation *op) {
+    walkDependentTensorPropertyValues(op, [&](Value &propertyValue) {
+      if (propertyValue == value && seen.insert(op).second)
+        users.push_back(op);
+    });
+  });
+  return users;
+}
+
+bool mlir::hasDependentTensorResultUses(Operation *op, Operation *root) {
+  if (!op || !root)
+    return false;
+  return llvm::any_of(op->getResults(), [&](Value result) {
+    return hasDependentTensorPropertyUses(result, root);
+  });
+}
+
+LogicalResult mlir::verifyNoDependentTensorPropertyUses(Value value,
+                                                        Operation *root,
+                                                        Location loc) {
+  if (hasDependentTensorPropertyUses(value, root))
+    return emitError(loc) << "value is referenced from dependent tensor "
+                             "property uses";
+  return success();
+}
+
+void mlir::replaceUsesOfWithIncludingDependentTensorProperties(Operation *op,
+                                                               Value from,
+                                                               Value to) {
+  if (!op || from == to)
+    return;
+  op->replaceUsesOfWith(from, to);
+  walkDependentTensorPropertyValues(op, [&](Value &propertyValue) {
+    if (propertyValue == from)
+      propertyValue = to;
   });
 }
 

@@ -17,6 +17,9 @@ namespace dependent_tensor {
 #define GEN_PASS_DEF_VERIFYDEPENDENTTENSORSEMANTICSPASS
 #define GEN_PASS_DEF_DEPENDENTTENSORCLONELOCALPRODUCERPASS
 #define GEN_PASS_DEF_DEPENDENTTENSORREPLACEDIMVALUEPASS
+#define GEN_PASS_DEF_DEPENDENTTENSORREPLACEFIRSTBLOCKARGPASS
+#define GEN_PASS_DEF_DEPENDENTTENSORREPLACEOPUSESPASS
+#define GEN_PASS_DEF_DEPENDENTTENSORCHECKPROPERTYUSESPASS
 #include "mlir/Dialect/DependentTensor/Transforms/Passes.h.inc"
 } // namespace dependent_tensor
 } // namespace mlir
@@ -71,6 +74,17 @@ static LogicalResult verifyStoredTensorSemantics(
     if (!dimValue.getType().isIndex())
       return owner->emitOpError() << "requires index-typed dependent " << kind
                                   << " dimension values";
+    if (Operation *isolated = owner->getParentWithTrait<OpTrait::IsIsolatedFromAbove>()) {
+      Operation *dimOwner = dimValue.getDefiningOp();
+      if (!dimOwner) {
+        auto arg = cast<BlockArgument>(dimValue);
+        dimOwner = arg.getOwner() ? arg.getOwner()->getParentOp() : nullptr;
+      }
+      if (dimOwner && dimOwner != isolated && !isolated->isAncestor(dimOwner))
+        return owner->emitOpError()
+               << "dependent " << kind
+               << " dimension value illegally crosses an IsolatedFromAbove boundary";
+    }
     if (funcBoundaryOwner) {
       auto arg = dyn_cast<BlockArgument>(dimValue);
       if (!arg || funcBoundaryOwner.isExternal() ||
@@ -328,10 +342,8 @@ struct DependentTensorCloneLocalProducerPass
         break;
       toClone.push_back(&op);
     }
-    if (toClone.empty()) {
-      signalPassFailure();
+    if (toClone.empty())
       return;
-    }
 
     IRMapping mapping;
     OpBuilder builder(getOperation().getContext());
@@ -356,6 +368,80 @@ struct DependentTensorReplaceDimValuePass
     if (indexResults.size() < 2)
       return;
     indexResults.front().replaceAllUsesWith(indexResults[1]);
+  }
+};
+
+struct DependentTensorReplaceOpUsesPass
+    : public dependent_tensor::impl::DependentTensorReplaceOpUsesPassBase<
+          DependentTensorReplaceOpUsesPass> {
+  using DependentTensorReplaceOpUsesPassBase<
+      DependentTensorReplaceOpUsesPass>::DependentTensorReplaceOpUsesPassBase;
+
+  void runOnOperation() override {
+    SmallVector<Value> indexResults;
+    for (Operation &op : getOperation().getBody().front())
+      for (Value result : op.getResults())
+        if (result.getType().isIndex())
+          indexResults.push_back(result);
+    if (indexResults.size() < 2)
+      return;
+    for (Operation &op : getOperation().getBody().front())
+      replaceUsesOfWithIncludingDependentTensorProperties(
+          &op, indexResults.front(), indexResults[1]);
+  }
+};
+
+struct DependentTensorReplaceFirstBlockArgPass
+    : public dependent_tensor::impl::DependentTensorReplaceFirstBlockArgPassBase<
+          DependentTensorReplaceFirstBlockArgPass> {
+  using DependentTensorReplaceFirstBlockArgPassBase<
+      DependentTensorReplaceFirstBlockArgPass>::
+          DependentTensorReplaceFirstBlockArgPassBase;
+
+  void runOnOperation() override {
+    SmallVector<BlockArgument> indexArgs;
+    for (BlockArgument arg : getOperation().getArguments())
+      if (arg.getType().isIndex())
+        indexArgs.push_back(arg);
+    if (indexArgs.size() < 2)
+      return;
+    indexArgs.front().replaceAllUsesWith(indexArgs[1]);
+  }
+};
+
+struct DependentTensorCheckPropertyUsesPass
+    : public dependent_tensor::impl::DependentTensorCheckPropertyUsesPassBase<
+          DependentTensorCheckPropertyUsesPass> {
+  using DependentTensorCheckPropertyUsesPassBase<
+      DependentTensorCheckPropertyUsesPass>::
+          DependentTensorCheckPropertyUsesPassBase;
+
+  void runOnOperation() override {
+    Operation *root = getOperation();
+    Value value;
+    for (Operation &op : getOperation().getBody().front()) {
+      for (Value result : op.getResults()) {
+        if (result.getType().isIndex()) {
+          value = result;
+          break;
+        }
+      }
+      if (value)
+        break;
+    }
+    if (!value)
+      return;
+    if (!hasDependentTensorPropertyUses(value, root) ||
+        dependentTensorUseEmpty(value, root) ||
+        getDependentTensorPropertyUsers(value, root).empty()) {
+      root->emitOpError("expected dependent tensor property uses");
+      return signalPassFailure();
+    }
+    if (Operation *def = value.getDefiningOp())
+      if (!hasDependentTensorResultUses(def, root)) {
+        root->emitOpError("expected dependent tensor result uses");
+        return signalPassFailure();
+      }
   }
 };
 } // namespace

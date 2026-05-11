@@ -11,6 +11,14 @@
 namespace mlir {
 class Operation;
 
+/// Dependent tensor properties may contain SSA `Value` references. These
+/// references are semantic SSA edges, but they are not MLIR operands and are
+/// not visible through `Value::getUses()`.
+///
+/// Code that needs to inspect, update, remap, verify, or query these
+/// second-class uses must go through the helpers in this file. Operations that
+/// store such references expose their mutable slots with
+/// `DependentTensorPropertyOpInterface::walkDependentTensorPropertyValues`.
 void walkDependentTensorPropertyValues(
     Operation *op, function_ref<void(Value &)> callback);
 void remapDependentTensorPropertyValues(Operation *op, IRMapping &mapping);
@@ -18,6 +26,15 @@ void replaceDependentTensorPropertyValue(Operation *root, Value from, Value to);
 void replaceDependentTensorPropertyValueIf(
     Operation *root, Value from, Value to,
     function_ref<bool(Operation *)> shouldReplaceOwner);
+bool hasDependentTensorPropertyUses(Value value, Operation *root);
+bool dependentTensorUseEmpty(Value value, Operation *root);
+SmallVector<Operation *> getDependentTensorPropertyUsers(Value value,
+                                                         Operation *root);
+bool hasDependentTensorResultUses(Operation *op, Operation *root);
+LogicalResult verifyNoDependentTensorPropertyUses(Value value, Operation *root,
+                                                  Location loc);
+void replaceUsesOfWithIncludingDependentTensorProperties(Operation *op,
+                                                         Value from, Value to);
 
 namespace dependent_tensor {
 ParseResult
