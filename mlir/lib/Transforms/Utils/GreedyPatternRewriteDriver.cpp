@@ -481,7 +481,7 @@ bool GreedyPatternRewriteDriver::processWorklist() {
     });
 
     // If the operation is trivially dead - remove it.
-    if (isOpTriviallyDead(op)) {
+    if (isOpTriviallyDeadIncludingPropertySSA(op)) {
       rewriter.eraseOp(op);
       changed = true;
 

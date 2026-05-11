@@ -8,6 +8,7 @@
 
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
+#include "mlir/IR/PropertySSAUseSupport.h"
 #include "mlir/IR/SymbolTable.h"
 #include <utility>
 
@@ -34,6 +35,14 @@ bool MemoryEffects::Effect::classof(const SideEffects::Effect *effect) {
 
 bool mlir::isOpTriviallyDead(Operation *op) {
   return op->use_empty() && wouldOpBeTriviallyDead(op);
+}
+
+bool mlir::isOpTriviallyDeadIncludingPropertySSA(Operation *op) {
+  // TODO: Option B: if downstream testing stays clean, consider making
+  // isOpTriviallyDead itself use allResultsUseEmpty. For now this explicit
+  // helper preserves the native-use-only meaning of Operation::use_empty while
+  // letting CSE/DCE opt into property SSA liveness.
+  return allResultsUseEmpty(op) && wouldOpBeTriviallyDead(op);
 }
 
 /// Internal implementation of `mlir::wouldOpBeTriviallyDead` that also

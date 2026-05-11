@@ -8,6 +8,7 @@
 
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Iterators.h"
+#include "mlir/IR/PropertySSAUseSupport.h"
 #include "mlir/IR/RegionKindInterface.h"
 #include "llvm/ADT/SmallPtrSet.h"
 
@@ -286,6 +287,21 @@ void RewriterBase::finalizeOpModification(Operation *op) {
     rewriteListener->notifyOperationModified(op);
 }
 
+void RewriterBase::replaceAllUsesWith(Value from, Value to) {
+  for (Operation *op : getPropertySSAUsers(from)) {
+    modifyOpInPlace(op, [&]() {
+      walkPropertySSAValues(op, [&](Value &value) {
+        if (value == from)
+          value = to;
+      });
+    });
+  }
+  for (OpOperand &operand : llvm::make_early_inc_range(from.getUses())) {
+    Operation *op = operand.getOwner();
+    modifyOpInPlace(op, [&]() { operand.set(to); });
+  }
+}
+
 void RewriterBase::replaceAllUsesExcept(
     Value from, Value to, const SmallPtrSetImpl<Operation *> &preservedUsers) {
   return replaceUsesWithIf(from, to, [&](OpOperand &use) {
@@ -298,12 +314,31 @@ void RewriterBase::replaceUsesWithIf(Value from, Value to,
                                      function_ref<bool(OpOperand &)> functor,
                                      bool *allUsesReplaced) {
   bool allReplaced = true;
-  for (OpOperand &operand : llvm::make_early_inc_range(from.getUses())) {
+  llvm::SmallPtrSet<OpOperand *, 8> replacedUses;
+  llvm::SmallPtrSet<Operation *, 8> replacedOwners;
+  for (OpOperand &operand : from.getUses()) {
     bool replace = functor(operand);
-    if (replace)
-      modifyOpInPlace(operand.getOwner(), [&]() { operand.set(to); });
+    if (replace) {
+      replacedUses.insert(&operand);
+      replacedOwners.insert(operand.getOwner());
+    }
     allReplaced &= replace;
   }
+  for (Operation *op : getPropertySSAUsers(from)) {
+    bool replace = replacedOwners.contains(op);
+    if (replace) {
+      modifyOpInPlace(op, [&]() {
+        walkPropertySSAValues(op, [&](Value &value) {
+          if (value == from)
+            value = to;
+        });
+      });
+    }
+    allReplaced &= replace;
+  }
+  for (OpOperand &operand : llvm::make_early_inc_range(from.getUses()))
+    if (replacedUses.contains(&operand))
+      modifyOpInPlace(operand.getOwner(), [&]() { operand.set(to); });
   if (allUsesReplaced)
     *allUsesReplaced = allReplaced;
 }

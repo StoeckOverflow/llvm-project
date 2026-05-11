@@ -7,6 +7,8 @@
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-check-property-uses))'
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-replace-dim-value),verify-dependent-tensor-semantics)'
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-dce-local-dims),verify-dependent-tensor-semantics)' | FileCheck %s --check-prefix=DCE
+// RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(canonicalize))' | FileCheck %s --check-prefix=CANON
+// RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(cse))' | FileCheck %s --check-prefix=CSE
 
 func.func @clone_make() {
   %m = arith.constant 1 : index
@@ -233,3 +235,21 @@ func.func @keep_scf_for_semantics_dim(%m: index, %init: tensor<?xf32>)
 // DCE-NEXT:   scf.yield %[[ARG]] : tensor<?xf32>
 // DCE-NEXT: }
 // DCE-NEXT: return %[[RESULT]] : tensor<?xf32>
+
+// -----
+
+func.func @generic_dce_keeps_property_only_dim(%a: index, %b: index) -> f32 {
+  %c0 = arith.constant 0 : index
+  %dim = arith.muli %a, %b : index
+  %t = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
+  %v = dependent_tensor.extract %t[%c0] : tensor<?xf32>
+  return %v : f32
+}
+
+// CANON-LABEL: func.func @generic_dce_keeps_property_only_dim
+// CANON: %[[DIM:.*]] = arith.muli
+// CANON: dependent_tensor.make () #tensor<[%[[DIM]]], f32>
+
+// CSE-LABEL: func.func @generic_dce_keeps_property_only_dim
+// CSE: %[[DIM:.*]] = arith.muli
+// CSE: dependent_tensor.make () #tensor<[%[[DIM]]], f32>

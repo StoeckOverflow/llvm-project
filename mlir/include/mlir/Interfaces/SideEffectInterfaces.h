@@ -532,6 +532,11 @@ bool mightHaveEffect(Operation *op, ValueTy value) {
 /// memory that prevent erasing.
 bool isOpTriviallyDead(Operation *op);
 
+/// Return true if the given operation has no native operand users, no property
+/// SSA users of its results, and no side effects on memory that prevent
+/// erasing.
+bool isOpTriviallyDeadIncludingPropertySSA(Operation *op);
+
 /// Return true if the given operation would be dead if unused, and has no side
 /// effects on memory that would prevent erasing. This is equivalent to checking
 /// `isOpTriviallyDead` if `op` was unused.

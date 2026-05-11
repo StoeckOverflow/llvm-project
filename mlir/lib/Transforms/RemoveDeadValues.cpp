@@ -39,6 +39,7 @@
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/OperationSupport.h"
+#include "mlir/IR/PropertySSAUseSupport.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
@@ -531,7 +532,7 @@ static void processBranchOp(BranchOpInterface branchOp, RunLivenessAnalysis &la,
 static SmallVector<Value> createPoisonedValues(OpBuilder &b,
                                                ValueRange values) {
   return llvm::map_to_vector(values, [&](Value value) {
-    if (value.use_empty())
+    if (allUseEmpty(value))
       return Value();
     return ub::PoisonOp::create(b, value.getLoc(), value.getType()).getResult();
   });
@@ -743,7 +744,7 @@ static void cleanUpDeadVals(MLIRContext *ctx, RDVFinalCleanupList &list) {
     for (Value opResult : opResults) {
       // Early continue for the case where the op result has no uses. No need to
       // create a poison op here.
-      if (opResult.use_empty())
+      if (allUseEmpty(opResult))
         continue;
 
       rewriter.setInsertionPoint(op);
@@ -757,7 +758,7 @@ static void cleanUpDeadVals(MLIRContext *ctx, RDVFinalCleanupList &list) {
 
   // 7. Remove all dead poison ops.
   for (ub::PoisonOp poisonOp : listener.poisonOps) {
-    if (poisonOp.use_empty())
+    if (allResultsUseEmpty(poisonOp))
       poisonOp.erase();
   }
 

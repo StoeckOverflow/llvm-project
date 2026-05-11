@@ -15,6 +15,7 @@
 
 #include "mlir/IR/Dominance.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/PropertySSAUseSupport.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/Passes.h"
@@ -152,7 +153,7 @@ void CSEDriver::replaceUsesAndDelete(ScopedMapTy &knownValues, Operation *op,
     if (auto *rewriteListener =
             dyn_cast_if_present<RewriterBase::Listener>(rewriter.getListener()))
       for (Value v : op->getResults())
-        if (all_of(v.getUses(), wasVisited))
+        if (all_of(v.getUses(), wasVisited) && propertySSAUseEmpty(v))
           rewriteListener->notifyOperationReplaced(op, existing);
 
     // Replace all uses, but do not remove the operation yet. This does not
@@ -161,7 +162,7 @@ void CSEDriver::replaceUsesAndDelete(ScopedMapTy &knownValues, Operation *op,
                                wasVisited);
 
     // There may be some remaining uses of the operation.
-    if (op->use_empty())
+    if (allResultsUseEmpty(op))
       opsToErase.push_back(op);
   }
 
@@ -249,7 +250,7 @@ LogicalResult CSEDriver::simplifyOperation(ScopedMapTy &knownValues,
     return failure();
 
   // If the operation is already trivially dead just add it to the erase list.
-  if (isOpTriviallyDead(op)) {
+  if (isOpTriviallyDeadIncludingPropertySSA(op)) {
     opsToErase.push_back(op);
     ++numDCE;
     return success();

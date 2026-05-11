@@ -15,6 +15,7 @@
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/PropertySSAUseSupport.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
@@ -334,6 +335,11 @@ static void processValue(Value value, LiveMap &liveMap) {
       return false;
     return liveMap.wasProvenLive(use.getOwner());
   });
+  if (!provedLive) {
+    provedLive = llvm::any_of(getPropertySSAUsers(value), [&](Operation *user) {
+      return liveMap.wasProvenLive(user);
+    });
+  }
   if (provedLive)
     liveMap.setProvedLive(value);
 }
