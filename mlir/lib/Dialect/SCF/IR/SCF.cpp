@@ -23,6 +23,7 @@
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/PropertySSAUseSupport.h"
 #include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Interfaces/ParallelCombiningOpInterface.h"
 #include "mlir/Interfaces/ValueBoundsOpInterface.h"
@@ -403,11 +404,15 @@ static void populateDependentTensorLoopSemantics(ForOp forOp) {
   properties.dependentTensorIterArgSemantics.clear();
   properties.dependentTensorResultSemantics.clear();
 
-  if (forOp.getInitArgs().size() != forOp.getNumResults())
+  if (forOp.getInitArgs().size() != forOp.getNumResults()) {
+    refreshPropertySSAUses(forOp);
     return;
+  }
   if (forOp.getBody()->getNumArguments() <
-      forOp.getNumInductionVars() + forOp.getInitArgs().size())
+      forOp.getNumInductionVars() + forOp.getInitArgs().size()) {
+    refreshPropertySSAUses(forOp);
     return;
+  }
 
   for (auto [i, init] : llvm::enumerate(forOp.getInitArgs())) {
     auto rankedType = dyn_cast<RankedTensorType>(forOp.getResultTypes()[i]);
@@ -428,6 +433,7 @@ static void populateDependentTensorLoopSemantics(ForOp forOp) {
     resultSemantics.rank = rankedType.getRank();
     properties.dependentTensorResultSemantics.push_back(resultSemantics);
   }
+  refreshPropertySSAUses(forOp);
 }
 
 LogicalResult ForOp::verify() {

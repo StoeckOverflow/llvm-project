@@ -8,8 +8,8 @@
 
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Iterators.h"
-#include "mlir/IR/PropertySSAUseSupport.h"
 #include "mlir/IR/RegionKindInterface.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 
 using namespace mlir;
@@ -154,7 +154,7 @@ void RewriterBase::replaceOp(Operation *op, Operation *newOp) {
 /// This method erases an operation that is known to have no uses. The uses of
 /// the given operation *must* be known to be dead.
 void RewriterBase::eraseOp(Operation *op) {
-  assert(op->use_empty() && "expected 'op' to have no uses");
+  assert(op->all_use_empty() && "expected 'op' to have no uses");
   auto *rewriteListener = dyn_cast_if_present<Listener>(listener);
 
   // If the current insertion point is before the erased operation, we adjust
@@ -177,7 +177,7 @@ void RewriterBase::eraseOp(Operation *op) {
         "expected empty regions");
     // All users should have been erased already if the op is in a region with
     // SSA dominance.
-    if (!op->use_empty() && op->getParentOp())
+    if (!op->all_use_empty() && op->getParentOp())
       assert(mayBeGraphRegion(*op->getParentRegion()) &&
              "expected that op has no uses");
 #endif // NDEBUG
@@ -234,9 +234,14 @@ void RewriterBase::eraseBlock(Block *block) {
   assert(block->use_empty() && "expected 'block' to have no uses");
 
   for (auto &op : llvm::make_early_inc_range(llvm::reverse(*block))) {
-    assert(op.use_empty() && "expected 'op' to have no uses");
+    assert(op.all_use_empty() && "expected 'op' to have no uses");
     eraseOp(&op);
   }
+
+  assert(llvm::all_of(
+             block->getArguments(),
+             [](BlockArgument arg) { return arg.property_use_empty(); }) &&
+         "expected block arguments to have no property SSA uses");
 
   // Notify the listener that the block is about to be removed.
   if (auto *rewriteListener = dyn_cast_if_present<Listener>(listener))
@@ -288,13 +293,10 @@ void RewriterBase::finalizeOpModification(Operation *op) {
 }
 
 void RewriterBase::replaceAllUsesWith(Value from, Value to) {
-  for (Operation *op : getPropertySSAUsers(from)) {
-    modifyOpInPlace(op, [&]() {
-      walkPropertySSAValues(op, [&](Value &value) {
-        if (value == from)
-          value = to;
-      });
-    });
+  for (PropertySSAUse &use :
+       llvm::make_early_inc_range(from.getPropertyUses())) {
+    Operation *op = use.getOwner();
+    modifyOpInPlace(op, [&]() { use.set(to); });
   }
   for (OpOperand &operand : llvm::make_early_inc_range(from.getUses())) {
     Operation *op = operand.getOwner();
@@ -324,15 +326,12 @@ void RewriterBase::replaceUsesWithIf(Value from, Value to,
     }
     allReplaced &= replace;
   }
-  for (Operation *op : getPropertySSAUsers(from)) {
+  for (PropertySSAUse &use :
+       llvm::make_early_inc_range(from.getPropertyUses())) {
+    Operation *op = use.getOwner();
     bool replace = replacedOwners.contains(op);
     if (replace) {
-      modifyOpInPlace(op, [&]() {
-        walkPropertySSAValues(op, [&](Value &value) {
-          if (value == from)
-            value = to;
-        });
-      });
+      modifyOpInPlace(op, [&]() { use.set(to); });
     }
     allReplaced &= replace;
   }

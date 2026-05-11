@@ -1,28 +1,12 @@
 #include "mlir/IR/PropertySSAUseSupport.h"
 
+#include "mlir/IR/Dominance.h"
 #include "mlir/IR/Operation.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include <memory>
 
 using namespace mlir;
-
-static Operation *getPropertySSAUseSearchRoot(Value value) {
-  Operation *op = value.getDefiningOp();
-  if (!op) {
-    auto arg = dyn_cast<BlockArgument>(value);
-    op = arg && arg.getOwner() ? arg.getOwner()->getParentOp() : nullptr;
-  }
-  if (!op)
-    return nullptr;
-  if (!op->hasTrait<OpTrait::IsIsolatedFromAbove>()) {
-    while (Operation *parent = op->getParentOp()) {
-      op = parent;
-      if (op->hasTrait<OpTrait::IsIsolatedFromAbove>())
-        break;
-    }
-  }
-  return op;
-}
 
 static Operation *getPropertySSAUseSearchRoot(Operation *op) {
   if (!op)
@@ -34,6 +18,10 @@ static Operation *getPropertySSAUseSearchRoot(Operation *op) {
     op = parent;
   }
   return op;
+}
+
+static bool isInPropertySSAUseScope(Operation *root, Operation *owner) {
+  return !root || (owner && root->isAncestor(owner));
 }
 
 void mlir::walkPropertySSAValues(Operation *op,
@@ -60,11 +48,33 @@ void mlir::walkPropertySSAValues(Operation *op,
   iface.walkPropertySSAValues(skipNullCallback);
 }
 
-void mlir::remapPropertySSAValues(Operation *op, IRMapping &mapping) {
+void mlir::dropPropertySSAUses(Operation *op) {
+  if (!op)
+    return;
+  for (std::unique_ptr<PropertySSAUse> &use : op->propertySSAUses)
+    use->unlink();
+  op->propertySSAUses.clear();
+}
+
+void mlir::registerPropertySSAUses(Operation *op) {
+  if (!op)
+    return;
   walkPropertySSAValues(op, [&](Value &value) {
-    if (Value mapped = mapping.lookupOrNull(value))
-      value = mapped;
+    if (value)
+      op->propertySSAUses.push_back(
+          std::make_unique<PropertySSAUse>(op, &value));
   });
+}
+
+void mlir::refreshPropertySSAUses(Operation *op) {
+  dropPropertySSAUses(op);
+  registerPropertySSAUses(op);
+}
+
+void mlir::remapPropertySSAValues(Operation *op, IRMapping &mapping) {
+  for (std::unique_ptr<PropertySSAUse> &use : op->propertySSAUses)
+    if (Value mapped = mapping.lookupOrNull(use->get()))
+      use->set(mapped);
 }
 
 void mlir::replacePropertySSAValue(Operation *root, Value from, Value to) {
@@ -74,31 +84,22 @@ void mlir::replacePropertySSAValue(Operation *root, Value from, Value to) {
 void mlir::replacePropertySSAValueIf(
     Operation *root, Value from, Value to,
     function_ref<bool(Operation *)> shouldReplaceOwner) {
-  if (!root || !from || !to)
+  if (!from || !to)
     return;
-  root->walk([&](Operation *op) {
-    if (!shouldReplaceOwner(op))
-      return;
-    walkPropertySSAValues(op, [&](Value &value) {
-      if (value == from)
-        value = to;
-    });
-  });
+  for (PropertySSAUse &use : llvm::make_early_inc_range(from.getPropertyUses()))
+    if (isInPropertySSAUseScope(root, use.getOwner()) &&
+        shouldReplaceOwner(use.getOwner()))
+      use.set(to);
 }
 
 bool mlir::hasPropertySSAUses(Value value, Operation *root) {
   if (!value)
     return false;
   if (!root)
-    root = getPropertySSAUseSearchRoot(value);
-  if (!root)
-    return false;
-  bool found = false;
-  root->walk([&](Operation *op) {
-    walkPropertySSAValues(
-        op, [&](Value &propertyValue) { found |= propertyValue == value; });
+    return !value.property_use_empty();
+  return llvm::any_of(value.getPropertyUses(), [&](PropertySSAUse &use) {
+    return isInPropertySSAUseScope(root, use.getOwner());
   });
-  return found;
 }
 
 bool mlir::propertySSAUseEmpty(Value value, Operation *root) {
@@ -110,17 +111,10 @@ SmallVector<Operation *> mlir::getPropertySSAUsers(Value value,
   SmallVector<Operation *> users;
   if (!value)
     return users;
-  if (!root)
-    root = getPropertySSAUseSearchRoot(value);
-  if (!root)
-    return users;
   llvm::SmallPtrSet<Operation *, 8> seen;
-  root->walk([&](Operation *op) {
-    walkPropertySSAValues(op, [&](Value &propertyValue) {
-      if (propertyValue == value && seen.insert(op).second)
-        users.push_back(op);
-    });
-  });
+  for (Operation *op : value.getPropertyUsers())
+    if (isInPropertySSAUseScope(root, op) && seen.insert(op).second)
+      users.push_back(op);
   return users;
 }
 
@@ -129,8 +123,6 @@ bool mlir::hasPropertySSAResultUses(Operation *op, Operation *root) {
     return false;
   if (!root)
     root = getPropertySSAUseSearchRoot(op);
-  if (!root)
-    return false;
   return llvm::any_of(op->getResults(), [&](Value result) {
     return hasPropertySSAUses(result, root);
   });
@@ -139,10 +131,7 @@ bool mlir::hasPropertySSAResultUses(Operation *op, Operation *root) {
 bool mlir::allUseEmpty(Value value, Operation *root) {
   if (!value)
     return true;
-  if (!value.use_empty())
-    return false;
-  return propertySSAUseEmpty(value,
-                             root ? root : getPropertySSAUseSearchRoot(value));
+  return value.use_empty() && propertySSAUseEmpty(value, root);
 }
 
 SmallVector<Operation *> mlir::getAllUsers(Value value, Operation *root) {
@@ -153,8 +142,7 @@ SmallVector<Operation *> mlir::getAllUsers(Value value, Operation *root) {
   for (Operation *user : value.getUsers())
     if (seen.insert(user).second)
       users.push_back(user);
-  for (Operation *user : getPropertySSAUsers(
-           value, root ? root : getPropertySSAUseSearchRoot(value)))
+  for (Operation *user : getPropertySSAUsers(value, root))
     if (seen.insert(user).second)
       users.push_back(user);
   return users;
@@ -181,8 +169,64 @@ void mlir::replaceUsesOfWithIncludingPropertySSAUses(Operation *op, Value from,
   if (!op || from == to)
     return;
   op->replaceUsesOfWith(from, to);
-  walkPropertySSAValues(op, [&](Value &propertyValue) {
-    if (propertyValue == from)
-      propertyValue = to;
+  for (std::unique_ptr<PropertySSAUse> &use : op->propertySSAUses)
+    if (use->get() == from)
+      use->set(to);
+}
+
+bool mlir::isOwnerSitePropertySSAUse(Operation *owner, Value value) {
+  if (!owner || !value)
+    return false;
+  if (Operation *defOp = value.getDefiningOp())
+    return !owner->isAncestor(defOp);
+  auto blockArg = cast<BlockArgument>(value);
+  Operation *argOwner =
+      blockArg.getOwner() ? blockArg.getOwner()->getParentOp() : nullptr;
+  return !argOwner || !owner->isAncestor(argOwner);
+}
+
+static Operation *getPropertySSAValueOwner(Value value) {
+  if (Operation *defOp = value.getDefiningOp())
+    return defOp;
+  auto blockArg = cast<BlockArgument>(value);
+  return blockArg.getOwner() ? blockArg.getOwner()->getParentOp() : nullptr;
+}
+
+bool mlir::crossesPropertySSAUseIsolatedFromAboveBoundary(Operation *owner,
+                                                          Value value) {
+  if (!owner || !value)
+    return false;
+  Operation *isolated =
+      owner->hasTrait<OpTrait::IsIsolatedFromAbove>()
+          ? owner
+          : owner->getParentWithTrait<OpTrait::IsIsolatedFromAbove>();
+  if (!isolated)
+    return false;
+  Operation *valueOwner = getPropertySSAValueOwner(value);
+  return valueOwner && valueOwner != isolated &&
+         !isolated->isAncestor(valueOwner);
+}
+
+LogicalResult mlir::verifyPropertySSAUseDominance(Operation *owner, Value value,
+                                                  DominanceInfo &dominance) {
+  if (!owner || !value || !isOwnerSitePropertySSAUse(owner, value))
+    return success();
+  if (crossesPropertySSAUseIsolatedFromAboveBoundary(owner, value))
+    return owner->emitOpError() << "property SSA value illegally crosses an "
+                                   "IsolatedFromAbove boundary";
+  if (!dominance.properlyDominates(value, owner))
+    return owner->emitOpError()
+           << "property SSA value does not dominate this operation";
+  return success();
+}
+
+LogicalResult mlir::verifyPropertySSAUseDominance(Operation *owner,
+                                                  DominanceInfo &dominance) {
+  LogicalResult result = success();
+  walkPropertySSAValues(owner, [&](Value &value) {
+    if (failed(result))
+      return;
+    result = verifyPropertySSAUseDominance(owner, value, dominance);
   });
+  return result;
 }

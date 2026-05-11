@@ -9,34 +9,13 @@
 #include "mlir/IR/Value.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/Operation.h"
-#include "mlir/IR/PropertySSAUseSupport.h"
 #include "llvm/ADT/SmallPtrSet.h"
 
 using namespace mlir;
 using namespace mlir::detail;
 
-static Operation *getPropertySSAUseSearchRoot(Value value) {
-  Operation *op = value.getDefiningOp();
-  if (!op) {
-    auto arg = dyn_cast<BlockArgument>(value);
-    op = arg && arg.getOwner() ? arg.getOwner()->getParentOp() : nullptr;
-  }
-  if (!op)
-    return nullptr;
-  if (!op->hasTrait<OpTrait::IsIsolatedFromAbove>()) {
-    while (Operation *parent = op->getParentOp()) {
-      op = parent;
-      if (op->hasTrait<OpTrait::IsIsolatedFromAbove>())
-        break;
-    }
-  }
-  return op;
-}
-
-// Property SSA refs model second-class SSA edges. They are scoped to the
-// nearest IsolatedFromAbove operation containing the replaced value, then
-// updated before native operand uses so transient IR does not mix old property
-// refs with already-rewritten operands. For replaceUsesWithIf, property refs
+// Property SSA refs model second-class SSA edges. They are tracked by a
+// secondary intrusive list on ValueImpl. For replaceUsesWithIf, property refs
 // cannot be matched against an OpOperand predicate directly; the approximation
 // is to update property refs owned by operations that had at least one selected
 // ordinary operand use.
@@ -102,7 +81,9 @@ bool Value::hasNUsesOrMore(unsigned n) const {
 //===----------------------------------------------------------------------===//
 
 void Value::replaceAllUsesWith(Value newValue) {
-  replacePropertySSAValue(getPropertySSAUseSearchRoot(*this), *this, newValue);
+  assert(*this != newValue && "cannot RAUW a value with itself");
+  while (!property_use_empty())
+    property_use_begin()->set(newValue);
   impl->replaceAllUsesWith(newValue);
 }
 
@@ -111,9 +92,11 @@ void Value::replaceAllUsesWith(Value newValue) {
 /// listed in 'exceptions' .
 void Value::replaceAllUsesExcept(
     Value newValue, const SmallPtrSetImpl<Operation *> &exceptions) {
-  replacePropertySSAValueIf(
-      getPropertySSAUseSearchRoot(*this), *this, newValue,
-      [&](Operation *op) { return exceptions.count(op) == 0; });
+  for (PropertySSAUse &use :
+       llvm::make_early_inc_range(getPropertyUses())) {
+    if (exceptions.count(use.getOwner()) == 0)
+      use.set(newValue);
+  }
   for (OpOperand &use : llvm::make_early_inc_range(getUses())) {
     if (exceptions.count(use.getOwner()) == 0)
       use.set(newValue);
@@ -124,9 +107,11 @@ void Value::replaceAllUsesExcept(
 /// IR that uses 'this' to use the other value instead except if the user is
 /// 'exceptedUser'.
 void Value::replaceAllUsesExcept(Value newValue, Operation *exceptedUser) {
-  replacePropertySSAValueIf(
-      getPropertySSAUseSearchRoot(*this), *this, newValue,
-      [&](Operation *op) { return op != exceptedUser; });
+  for (PropertySSAUse &use :
+       llvm::make_early_inc_range(getPropertyUses())) {
+    if (use.getOwner() != exceptedUser)
+      use.set(newValue);
+  }
   for (OpOperand &use : llvm::make_early_inc_range(getUses())) {
     if (use.getOwner() != exceptedUser)
       use.set(newValue);
@@ -138,19 +123,37 @@ void Value::replaceAllUsesExcept(Value newValue, Operation *exceptedUser) {
 void Value::replaceUsesWithIf(Value newValue,
                               function_ref<bool(OpOperand &)> shouldReplace) {
   llvm::SmallPtrSet<OpOperand *, 8> replacedUses;
+  llvm::SmallPtrSet<Operation *, 8> replacedOwners;
   for (OpOperand &use : getUses())
-    if (shouldReplace(use))
+    if (shouldReplace(use)) {
       replacedUses.insert(&use);
-  replacePropertySSAValueIf(
-      getPropertySSAUseSearchRoot(*this), *this, newValue,
-      [&](Operation *owner) {
-        return llvm::any_of(owner->getOpOperands(), [&](OpOperand &operand) {
-          return replacedUses.contains(&operand);
-        });
-      });
+      replacedOwners.insert(use.getOwner());
+    }
+  for (PropertySSAUse &use :
+       llvm::make_early_inc_range(getPropertyUses())) {
+    if (replacedOwners.contains(use.getOwner()))
+      use.set(newValue);
+  }
   for (OpOperand &use : llvm::make_early_inc_range(getUses()))
     if (replacedUses.contains(&use))
       use.set(newValue);
+}
+
+void Value::dropAllPropertyUses() {
+  while (!property_use_empty())
+    property_use_begin()->drop();
+}
+
+SmallVector<Operation *> Value::getAllUsers() const {
+  SmallVector<Operation *> users;
+  llvm::SmallPtrSet<Operation *, 8> seen;
+  for (Operation *user : getUsers())
+    if (seen.insert(user).second)
+      users.push_back(user);
+  for (Operation *user : getPropertyUsers())
+    if (seen.insert(user).second)
+      users.push_back(user);
+  return users;
 }
 
 /// Returns true if the value is used outside of the given block.

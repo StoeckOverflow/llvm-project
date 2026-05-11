@@ -18,7 +18,10 @@
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/Region.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Twine.h"
+#include <memory>
 #include <optional>
 
 namespace mlir {
@@ -880,6 +883,20 @@ public:
   /// Returns true if this operation has no uses.
   bool use_empty() { return getResults().use_empty(); }
 
+  /// Returns true if this operation's results have no property SSA uses.
+  bool property_use_empty() {
+    return llvm::all_of(getOpResults(), [](OpResult result) {
+      return result.property_use_empty();
+    });
+  }
+
+  /// Returns true if this operation's results have no native or property SSA
+  /// uses.
+  bool all_use_empty() {
+    return llvm::all_of(getOpResults(),
+                        [](OpResult result) { return result.all_use_empty(); });
+  }
+
   /// Returns true if the results of this operation are used outside of the
   /// given block.
   bool isUsedOutsideOfBlock(Block *block) {
@@ -1098,6 +1115,9 @@ private:
   /// This holds general named attributes for the operation.
   DictionaryAttr attrs;
 
+  /// Intrusive property SSA uses owned by this operation.
+  SmallVector<std::unique_ptr<PropertySSAUse>> propertySSAUses;
+
   // allow ilist_traits access to 'block' field.
   friend struct llvm::ilist_traits<Operation>;
 
@@ -1106,6 +1126,14 @@ private:
 
   // allow value to access the 'ResultStorage' methods.
   friend class Value;
+
+  // allow property SSA helpers to register and refresh property use nodes.
+  friend void registerPropertySSAUses(Operation *);
+  friend void refreshPropertySSAUses(Operation *);
+  friend void dropPropertySSAUses(Operation *);
+  friend void remapPropertySSAValues(Operation *, IRMapping &);
+  friend void replaceUsesOfWithIncludingPropertySSAUses(Operation *, Value,
+                                                       Value);
 
   // allow ilist_node_with_parent to access the 'getParent' method.
   friend class llvm::ilist_node_with_parent<Operation, Block>;

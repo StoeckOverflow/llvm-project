@@ -26,8 +26,8 @@
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/MapVector.h"
-#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallVectorExtras.h"
 
 #include "mlir/Dialect/Func/IR/FuncOpsDialect.cpp.inc"
@@ -56,8 +56,9 @@ static ParseResult parseDependentTensorAwareFunctionSignature(
               if (failed(argPresent.value()))
                 return failure();
               if (!arguments.empty() && arguments.back().ssaName.name.empty())
-                return parser.emitError(argument.ssaName.location,
-                                        "expected type instead of SSA identifier");
+                return parser.emitError(
+                    argument.ssaName.location,
+                    "expected type instead of SSA identifier");
             } else {
               argument.ssaName.location = parser.getCurrentLocation();
               if (!arguments.empty() && !arguments.back().ssaName.name.empty())
@@ -122,13 +123,14 @@ static ParseResult parseDependentTensorTypesBoundary(
       return failure();
     auto it = functionArgIndices.find(normalizeSSAName(arg.name));
     if (it == functionArgIndices.end())
-      return parser.emitError(arg.location,
-                              "dependent tensor boundary values must be function arguments");
+      return parser.emitError(
+          arg.location,
+          "dependent tensor boundary values must be function arguments");
     unsigned argIndex = it->second;
     auto rankedType = dyn_cast<RankedTensorType>(argTypes[argIndex]);
     if (!rankedType)
-      return parser.emitError(arg.location,
-                              "dependent tensor boundary requires ranked tensor");
+      return parser.emitError(
+          arg.location, "dependent tensor boundary requires ranked tensor");
     PendingDependentTensorValueSemantics info;
     info.valueIndex = argIndex;
     info.type = rankedType;
@@ -147,8 +149,9 @@ static ParseResult parseDependentTensorTypesBoundary(
       -> ParseResult {
     auto resultType = dyn_cast<RankedTensorType>(resultTypes[resultIndex]);
     if (!resultType)
-      return parser.emitError(parser.getCurrentLocation(),
-                              "dependent tensor boundary requires ranked tensor");
+      return parser.emitError(
+          parser.getCurrentLocation(),
+          "dependent tensor boundary requires ranked tensor");
     PendingDependentTensorValueSemantics resultInfo;
     resultInfo.valueIndex = resultIndex;
     resultInfo.type = resultType;
@@ -188,8 +191,9 @@ static ParseResult resolveDependentTensorTypesBoundary(
   if (pendingArgSemantics.empty() && pendingResultSemantics.empty())
     return success();
   if (body.empty())
-    return parser.emitError(parser.getCurrentLocation(),
-                            "dependent tensor function boundaries require a body");
+    return parser.emitError(
+        parser.getCurrentLocation(),
+        "dependent tensor function boundaries require a body");
 
   DenseMap<StringRef, Value> functionArgNames;
   functionArgNames.reserve(entryArgs.size());
@@ -200,20 +204,22 @@ static ParseResult resolveDependentTensorTypesBoundary(
       functionArgNames.try_emplace(name, value);
   }
 
-  auto resolveOne = [&](const PendingDependentTensorValueSemantics &pending,
-                        SmallVectorImpl<DependentTensorValueSemantics> &out)
-      -> ParseResult {
+  auto resolveOne =
+      [&](const PendingDependentTensorValueSemantics &pending,
+          SmallVectorImpl<DependentTensorValueSemantics> &out) -> ParseResult {
     DependentTensorValueSemantics info;
     info.valueIndex = pending.valueIndex;
     info.rank = pending.type.getRank();
     for (const OpAsmParser::UnresolvedOperand &dim : pending.dims) {
       auto it = functionArgNames.find(normalizeSSAName(dim.name));
       if (it == functionArgNames.end())
-        return parser.emitError(dim.location,
-                                "dependent tensor boundary dims must be function arguments");
+        return parser.emitError(
+            dim.location,
+            "dependent tensor boundary dims must be function arguments");
       if (!it->second.getType().isIndex())
-        return parser.emitError(dim.location,
-                                "dependent tensor boundary dims must be index values");
+        return parser.emitError(
+            dim.location,
+            "dependent tensor boundary dims must be index values");
       info.dimValues.push_back(it->second);
     }
     out.push_back(std::move(info));
@@ -351,9 +357,7 @@ LogicalResult ConstantOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
   return success();
 }
 
-OpFoldResult ConstantOp::fold(FoldAdaptor adaptor) {
-  return getValueAttr();
-}
+OpFoldResult ConstantOp::fold(FoldAdaptor adaptor) { return getValueAttr(); }
 
 void ConstantOp::getAsmResultNames(
     function_ref<void(Value, StringRef)> setNameFn) {
@@ -431,13 +435,15 @@ ParseResult FuncOp::parse(OpAsmParser &parser, OperationState &result) {
     return failure();
   for (OpAsmParser::Argument &arg : entryArgs) {
     if (hasDependentTensorSeedArgsAttr(arg.attrs))
-      return parser.emitError(arg.ssaName.location,
-                              "dependent_tensor.seed_args is no longer supported");
+      return parser.emitError(
+          arg.ssaName.location,
+          "dependent_tensor.seed_args is no longer supported");
   }
   for (DictionaryAttr attrs : resultAttrs) {
     if (hasDependentTensorSeedArgsAttr(attrs))
-      return parser.emitError(signatureLocation,
-                              "dependent_tensor.seed_args is no longer supported");
+      return parser.emitError(
+          signatureLocation,
+          "dependent_tensor.seed_args is no longer supported");
   }
 
   std::string errorMessage;
@@ -453,15 +459,17 @@ ParseResult FuncOp::parse(OpAsmParser &parser, OperationState &result) {
            << "failed to construct function type"
            << (errorMessage.empty() ? "" : ": ") << errorMessage;
   }
-  result.addAttribute(getFunctionTypeAttrName(result.name), TypeAttr::get(type));
+  result.addAttribute(getFunctionTypeAttrName(result.name),
+                      TypeAttr::get(type));
 
   NamedAttrList parsedAttributes;
   SMLoc attributeDictLocation = parser.getCurrentLocation();
   if (parser.parseOptionalAttrDictWithKeyword(parsedAttributes))
     return failure();
   if (parsedAttributes.get("dependent_tensor.seed_args"))
-    return parser.emitError(attributeDictLocation,
-                            "dependent_tensor.seed_args is no longer supported");
+    return parser.emitError(
+        attributeDictLocation,
+        "dependent_tensor.seed_args is no longer supported");
 
   for (StringRef disallowed :
        {SymbolTable::getVisibilityAttrName(), SymbolTable::getSymbolAttrName(),
@@ -481,8 +489,8 @@ ParseResult FuncOp::parse(OpAsmParser &parser, OperationState &result) {
 
   SmallVector<PendingDependentTensorValueSemantics> pendingArgSemantics;
   SmallVector<PendingDependentTensorValueSemantics> pendingResultSemantics;
-  if (parseDependentTensorTypesBoundary(parser, entryArgs, argTypes, resultTypes,
-                                        pendingArgSemantics,
+  if (parseDependentTensorTypesBoundary(parser, entryArgs, argTypes,
+                                        resultTypes, pendingArgSemantics,
                                         pendingResultSemantics))
     return failure();
 
@@ -531,7 +539,8 @@ void FuncOp::print(OpAsmPrinter &p) {
     llvm::interleaveComma(argSemantics, p, [&](const auto &semantics) {
       p.printOperand(getArgument(semantics.valueIndex));
       p << " : ";
-      auto type = cast<RankedTensorType>(getArgument(semantics.valueIndex).getType());
+      auto type =
+          cast<RankedTensorType>(getArgument(semantics.valueIndex).getType());
       dependent_tensor::printTensorSpec(p, semantics.dimValues,
                                         type.getElementType());
     });
@@ -653,6 +662,7 @@ FuncOp FuncOp::clone(IRMapping &mapper) {
 
   /// Clone the current function into the new one and return it.
   cloneInto(newFunc, mapper);
+  remapPropertySSAValues(newFunc, mapper);
   return newFunc;
 }
 FuncOp FuncOp::clone() {

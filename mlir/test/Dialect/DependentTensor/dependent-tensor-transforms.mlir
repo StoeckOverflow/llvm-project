@@ -141,6 +141,13 @@ func.func @replace_scf_for_semantics() {
 
 // -----
 
+func.func @check_property_use_list_api(%dim: index, %t: tensor<?xf32>)
+    #types[%t : #tensor<[%dim], f32>] {
+  return
+}
+
+// -----
+
 func.func @keep_property_only_dim(%r: index) -> tensor<?xf32>
     #types[] -> #tensor<[%r], f32> {
   %m = arith.constant 8 : index

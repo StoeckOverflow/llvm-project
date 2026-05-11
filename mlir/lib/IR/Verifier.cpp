@@ -77,19 +77,6 @@ private:
 };
 } // namespace
 
-/// Return true when a property SSA reference can be checked as an ordinary
-/// owner-site use of `owner`. Some operation properties describe boundary
-/// metadata for values defined in regions nested under the owner operation
-/// itself. Those references have dialect-specific semantics and are not
-/// ordinary uses at the owner operation location.
-static bool isOwnerSitePropertySSAUse(Operation &owner, Value value) {
-  if (Operation *defOp = value.getDefiningOp())
-    return !owner.isAncestor(defOp);
-  auto blockArg = cast<BlockArgument>(value);
-  Operation *argOwner = blockArg.getOwner()->getParentOp();
-  return !argOwner || !owner.isAncestor(argOwner);
-}
-
 LogicalResult OperationVerifier::verifyOpAndDominance(Operation &op) {
   // Verify the operation first, collecting any IsolatedFromAbove operations.
   if (failed(verifyOperation(op)))
@@ -469,18 +456,7 @@ OperationVerifier::verifyDominanceOfContainedRegions(Operation &op,
               return failure();
             }
 
-            LogicalResult propertyDominance = success();
-            walkPropertySSAValues(&op, [&](Value &value) {
-              if (failed(propertyDominance) ||
-                  !isOwnerSitePropertySSAUse(op, value))
-                return;
-              if (domInfo.properlyDominates(value, &op))
-                return;
-              propertyDominance =
-                  op.emitOpError()
-                  << "property SSA value does not dominate this operation";
-            });
-            if (failed(propertyDominance))
+            if (failed(verifyPropertySSAUseDominance(&op, domInfo)))
               return failure();
           }
 

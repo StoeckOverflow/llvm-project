@@ -26,6 +26,7 @@ class Operation;
 class OpOperand;
 class OpPrintingFlags;
 class OpResult;
+class PropertySSAUse;
 class Region;
 class Value;
 
@@ -34,6 +35,11 @@ class Value;
 //===----------------------------------------------------------------------===//
 
 namespace detail {
+
+class PropertySSAUseList : public IRObjectWithUseList<PropertySSAUse> {
+public:
+  PropertySSAUseList() = default;
+};
 
 /// The base class for all derived Value classes. It contains all of the
 /// components that are shared across Value classes.
@@ -68,6 +74,14 @@ public:
   /// Return the kind of this value.
   Kind getKind() const { return typeAndKind.getInt(); }
 
+  /// Return the secondary use-list for property SSA references.
+  IRObjectWithUseList<PropertySSAUse> &getPropertySSAUseList() {
+    return propertySSAUses;
+  }
+  const IRObjectWithUseList<PropertySSAUse> &getPropertySSAUseList() const {
+    return propertySSAUses;
+  }
+
 protected:
   ValueImpl(Type type, Kind kind) : typeAndKind(type, kind) {}
 
@@ -81,6 +95,9 @@ protected:
 
   /// The type of this result and the kind.
   llvm::PointerIntPair<Type, 3, Kind> typeAndKind;
+
+  /// Secondary use-list for SSA values referenced from operation properties.
+  PropertySSAUseList propertySSAUses;
 };
 } // namespace detail
 
@@ -205,6 +222,17 @@ public:
   /// Returns true if this value has no uses.
   bool use_empty() const { return impl->use_empty(); }
 
+  /// Drop all property SSA uses of this value from their respective owners.
+  void dropAllPropertyUses();
+
+  /// Returns true if this value has no property SSA uses.
+  bool property_use_empty() const {
+    return impl->getPropertySSAUseList().use_empty();
+  }
+
+  /// Returns true if this value has no native or property SSA uses.
+  bool all_use_empty() const { return use_empty() && property_use_empty(); }
+
   //===--------------------------------------------------------------------===//
   // Users
 
@@ -214,6 +242,39 @@ public:
   user_iterator user_begin() const { return use_begin(); }
   user_iterator user_end() const { return use_end(); }
   user_range getUsers() const { return {user_begin(), user_end()}; }
+
+  //===--------------------------------------------------------------------===//
+  // Property Uses
+
+  using property_use_iterator = ValueUseIterator<PropertySSAUse>;
+  using property_use_range = iterator_range<property_use_iterator>;
+
+  property_use_iterator property_use_begin() const {
+    return impl->getPropertySSAUseList().use_begin();
+  }
+  property_use_iterator property_use_end() const {
+    return property_use_iterator();
+  }
+  property_use_range getPropertyUses() const {
+    return {property_use_begin(), property_use_end()};
+  }
+
+  using property_user_iterator =
+      ValueUserIterator<property_use_iterator, PropertySSAUse>;
+  using property_user_range = iterator_range<property_user_iterator>;
+
+  property_user_iterator property_user_begin() const {
+    return property_user_iterator(property_use_begin());
+  }
+  property_user_iterator property_user_end() const {
+    return property_user_iterator(property_use_end());
+  }
+  property_user_range getPropertyUsers() const {
+    return {property_user_begin(), property_user_end()};
+  }
+
+  /// Return the unique set of native and property SSA users of this value.
+  SmallVector<Operation *> getAllUsers() const;
 
   //===--------------------------------------------------------------------===//
   // Utilities
@@ -267,6 +328,69 @@ private:
   /// only to avoid hard-to-debug typo/programming mistakes.
   friend class OperandStorage;
   using IROperand<OpOperand, Value>::IROperand;
+};
+
+//===----------------------------------------------------------------------===//
+// PropertySSAUse
+//===----------------------------------------------------------------------===//
+
+/// This class represents a second-class SSA use from an operation property.
+/// Unlike `OpOperand`, the use points at an existing `Value` slot owned by the
+/// operation's property storage.
+class PropertySSAUse : public detail::IROperandBase {
+public:
+  PropertySSAUse(Operation *owner, Value *slot)
+      : detail::IROperandBase(owner), slot(slot) {
+    if (Value value = get())
+      insertInto(getUseList(value));
+  }
+  PropertySSAUse(PropertySSAUse &&other)
+      : detail::IROperandBase(std::move(other)), slot(other.slot) {
+    other.slot = nullptr;
+    if (Value value = get())
+      insertInto(getUseList(value));
+  }
+  PropertySSAUse &operator=(PropertySSAUse &&other) = delete;
+
+  /// Provide the property use-list attached to the given value.
+  static IRObjectWithUseList<PropertySSAUse> *getUseList(Value value) {
+    return &value.getImpl()->getPropertySSAUseList();
+  }
+
+  /// Return the current value referenced by this property slot.
+  Value get() const { return slot ? *slot : Value(); }
+
+  /// Return the mutable property slot represented by this use.
+  Value *getSlot() const { return slot; }
+
+  /// Set the property slot to a new value and relink this use.
+  void set(Value newValue) {
+    removeFromCurrent();
+    if (slot)
+      *slot = newValue;
+    if (newValue)
+      insertInto(getUseList(newValue));
+  }
+
+  /// Returns true if this property use contains the given value.
+  bool is(Value value) const { return get() == value; }
+
+  /// Drop this property use and clear the underlying slot.
+  void drop() {
+    detail::IROperandBase::drop();
+    if (slot)
+      *slot = Value();
+  }
+
+  /// Unlink this property use without mutating the underlying property slot.
+  void unlink() {
+    removeFromCurrent();
+    nextUse = nullptr;
+    back = nullptr;
+  }
+
+private:
+  Value *slot = nullptr;
 };
 
 //===----------------------------------------------------------------------===//

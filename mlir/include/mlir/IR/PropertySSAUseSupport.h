@@ -15,6 +15,7 @@
 #include "mlir/IR/Value.h"
 
 namespace mlir {
+class DominanceInfo;
 class Operation;
 
 /// Properties may contain SSA `Value` references. These references are
@@ -24,6 +25,9 @@ class Operation;
 /// Operations that store such references expose their mutable slots with
 /// `PropertySSAUseOpInterface::walkPropertySSAValues`.
 void walkPropertySSAValues(Operation *op, function_ref<void(Value &)> callback);
+void registerPropertySSAUses(Operation *op);
+void refreshPropertySSAUses(Operation *op);
+void dropPropertySSAUses(Operation *op);
 void remapPropertySSAValues(Operation *op, IRMapping &mapping);
 void replacePropertySSAValue(Operation *root, Value from, Value to);
 void replacePropertySSAValueIf(
@@ -42,10 +46,30 @@ LogicalResult verifyNoPropertySSAUses(Value value, Operation *root,
 void replaceUsesOfWithIncludingPropertySSAUses(Operation *op, Value from,
                                                Value to);
 
-// TODO: Replace the scan-based property-use queries with an intrusive
-// PropertySSAUse list hanging off ValueImpl. That secondary list should remain
-// distinct from the native OpOperand use-list, but make all-use queries cheap
-// and improve release-mode erasure checks in generic transforms.
+/// Return true when `value` models an ordinary property SSA use at `owner`'s
+/// operation location. Some operation properties describe boundary metadata for
+/// values defined in regions nested under the owner itself; those references
+/// have dialect-specific semantics and are not ordinary owner-site uses.
+bool isOwnerSitePropertySSAUse(Operation *owner, Value value);
+
+/// Return true if `value` would be an illegal property capture by `owner`
+/// across the nearest IsolatedFromAbove boundary containing `owner`.
+bool crossesPropertySSAUseIsolatedFromAboveBoundary(Operation *owner,
+                                                    Value value);
+
+/// Verify generic SSA dominance/isolation for an owner-site property SSA use.
+/// Dialects are still responsible for stronger semantic rules attached to
+/// their property metadata.
+LogicalResult verifyPropertySSAUseDominance(Operation *owner, Value value,
+                                            DominanceInfo &dominance);
+LogicalResult verifyPropertySSAUseDominance(Operation *owner,
+                                            DominanceInfo &dominance);
+
+// Future direction: if property SSA references become common beyond
+// value-dependent type metadata, consider moving operation-owned
+// PropertySSAUse nodes into trailing storage instead of the current op-local
+// vector. Keep the list separate from native OpOperand uses unless MLIR
+// intentionally grows an opt-in merged use iterator.
 
 } // namespace mlir
 

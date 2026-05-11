@@ -11,34 +11,19 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PropertySSAUseSupport.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace mlir;
 
-#ifndef NDEBUG
 static bool isReferencedFromPropertySSAUses(Value value) {
-  Operation *root = nullptr;
-  if (Operation *parentOp = value.getParentBlock()->getParentOp()) {
-    root = parentOp;
-    while (!root->hasTrait<OpTrait::IsIsolatedFromAbove>()) {
-      Operation *ancestor = root->getParentOp();
-      if (!ancestor)
-        break;
-      root = ancestor;
-    }
-  }
-  if (!root)
-    return false;
-  bool referenced = false;
-  root->walk([&](Operation *op) {
-    walkPropertySSAValues(op, [&](Value &propertyValue) {
-      referenced |= propertyValue == value;
-    });
-  });
-  return referenced;
+  return !value.property_use_empty();
 }
-#endif
+
+static bool hasArgumentsReferencedFromPropertySSAUses(Block *block) {
+  return llvm::any_of(block->getArguments(), isReferencedFromPropertySSAUses);
+}
 
 //===----------------------------------------------------------------------===//
 // Block
@@ -92,6 +77,9 @@ void Block::moveBefore(Region *region, llvm::iplist<Block>::iterator iterator) {
 /// Unlink this Block from its parent Region and delete it.
 void Block::erase() {
   assert(getParent() && "Block has no parent");
+  if (LLVM_UNLIKELY(hasArgumentsReferencedFromPropertySSAUses(this)))
+    llvm::report_fatal_error(
+        "cannot erase block with arguments referenced from property SSA uses");
   getParent()->getBlocks().erase(this);
 }
 
@@ -224,8 +212,9 @@ BlockArgument Block::insertArgument(args_iterator it, Type type, Location loc) {
 
 void Block::eraseArgument(unsigned index) {
   assert(index < arguments.size());
-  assert(!isReferencedFromPropertySSAUses(arguments[index]) &&
-         "cannot erase block argument referenced from property SSA uses");
+  if (LLVM_UNLIKELY(isReferencedFromPropertySSAUses(arguments[index])))
+    llvm::report_fatal_error(
+        "cannot erase block argument referenced from property SSA uses");
   arguments[index].destroy();
   arguments.erase(arguments.begin() + index);
   for (BlockArgument arg : llvm::drop_begin(arguments, index))

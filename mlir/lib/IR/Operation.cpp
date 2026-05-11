@@ -27,29 +27,13 @@
 
 using namespace mlir;
 
-#ifndef NDEBUG
 static bool isResultReferencedFromPropertySSAUses(Operation *op) {
   if (!op || op->getNumResults() == 0)
     return false;
-  Operation *root = op;
-  while (!root->hasTrait<OpTrait::IsIsolatedFromAbove>()) {
-    Operation *ancestor = root->getParentOp();
-    if (!ancestor)
-      break;
-    root = ancestor;
-  }
-
-  bool referenced = false;
-  root->walk([&](Operation *candidate) {
-    walkPropertySSAValues(candidate, [&](Value &propertyValue) {
-      if (llvm::isa_and_present<OpResult>(propertyValue) &&
-          propertyValue.getDefiningOp() == op)
-        referenced = true;
-    });
+  return llvm::any_of(op->getResults(), [](Value result) {
+    return !result.property_use_empty();
   });
-  return referenced;
 }
-#endif
 
 //===----------------------------------------------------------------------===//
 // Operation
@@ -172,6 +156,7 @@ Operation *Operation::create(Location location, OperationName name,
 
   // This must be done after properties are initalized.
   op->setAttrs(attributes);
+  registerPropertySSAUses(op);
 
   return op;
 }
@@ -202,6 +187,7 @@ Operation::Operation(Location location, OperationName name, unsigned numResults,
 // allocated via malloc.
 Operation::~Operation() {
   assert(block == nullptr && "operation destroyed but still in a block");
+  dropPropertySSAUses(this);
 #ifndef NDEBUG
   if (!use_empty()) {
     {
@@ -381,14 +367,19 @@ LogicalResult Operation::setPropertiesFromAttribute(
   std::optional<RegisteredOperationName> info = getRegisteredInfo();
   if (LLVM_UNLIKELY(!info)) {
     *getPropertiesStorage().as<Attribute *>() = attr;
+    refreshPropertySSAUses(this);
     return success();
   }
-  return info->setOpPropertiesFromAttribute(
+  LogicalResult result = info->setOpPropertiesFromAttribute(
       this->getName(), this->getPropertiesStorage(), attr, emitError);
+  if (succeeded(result))
+    refreshPropertySSAUses(this);
+  return result;
 }
 
 void Operation::copyProperties(OpaqueProperties rhs) {
   name.copyOpProperties(getPropertiesStorage(), rhs);
+  refreshPropertySSAUses(this);
 }
 
 llvm::hash_code Operation::hashProperties() {
@@ -556,8 +547,9 @@ void llvm::ilist_traits<::mlir::Operation>::transferNodesFromList(
 /// Remove this operation (and its descendants) from its Block and delete
 /// all of them.
 void Operation::erase() {
-  assert(!isResultReferencedFromPropertySSAUses(this) &&
-         "cannot erase operation with results referenced from property SSA uses");
+  if (LLVM_UNLIKELY(isResultReferencedFromPropertySSAUses(this)))
+    llvm::report_fatal_error(
+        "cannot erase operation with results referenced from property SSA uses");
   if (auto *parent = getBlock())
     parent->getOperations().erase(this);
   else

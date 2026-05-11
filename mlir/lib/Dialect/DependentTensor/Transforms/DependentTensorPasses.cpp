@@ -10,6 +10,7 @@
 #include "mlir/Dialect/DependentTensor/Transforms/Passes.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Dominance.h"
+#include "mlir/IR/PropertySSAUseSupport.h"
 #include "llvm/ADT/DenseSet.h"
 
 namespace mlir {
@@ -23,8 +24,9 @@ using namespace mlir;
 using namespace mlir::dependent_tensor;
 
 namespace {
-static FailureOr<TensorValueSemantics> buildInfoFromStored(
-    RankedTensorType type, const DependentTensorValueSemantics &stored) {
+static FailureOr<TensorValueSemantics>
+buildInfoFromStored(RankedTensorType type,
+                    const DependentTensorValueSemantics &stored) {
   if (stored.rank != type.getRank() ||
       stored.dimValues.size() != static_cast<size_t>(type.getRank()))
     return failure();
@@ -38,25 +40,25 @@ static FailureOr<TensorValueSemantics> buildInfoFromStored(
   return info;
 }
 
-static LogicalResult verifyStoredTensorSemantics(
-    Operation *owner, StringRef kind, Type type,
-    const DependentTensorValueSemantics &stored, unsigned expectedIndex,
-    DominanceInfo &dominance, Operation *dominanceUseSite = nullptr,
-    func::FuncOp funcBoundaryOwner = nullptr) {
+static LogicalResult
+verifyStoredTensorSemantics(Operation *owner, StringRef kind, Type type,
+                            const DependentTensorValueSemantics &stored,
+                            unsigned expectedIndex, DominanceInfo &dominance,
+                            Operation *dominanceUseSite = nullptr,
+                            func::FuncOp funcBoundaryOwner = nullptr) {
   auto rankedType = dyn_cast<RankedTensorType>(type);
   if (!rankedType)
     return owner->emitOpError() << "requires ranked tensor type for dependent "
                                 << kind << " semantics";
   if (stored.valueIndex != expectedIndex)
-    return owner->emitOpError() << "has dependent " << kind
-                                << " semantics for wrong value index";
-  if (stored.rank != rankedType.getRank())
-    return owner->emitOpError() << "requires dependent " << kind
-                                << " rank to match tensor rank";
-  if (stored.dimValues.size() != static_cast<size_t>(rankedType.getRank()))
     return owner->emitOpError()
-           << "requires one dependent dimension value per " << kind
-           << " tensor dimension";
+           << "has dependent " << kind << " semantics for wrong value index";
+  if (stored.rank != rankedType.getRank())
+    return owner->emitOpError()
+           << "requires dependent " << kind << " rank to match tensor rank";
+  if (stored.dimValues.size() != static_cast<size_t>(rankedType.getRank()))
+    return owner->emitOpError() << "requires one dependent dimension value per "
+                                << kind << " tensor dimension";
 
   for (auto [dim, dimValue] : llvm::enumerate(stored.dimValues)) {
     if (!rankedType.isDynamicDim(dim))
@@ -64,22 +66,15 @@ static LogicalResult verifyStoredTensorSemantics(
              << "requires dependent " << kind
              << " dimensions to correspond to dynamic tensor dimensions";
     if (!dimValue)
-      return owner->emitOpError() << "has null dependent " << kind
-                                  << " dimension value";
+      return owner->emitOpError()
+             << "has null dependent " << kind << " dimension value";
     if (!dimValue.getType().isIndex())
       return owner->emitOpError() << "requires index-typed dependent " << kind
                                   << " dimension values";
-    if (Operation *isolated = owner->getParentWithTrait<OpTrait::IsIsolatedFromAbove>()) {
-      Operation *dimOwner = dimValue.getDefiningOp();
-      if (!dimOwner) {
-        auto arg = cast<BlockArgument>(dimValue);
-        dimOwner = arg.getOwner() ? arg.getOwner()->getParentOp() : nullptr;
-      }
-      if (dimOwner && dimOwner != isolated && !isolated->isAncestor(dimOwner))
-        return owner->emitOpError()
-               << "dependent " << kind
-               << " dimension value illegally crosses an IsolatedFromAbove boundary";
-    }
+    if (crossesPropertySSAUseIsolatedFromAboveBoundary(owner, dimValue))
+      return owner->emitOpError() << "dependent " << kind
+                                  << " dimension value illegally crosses an "
+                                     "IsolatedFromAbove boundary";
     if (funcBoundaryOwner) {
       auto arg = dyn_cast<BlockArgument>(dimValue);
       if (!arg || funcBoundaryOwner.isExternal() ||
@@ -112,8 +107,7 @@ static LogicalResult verifyFuncBoundaryProperties(func::FuncOp func,
   for (const DependentTensorValueSemantics &stored :
        func.getProperties().dependentTensorArgSemantics) {
     if (!seenArgSemantics.insert(stored.valueIndex).second)
-      return func.emitOpError()
-             << "has duplicate dependent argument semantics";
+      return func.emitOpError() << "has duplicate dependent argument semantics";
     if (stored.valueIndex >= func.getNumArguments())
       return func.emitOpError()
              << "has dependent argument semantics out of range";
@@ -129,7 +123,8 @@ static LogicalResult verifyFuncBoundaryProperties(func::FuncOp func,
     if (!seenResultSemantics.insert(stored.valueIndex).second)
       return func.emitOpError() << "has duplicate dependent result semantics";
     if (stored.valueIndex >= func.getNumResults())
-      return func.emitOpError() << "has dependent result semantics out of range";
+      return func.emitOpError()
+             << "has dependent result semantics out of range";
     if (failed(verifyStoredTensorSemantics(
             func, "result", func.getResultTypes()[stored.valueIndex], stored,
             stored.valueIndex, dominance, /*dominanceUseSite=*/nullptr, func)))
@@ -151,9 +146,9 @@ static LogicalResult verifyInterfaceProperties(Operation *op,
         iface.getDependentTensorResultSemantics(result.getResultNumber());
     if (failed(stored))
       continue;
-    if (failed(verifyStoredTensorSemantics(
-            op, "result", result.getType(), *stored, result.getResultNumber(),
-            dominance)))
+    if (failed(verifyStoredTensorSemantics(op, "result", result.getType(),
+                                           *stored, result.getResultNumber(),
+                                           dominance)))
       return failure();
   }
 
@@ -189,14 +184,15 @@ static LogicalResult verifyReturnSemantics(func::FuncOp func,
       continue;
     }
 
-    auto rankedResultType = dyn_cast<RankedTensorType>(func.getResultTypes()[i]);
+    auto rankedResultType =
+        dyn_cast<RankedTensorType>(func.getResultTypes()[i]);
     auto expected = buildInfoFromStored(rankedResultType, *stored);
     if (failed(actual) || failed(expected))
       return ret.emitOpError()
              << "failed to resolve dependent_tensor result semantics";
     if (!haveEqualSemantics(*actual, *expected))
-      return ret.emitOpError()
-             << "returned value does not match function result dependency metadata";
+      return ret.emitOpError() << "returned value does not match function "
+                                  "result dependency metadata";
   }
   return success();
 }
@@ -214,13 +210,14 @@ static LogicalResult verifyCallSemantics(func::CallOp call) {
     auto actual = getValueSemantics(operand);
     if (!stored) {
       if (succeeded(actual))
-        return call.emitOpError()
-               << "operand #" << i
-               << " carries dependent_tensor semantics not declared by the callee";
+        return call.emitOpError() << "operand #" << i
+                                  << " carries dependent_tensor semantics not "
+                                     "declared by the callee";
       continue;
     }
 
-    auto rankedArgType = dyn_cast<RankedTensorType>(callee.getArgumentTypes()[i]);
+    auto rankedArgType =
+        dyn_cast<RankedTensorType>(callee.getArgumentTypes()[i]);
     SmallVector<Value> mappedDims;
     mappedDims.reserve(stored->dimValues.size());
     for (Value dimValue : stored->dimValues) {
@@ -228,9 +225,9 @@ static LogicalResult verifyCallSemantics(func::CallOp call) {
       if (!arg || callee.isExternal() ||
           arg.getOwner() != &callee.getBody().front() ||
           arg.getArgNumber() >= call.getNumOperands())
-        return call.emitOpError()
-               << "failed to map callee dependent_tensor semantics for operand #"
-               << i;
+        return call.emitOpError() << "failed to map callee dependent_tensor "
+                                     "semantics for operand #"
+                                  << i;
       mappedDims.push_back(call.getOperand(arg.getArgNumber()));
     }
     DependentTensorValueSemantics mapped = *stored;
@@ -284,7 +281,8 @@ struct VerifyDependentTensorSemanticsPass
     : public dependent_tensor::impl::VerifyDependentTensorSemanticsPassBase<
           VerifyDependentTensorSemanticsPass> {
   using VerifyDependentTensorSemanticsPassBase<
-      VerifyDependentTensorSemanticsPass>::VerifyDependentTensorSemanticsPassBase;
+      VerifyDependentTensorSemanticsPass>::
+      VerifyDependentTensorSemanticsPassBase;
 
   void runOnOperation() override {
     ModuleOp module = getOperation();
