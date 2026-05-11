@@ -34,7 +34,6 @@ using namespace mlir;
 namespace mlir {
 void registerCloneTestPasses();
 void registerConvertToTargetEnvPass();
-void registerDependentTensorEqualityTestPasses();
 void registerLazyLoadingTestPasses();
 void registerLoopLikeInterfaceTestPasses();
 void registerPassManagerTestPass();
@@ -92,6 +91,7 @@ void registerTestControlFlowSink();
 void registerTestConvertToSPIRVPass();
 void registerTestDataLayoutQuery();
 void registerTestDeadCodeAnalysisPass();
+void registerDependentTensorTestPasses();
 void registerTestDecomposeCallGraphTypes();
 void registerTestDiagnosticsPass();
 void registerTestDiagnosticsMetadataPass();
@@ -184,7 +184,6 @@ void registerTestTransformsTransformDialectExtension(DialectRegistry &);
 static void registerTestPasses() {
   registerCloneTestPasses();
   registerConvertToTargetEnvPass();
-  registerDependentTensorEqualityTestPasses();
   registerPrintTosaAvailabilityPass();
   registerLazyLoadingTestPasses();
   registerLoopLikeInterfaceTestPasses();
@@ -241,6 +240,7 @@ static void registerTestPasses() {
   mlir::test::registerTestConvertToSPIRVPass();
   mlir::test::registerTestDataLayoutQuery();
   mlir::test::registerTestDeadCodeAnalysisPass();
+  mlir::test::registerDependentTensorTestPasses();
   mlir::test::registerTestDecomposeCallGraphTypes();
   mlir::test::registerTestDiagnosticsPass();
   mlir::test::registerTestDiagnosticsMetadataPass();

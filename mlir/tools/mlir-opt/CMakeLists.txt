@@ -17,6 +17,7 @@ if(MLIR_INCLUDE_TESTS)
     MLIRArmSMETestPasses
     MLIRBufferizationTestPasses
     MLIRControlFlowTestPasses
+    MLIRDependentTensorTestPasses
     MLIRDLTITestPasses
     MLIRFuncTestPasses
     MLIRGPUTestPasses

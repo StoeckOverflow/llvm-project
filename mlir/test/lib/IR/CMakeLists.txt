@@ -7,7 +7,6 @@ add_mlir_library(MLIRTestIR
   TestClone.cpp
   TestDiagnostics.cpp
   TestDiagnosticsMetadata.cpp
-  TestDependentTensorEquality.cpp
   TestDominance.cpp
   TestFunc.cpp
   TestInterfaces.cpp

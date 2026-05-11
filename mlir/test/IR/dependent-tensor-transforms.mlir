@@ -1,5 +1,5 @@
-// RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(dependent-tensor-clone-local-producer))' | FileCheck %s --check-prefix=CLONE
-// RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(dependent-tensor-replace-dim-value))' | FileCheck %s --check-prefix=REMAP
+// RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-clone-local-producer))' | FileCheck %s --check-prefix=CLONE
+// RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-replace-dim-value))' | FileCheck %s --check-prefix=REMAP
 
 func.func @clone_anchor_remap() {
   %d = arith.constant 1 : index

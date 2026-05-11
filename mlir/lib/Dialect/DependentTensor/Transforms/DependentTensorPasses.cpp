@@ -15,11 +15,6 @@
 namespace mlir {
 namespace dependent_tensor {
 #define GEN_PASS_DEF_VERIFYDEPENDENTTENSORSEMANTICSPASS
-#define GEN_PASS_DEF_DEPENDENTTENSORCLONELOCALPRODUCERPASS
-#define GEN_PASS_DEF_DEPENDENTTENSORREPLACEDIMVALUEPASS
-#define GEN_PASS_DEF_DEPENDENTTENSORREPLACEFIRSTBLOCKARGPASS
-#define GEN_PASS_DEF_DEPENDENTTENSORREPLACEOPUSESPASS
-#define GEN_PASS_DEF_DEPENDENTTENSORCHECKPROPERTYUSESPASS
 #include "mlir/Dialect/DependentTensor/Transforms/Passes.h.inc"
 } // namespace dependent_tensor
 } // namespace mlir
@@ -325,123 +320,6 @@ struct VerifyDependentTensorSemanticsPass
     });
     if (scfWalk.wasInterrupted())
       return signalPassFailure();
-  }
-};
-
-struct DependentTensorCloneLocalProducerPass
-    : public dependent_tensor::impl::DependentTensorCloneLocalProducerPassBase<
-          DependentTensorCloneLocalProducerPass> {
-  using DependentTensorCloneLocalProducerPassBase<
-      DependentTensorCloneLocalProducerPass>::DependentTensorCloneLocalProducerPassBase;
-
-  void runOnOperation() override {
-    Block &entry = getOperation().getBody().front();
-    SmallVector<Operation *> toClone;
-    for (Operation &op : entry) {
-      if (op.hasTrait<OpTrait::IsTerminator>())
-        break;
-      toClone.push_back(&op);
-    }
-    if (toClone.empty())
-      return;
-
-    IRMapping mapping;
-    OpBuilder builder(getOperation().getContext());
-    builder.setInsertionPoint(entry.getTerminator());
-    for (Operation *op : toClone)
-      builder.clone(*op, mapping);
-  }
-};
-
-struct DependentTensorReplaceDimValuePass
-    : public dependent_tensor::impl::DependentTensorReplaceDimValuePassBase<
-          DependentTensorReplaceDimValuePass> {
-  using DependentTensorReplaceDimValuePassBase<
-      DependentTensorReplaceDimValuePass>::DependentTensorReplaceDimValuePassBase;
-
-  void runOnOperation() override {
-    SmallVector<Value> indexResults;
-    for (Operation &op : getOperation().getBody().front())
-      for (Value result : op.getResults())
-        if (result.getType().isIndex())
-          indexResults.push_back(result);
-    if (indexResults.size() < 2)
-      return;
-    indexResults.front().replaceAllUsesWith(indexResults[1]);
-  }
-};
-
-struct DependentTensorReplaceOpUsesPass
-    : public dependent_tensor::impl::DependentTensorReplaceOpUsesPassBase<
-          DependentTensorReplaceOpUsesPass> {
-  using DependentTensorReplaceOpUsesPassBase<
-      DependentTensorReplaceOpUsesPass>::DependentTensorReplaceOpUsesPassBase;
-
-  void runOnOperation() override {
-    SmallVector<Value> indexResults;
-    for (Operation &op : getOperation().getBody().front())
-      for (Value result : op.getResults())
-        if (result.getType().isIndex())
-          indexResults.push_back(result);
-    if (indexResults.size() < 2)
-      return;
-    for (Operation &op : getOperation().getBody().front())
-      replaceUsesOfWithIncludingDependentTensorProperties(
-          &op, indexResults.front(), indexResults[1]);
-  }
-};
-
-struct DependentTensorReplaceFirstBlockArgPass
-    : public dependent_tensor::impl::DependentTensorReplaceFirstBlockArgPassBase<
-          DependentTensorReplaceFirstBlockArgPass> {
-  using DependentTensorReplaceFirstBlockArgPassBase<
-      DependentTensorReplaceFirstBlockArgPass>::
-          DependentTensorReplaceFirstBlockArgPassBase;
-
-  void runOnOperation() override {
-    SmallVector<BlockArgument> indexArgs;
-    for (BlockArgument arg : getOperation().getArguments())
-      if (arg.getType().isIndex())
-        indexArgs.push_back(arg);
-    if (indexArgs.size() < 2)
-      return;
-    indexArgs.front().replaceAllUsesWith(indexArgs[1]);
-  }
-};
-
-struct DependentTensorCheckPropertyUsesPass
-    : public dependent_tensor::impl::DependentTensorCheckPropertyUsesPassBase<
-          DependentTensorCheckPropertyUsesPass> {
-  using DependentTensorCheckPropertyUsesPassBase<
-      DependentTensorCheckPropertyUsesPass>::
-          DependentTensorCheckPropertyUsesPassBase;
-
-  void runOnOperation() override {
-    Operation *root = getOperation();
-    Value value;
-    for (Operation &op : getOperation().getBody().front()) {
-      for (Value result : op.getResults()) {
-        if (result.getType().isIndex()) {
-          value = result;
-          break;
-        }
-      }
-      if (value)
-        break;
-    }
-    if (!value)
-      return;
-    if (!hasDependentTensorPropertyUses(value, root) ||
-        dependentTensorUseEmpty(value, root) ||
-        getDependentTensorPropertyUsers(value, root).empty()) {
-      root->emitOpError("expected dependent tensor property uses");
-      return signalPassFailure();
-    }
-    if (Operation *def = value.getDefiningOp())
-      if (!hasDependentTensorResultUses(def, root)) {
-        root->emitOpError("expected dependent tensor result uses");
-        return signalPassFailure();
-      }
   }
 };
 } // namespace
