@@ -30,6 +30,19 @@ func.func @return_insert_boundary(
   return %r : tensor<?x?xf32>
 }
 
+func.func @multi_result_boundary(
+    %m : index,
+    %n : index,
+    %a : tensor<?xf32>,
+    %b : tensor<?xf32>)
+    -> (tensor<?xf32>, tensor<?xf32>)
+    #types[
+      %a : #tensor<[%m], f32>,
+      %b : #tensor<[%n], f32>
+    ] -> [#tensor<[%m], f32>, #tensor<[%n], f32>] {
+  return %a, %b : tensor<?xf32>, tensor<?xf32>
+}
+
 // CHECK-LABEL: func.func @identity_with_boundary
 // CHECK-SAME: #types[%{{.*}} : #tensor<[%{{.*}}, %{{.*}}], f32>] -> #tensor<[%{{.*}}, %{{.*}}], f32>
 // CHECK-LABEL: func.func @call_and_return_boundary
@@ -39,3 +52,6 @@ func.func @return_insert_boundary(
 // CHECK-LABEL: func.func @return_insert_boundary
 // CHECK-SAME: #types[] -> #tensor<[%{{.*}}, %{{.*}}], f32>
 // CHECK: dependent_tensor.insert
+// CHECK-LABEL: func.func @multi_result_boundary
+// CHECK-SAME: #types[
+// CHECK-SAME: ] -> [#tensor<[%{{.*}}], f32>, #tensor<[%{{.*}}], f32>]

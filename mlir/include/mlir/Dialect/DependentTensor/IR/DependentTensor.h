@@ -23,7 +23,6 @@ namespace dependent_tensor {
 struct TensorValueSemantics {
   RankedTensorType type;
   SmallVector<Value, 4> dimValues;
-  SmallVector<std::string, 4> dimNames;
 };
 
 FailureOr<TensorValueSemantics> getValueSemantics(Value value);
@@ -34,8 +33,7 @@ FailureOr<bool> haveEqualDimSemantics(Value lhs, unsigned lhsDim, Value rhs,
                                       unsigned rhsDim);
 DependentTensorValueSemantics
 buildStoredSemantics(unsigned valueIndex, RankedTensorType type,
-                     ArrayRef<Value> dimValues,
-                     ArrayRef<std::string> dimNames = {});
+                     ArrayRef<Value> dimValues);
 FailureOr<TensorValueSemantics>
 decodeStoredSemantics(Value value,
                       const DependentTensorValueSemantics &stored);

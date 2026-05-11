@@ -15,18 +15,16 @@
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/SmallVector.h"
 #include <cstdint>
-#include <string>
 
 namespace mlir {
 struct DependentTensorValueSemantics {
   uint32_t valueIndex = 0;
   int64_t rank = 0;
-  SmallVector<std::string, 4> dimNames;
   SmallVector<Value, 4> dimValues;
 
   bool operator==(const DependentTensorValueSemantics &other) const {
     return valueIndex == other.valueIndex && rank == other.rank &&
-           dimNames == other.dimNames && dimValues == other.dimValues;
+           dimValues == other.dimValues;
   }
 };
 

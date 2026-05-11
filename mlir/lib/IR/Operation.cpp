@@ -29,7 +29,25 @@ using namespace mlir;
 
 #ifndef NDEBUG
 static bool isResultReferencedFromDependentTensorProperties(Operation *op) {
-  return false;
+  if (!op || op->getNumResults() == 0)
+    return false;
+  Operation *root = op;
+  while (!root->hasTrait<OpTrait::IsIsolatedFromAbove>()) {
+    Operation *ancestor = root->getParentOp();
+    if (!ancestor)
+      break;
+    root = ancestor;
+  }
+
+  bool referenced = false;
+  root->walk([&](Operation *candidate) {
+    walkDependentTensorPropertyValues(candidate, [&](Value &propertyValue) {
+      if (llvm::isa_and_present<OpResult>(propertyValue) &&
+          propertyValue.getDefiningOp() == op)
+        referenced = true;
+    });
+  });
+  return referenced;
 }
 #endif
 

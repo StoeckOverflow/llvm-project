@@ -30,27 +30,14 @@ static FailureOr<TensorValueSemantics> buildInfoFromStored(
   if (stored.rank != type.getRank() ||
       stored.dimValues.size() != static_cast<size_t>(type.getRank()))
     return failure();
-  if (!stored.dimNames.empty() &&
-      stored.dimNames.size() != static_cast<size_t>(type.getRank()))
-    return failure();
   TensorValueSemantics info{type, {}};
   info.dimValues.reserve(stored.dimValues.size());
-  info.dimNames.assign(stored.dimNames.begin(), stored.dimNames.end());
   for (Value dimValue : stored.dimValues) {
     if (!dimValue || !dimValue.getType().isIndex())
       return failure();
     info.dimValues.push_back(dimValue);
   }
   return info;
-}
-
-static LogicalResult verifyUniqueDimNames(Operation *op,
-                                          ArrayRef<std::string> dimNames) {
-  llvm::SmallDenseSet<StringRef> seen;
-  for (const std::string &name : dimNames)
-    if (!seen.insert(name).second)
-      return op->emitOpError("has duplicate dependent tensor dimension name");
-  return success();
 }
 
 static LogicalResult verifyStoredTensorSemantics(
@@ -72,13 +59,6 @@ static LogicalResult verifyStoredTensorSemantics(
     return owner->emitOpError()
            << "requires one dependent dimension value per " << kind
            << " tensor dimension";
-  if (!stored.dimNames.empty() &&
-      stored.dimNames.size() != static_cast<size_t>(rankedType.getRank()))
-    return owner->emitOpError()
-           << "requires one dependent dimension name per " << kind
-           << " tensor dimension";
-  if (failed(verifyUniqueDimNames(owner, stored.dimNames)))
-    return failure();
 
   for (auto [dim, dimValue] : llvm::enumerate(stored.dimValues)) {
     if (!rankedType.isDynamicDim(dim))

@@ -14,18 +14,12 @@ using namespace mlir::dependent_tensor;
 
 namespace {
 static FailureOr<TensorValueSemantics>
-buildValueSemantics(RankedTensorType type, ArrayRef<Value> dimValues,
-                    ArrayRef<std::string> dimNames = {}) {
+buildValueSemantics(RankedTensorType type, ArrayRef<Value> dimValues) {
   if (type.getRank() != static_cast<int64_t>(dimValues.size()))
-    return failure();
-  if (!dimNames.empty() &&
-      type.getRank() != static_cast<int64_t>(dimNames.size()))
     return failure();
 
   TensorValueSemantics info{type, {}};
   info.dimValues.reserve(dimValues.size());
-  if (!dimNames.empty())
-    info.dimNames.assign(dimNames.begin(), dimNames.end());
   for (Value dimValue : dimValues) {
     if (!dimValue || !dimValue.getType().isIndex())
       return failure();
@@ -35,23 +29,20 @@ buildValueSemantics(RankedTensorType type, ArrayRef<Value> dimValues,
 }
 
 static DependentTensorValueSemantics
-buildStored(unsigned valueIndex, RankedTensorType type, ArrayRef<Value> dimValues,
-            ArrayRef<std::string> dimNames = {}) {
+buildStored(unsigned valueIndex, RankedTensorType type,
+            ArrayRef<Value> dimValues) {
   DependentTensorValueSemantics stored;
   stored.valueIndex = valueIndex;
   stored.rank = type.getRank();
   stored.dimValues.assign(dimValues.begin(), dimValues.end());
-  if (!dimNames.empty())
-    stored.dimNames.assign(dimNames.begin(), dimNames.end());
   return stored;
 }
 
 static DependentTensorValueSemantics
 buildStoredFromRange(unsigned valueIndex, RankedTensorType type,
-                     ValueRange dimValues,
-                     ArrayRef<std::string> dimNames = {}) {
+                     ValueRange dimValues) {
   SmallVector<Value> values(dimValues.begin(), dimValues.end());
-  return buildStored(valueIndex, type, ArrayRef<Value>(values), dimNames);
+  return buildStored(valueIndex, type, ArrayRef<Value>(values));
 }
 
 template <typename Range>
@@ -87,16 +78,15 @@ getCallResultSemantics(OpResult result, func::CallOp call,
         return failure();
       mappedDims.push_back(call.getOperand(arg.getArgNumber()));
     }
-    return buildValueSemantics(rankedType, mappedDims, stored->dimNames);
+    return buildValueSemantics(rankedType, mappedDims);
   }
   return failure();
 }
 } // namespace
 
 DependentTensorValueSemantics dependent_tensor::buildStoredSemantics(
-    unsigned valueIndex, RankedTensorType type, ArrayRef<Value> dimValues,
-    ArrayRef<std::string> dimNames) {
-  return buildStored(valueIndex, type, dimValues, dimNames);
+    unsigned valueIndex, RankedTensorType type, ArrayRef<Value> dimValues) {
+  return buildStored(valueIndex, type, dimValues);
 }
 
 FailureOr<TensorValueSemantics> dependent_tensor::decodeStoredSemantics(
@@ -111,7 +101,7 @@ FailureOr<TensorValueSemantics> dependent_tensor::decodeStoredSemantics(
     valueIndex = arg.getArgNumber();
   if (stored.valueIndex != valueIndex || stored.rank != rankedType.getRank())
     return failure();
-  return buildValueSemantics(rankedType, stored.dimValues, stored.dimNames);
+  return buildValueSemantics(rankedType, stored.dimValues);
 }
 
 FailureOr<TensorValueSemantics> dependent_tensor::getValueSemantics(Value value) {

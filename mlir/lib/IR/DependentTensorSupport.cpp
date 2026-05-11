@@ -8,8 +8,6 @@ llvm::hash_code
 mlir::hash_value(const DependentTensorValueSemantics &semantics) {
   return llvm::hash_combine(
       semantics.valueIndex, semantics.rank,
-      llvm::hash_combine_range(semantics.dimNames.begin(),
-                               semantics.dimNames.end()),
       llvm::hash_combine_range(semantics.dimValues.begin(),
                                semantics.dimValues.end()));
 }

@@ -141,19 +141,40 @@ static ParseResult parseDependentTensorTypesBoundary(
 
   if (failed(parser.parseOptionalArrow()))
     return success();
-  if (resultTypes.size() != 1)
-    return parser.emitError(parser.getCurrentLocation(),
-                            "dependent tensor result boundary requires one result");
-  auto resultType = dyn_cast<RankedTensorType>(resultTypes.front());
-  if (!resultType)
-    return parser.emitError(parser.getCurrentLocation(),
-                            "dependent tensor boundary requires ranked tensor");
-  PendingDependentTensorValueSemantics resultInfo;
-  resultInfo.valueIndex = 0;
-  resultInfo.type = resultType;
-  if (dependent_tensor::parseTensorSpec(parser, resultType, resultInfo.dims))
+  auto parseResultSemantics =
+      [&](unsigned resultIndex,
+          SmallVectorImpl<PendingDependentTensorValueSemantics> &semantics)
+      -> ParseResult {
+    auto resultType = dyn_cast<RankedTensorType>(resultTypes[resultIndex]);
+    if (!resultType)
+      return parser.emitError(parser.getCurrentLocation(),
+                              "dependent tensor boundary requires ranked tensor");
+    PendingDependentTensorValueSemantics resultInfo;
+    resultInfo.valueIndex = resultIndex;
+    resultInfo.type = resultType;
+    if (dependent_tensor::parseTensorSpec(parser, resultType, resultInfo.dims))
+      return failure();
+    semantics.push_back(std::move(resultInfo));
+    return success();
+  };
+
+  if (resultTypes.size() == 1)
+    return parseResultSemantics(/*resultIndex=*/0, resultSemantics);
+
+  unsigned resultIndex = 0;
+  if (parser.parseCommaSeparatedList(
+          OpAsmParser::Delimiter::Square, [&]() -> ParseResult {
+            if (resultIndex >= resultTypes.size())
+              return parser.emitError(
+                  parser.getCurrentLocation(),
+                  "too many dependent tensor result boundary entries");
+            return parseResultSemantics(resultIndex++, resultSemantics);
+          }))
     return failure();
-  resultSemantics.push_back(std::move(resultInfo));
+  if (resultIndex != resultTypes.size())
+    return parser.emitError(parser.getCurrentLocation(),
+                            "expected one dependent tensor result boundary "
+                            "entry per function result");
   return success();
 }
 
@@ -516,11 +537,20 @@ void FuncOp::print(OpAsmPrinter &p) {
     });
     p << "]";
     if (!resultSemantics.empty()) {
-      const auto &semantics = resultSemantics.front();
       p << " -> ";
-      auto type = cast<RankedTensorType>(getFunctionType().getResult(semantics.valueIndex));
-      dependent_tensor::printTensorSpec(p, semantics.dimValues,
-                                        type.getElementType());
+      auto printResultSemantics = [&](const auto &semantics) {
+        auto type = cast<RankedTensorType>(
+            getFunctionType().getResult(semantics.valueIndex));
+        dependent_tensor::printTensorSpec(p, semantics.dimValues,
+                                          type.getElementType());
+      };
+      if (resultSemantics.size() == 1) {
+        printResultSemantics(resultSemantics.front());
+      } else {
+        p << "[";
+        llvm::interleaveComma(resultSemantics, p, printResultSemantics);
+        p << "]";
+      }
     }
   }
 
