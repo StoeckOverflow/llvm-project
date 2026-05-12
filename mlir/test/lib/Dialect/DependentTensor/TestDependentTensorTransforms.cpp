@@ -18,6 +18,9 @@
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "mlir/Transforms/Inliner.h"
+#include "mlir/Transforms/InliningUtils.h"
+#include "llvm/ADT/STLExtras.h"
 
 using namespace mlir;
 
@@ -46,6 +49,23 @@ static FailureOr<SmallVector<int32_t>> getDimPair(func::FuncOp func) {
   return SmallVector<int32_t>(attr.asArrayRef().begin(),
                               attr.asArrayRef().end());
 }
+
+struct TestDependentTensorInlinerInterface : public InlinerInterface {
+  using InlinerInterface::InlinerInterface;
+
+  bool isLegalToInline(Operation *call, Operation *callable,
+                       bool wouldBeCloned) const override {
+    return true;
+  }
+  bool isLegalToInline(Region *dest, Region *src, bool wouldBeCloned,
+                       IRMapping &valueMapping) const override {
+    return true;
+  }
+  bool isLegalToInline(Operation *op, Region *dest, bool wouldBeCloned,
+                       IRMapping &valueMapping) const override {
+    return true;
+  }
+};
 
 struct TestDependentTensorEqualityPass
     : public PassWrapper<TestDependentTensorEqualityPass,
@@ -270,6 +290,51 @@ struct TestDependentTensorDialectConversionRemapPass
   }
 };
 
+struct TestDependentTensorInlineCalleePass
+    : public PassWrapper<TestDependentTensorInlineCalleePass,
+                         OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(
+      TestDependentTensorInlineCalleePass)
+
+  StringRef getArgument() const final {
+    return "test-dependent-tensor-inline-callee";
+  }
+  StringRef getDescription() const final {
+    return "Exercise inliner remapping for dependent tensor property SSA uses";
+  }
+
+  void runOnOperation() override {
+    ModuleOp module = getOperation();
+    auto caller =
+        module.lookupSymbol<func::FuncOp>("inline_property_ssa_caller");
+    auto callee =
+        module.lookupSymbol<func::FuncOp>("inline_property_ssa_callee");
+    if (!caller || !callee)
+      return;
+
+    func::CallOp call;
+    caller.walk([&](func::CallOp candidate) {
+      if (!call && candidate.getCallee() == callee.getName())
+        call = candidate;
+    });
+    if (!call)
+      return;
+
+    InlinerConfig config;
+    TestDependentTensorInlinerInterface interface(&getContext());
+    if (failed(inlineRegion(interface, config.getCloneCallback(),
+                            &callee.getBody(), call, call.getArgOperands(),
+                            call.getResults(), call.getLoc(),
+                            /*shouldCloneInlinedRegion=*/true))) {
+      call.emitError() << "failed to inline dependent tensor callee";
+      signalPassFailure();
+      return;
+    }
+
+    call.erase();
+  }
+};
+
 struct TestDependentTensorReplaceDimValueExceptPass
     : public PassWrapper<TestDependentTensorReplaceDimValueExceptPass,
                          OperationPass<func::FuncOp>> {
@@ -308,6 +373,49 @@ struct TestDependentTensorReplaceDimValueExceptPass
       return;
 
     indexResults.front().replaceAllUsesExcept(indexResults[1], exceptedOwner);
+  }
+};
+
+struct TestDependentTensorRewriterReplaceDimValueExceptPass
+    : public PassWrapper<TestDependentTensorRewriterReplaceDimValueExceptPass,
+                         OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(
+      TestDependentTensorRewriterReplaceDimValueExceptPass)
+
+  StringRef getArgument() const final {
+    return "test-dependent-tensor-rewriter-replace-dim-value-except";
+  }
+  StringRef getDescription() const final {
+    return "Exercise RewriterBase::replaceAllUsesExcept for property-only refs";
+  }
+
+  void runOnOperation() override {
+    if (getOperation().getName() != "rewriter_replace_dim_value_except")
+      return;
+
+    SmallVector<Value> indexResults;
+    for (Operation &op : getOperation().getBody().front())
+      for (Value result : op.getResults())
+        if (result.getType().isIndex())
+          indexResults.push_back(result);
+    if (indexResults.size() < 2)
+      return;
+
+    Operation *exceptedOwner = nullptr;
+    for (Operation &op : getOperation().getBody().front()) {
+      walkDependentTensorPropertyValues(&op, [&](Value &propertyValue) {
+        if (!exceptedOwner && propertyValue == indexResults.front())
+          exceptedOwner = &op;
+      });
+      if (exceptedOwner)
+        break;
+    }
+    if (!exceptedOwner)
+      return;
+
+    IRRewriter rewriter(getOperation().getContext());
+    rewriter.replaceAllUsesExcept(indexResults.front(), indexResults[1],
+                                  exceptedOwner);
   }
 };
 
@@ -368,6 +476,61 @@ struct TestDependentTensorReplaceOpUsesPass
   }
 };
 
+struct TestDependentTensorRefreshPropertyUsesPass
+    : public PassWrapper<TestDependentTensorRefreshPropertyUsesPass,
+                         OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(
+      TestDependentTensorRefreshPropertyUsesPass)
+
+  StringRef getArgument() const final {
+    return "test-dependent-tensor-refresh-property-uses";
+  }
+  StringRef getDescription() const final {
+    return "Exercise property SSA use-list refresh after direct mutation";
+  }
+
+  void runOnOperation() override {
+    if (getOperation().getName() != "refresh_property_use_membership")
+      return;
+
+    SmallVector<Value> indexArgs;
+    for (BlockArgument arg : getOperation().getArguments())
+      if (arg.getType().isIndex())
+        indexArgs.push_back(arg);
+    if (indexArgs.size() < 2)
+      return signalPassFailure();
+
+    Value oldValue = indexArgs[0];
+    Value newValue = indexArgs[1];
+    bool replaced = false;
+    walkDependentTensorPropertyValues(
+        getOperation(), [&](Value &propertyValue) {
+          if (!replaced && propertyValue == oldValue) {
+            propertyValue = newValue;
+            replaced = true;
+          }
+        });
+    if (!replaced)
+      return signalPassFailure();
+
+    Operation *owner = getOperation();
+    refreshPropertySSAUses(owner);
+    if (!oldValue.property_use_empty() || newValue.property_use_empty()) {
+      getOperation().emitOpError("expected refreshed property SSA use-list");
+      return signalPassFailure();
+    }
+    if (!llvm::is_contained(newValue.getPropertyUsers(), owner)) {
+      getOperation().emitOpError("expected new value property user");
+      return signalPassFailure();
+    }
+    if (!oldValue.use_empty() || !newValue.use_empty()) {
+      getOperation().emitOpError(
+          "expected native use-list to stay operand-only");
+      return signalPassFailure();
+    }
+  }
+};
+
 struct TestDependentTensorReplaceFirstBlockArgPass
     : public PassWrapper<TestDependentTensorReplaceFirstBlockArgPass,
                          OperationPass<func::FuncOp>> {
@@ -407,6 +570,62 @@ struct TestDependentTensorCheckPropertyUsesPass
 
   void runOnOperation() override {
     Operation *root = getOperation();
+    if (getOperation().getName() == "check_repeated_property_users") {
+      Value value = getOperation().getArgument(0);
+      unsigned propertyUseCount = 0;
+      for (PropertySSAUse &use : value.getPropertyUses())
+        if (root->isAncestor(use.getOwner()))
+          ++propertyUseCount;
+      if (propertyUseCount != 3) {
+        root->emitOpError("expected three property SSA use nodes");
+        return signalPassFailure();
+      }
+      if (getDependentTensorPropertyUsers(value, root).size() != 2) {
+        root->emitOpError("expected two deduplicated property users");
+        return signalPassFailure();
+      }
+      return;
+    }
+
+    if (getOperation().getName() == "check_multi_result_property_use") {
+      Operation *producer = nullptr;
+      getOperation().walk([&](scf::IfOp ifOp) {
+        if (!producer)
+          producer = ifOp.getOperation();
+      });
+      if (!producer || producer->getNumResults() != 2)
+        return signalPassFailure();
+      if (producer->getResult(0).property_use_empty() ||
+          producer->getResult(0).all_use_empty()) {
+        root->emitOpError("expected first result to have property SSA use");
+        return signalPassFailure();
+      }
+      if (!producer->getResult(1).property_use_empty() ||
+          !producer->getResult(1).all_use_empty()) {
+        root->emitOpError("expected second result to be unused");
+        return signalPassFailure();
+      }
+      if (!hasDependentTensorResultUses(producer, root)) {
+        root->emitOpError("expected producer result property uses");
+        return signalPassFailure();
+      }
+      return;
+    }
+
+    if (getOperation().getName() == "check_func_boundary_property_users") {
+      Value value = getOperation().getArgument(0);
+      if (value.property_use_empty() || value.getPropertyUsers().empty()) {
+        root->emitOpError("expected function boundary property SSA use");
+        return signalPassFailure();
+      }
+      if (value.use_empty() || value.getUsers().empty()) {
+        root->emitOpError(
+            "expected native and property user queries to stay distinct");
+        return signalPassFailure();
+      }
+      return;
+    }
+
     if (getOperation().getName() == "check_property_use_list_api") {
       Value value = getOperation().getArgument(0);
       if (value.property_use_empty() || value.all_use_empty() ||
@@ -634,9 +853,12 @@ void registerDependentTensorTestPasses() {
   PassRegistration<TestDependentTensorReplaceDimValuePass>();
   PassRegistration<TestDependentTensorRewriterReplaceOpPass>();
   PassRegistration<TestDependentTensorDialectConversionRemapPass>();
+  PassRegistration<TestDependentTensorInlineCalleePass>();
   PassRegistration<TestDependentTensorReplaceDimValueExceptPass>();
+  PassRegistration<TestDependentTensorRewriterReplaceDimValueExceptPass>();
   PassRegistration<TestDependentTensorReplaceDimValueIfPass>();
   PassRegistration<TestDependentTensorReplaceOpUsesPass>();
+  PassRegistration<TestDependentTensorRefreshPropertyUsesPass>();
   PassRegistration<TestDependentTensorReplaceFirstBlockArgPass>();
   PassRegistration<TestDependentTensorCheckPropertyUsesPass>();
   PassRegistration<TestDependentTensorDceLocalDimsPass>();

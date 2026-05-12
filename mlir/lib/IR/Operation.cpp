@@ -27,12 +27,13 @@
 
 using namespace mlir;
 
-static bool isResultReferencedFromPropertySSAUses(Operation *op) {
+static Value getResultReferencedFromPropertySSAUses(Operation *op) {
   if (!op || op->getNumResults() == 0)
-    return false;
-  return llvm::any_of(op->getResults(), [](Value result) {
-    return !result.property_use_empty();
-  });
+    return {};
+  for (Value result : op->getResults())
+    if (!result.property_use_empty())
+      return result;
+  return {};
 }
 
 //===----------------------------------------------------------------------===//
@@ -547,9 +548,9 @@ void llvm::ilist_traits<::mlir::Operation>::transferNodesFromList(
 /// Remove this operation (and its descendants) from its Block and delete
 /// all of them.
 void Operation::erase() {
-  if (LLVM_UNLIKELY(isResultReferencedFromPropertySSAUses(this)))
-    llvm::report_fatal_error(
-        "cannot erase operation with results referenced from property SSA uses");
+  if (Value result = getResultReferencedFromPropertySSAUses(this);
+      LLVM_UNLIKELY(result))
+    reportFatalPropertySSAUseError(result, "erase operation");
   if (auto *parent = getBlock())
     parent->getOperations().erase(this);
   else
@@ -761,8 +762,7 @@ Operation *Operation::clone(IRMapping &mapper, const CloneOptions &options) {
     clonedResultTypes = getResultTypes();
 
   // Create the new operation.
-  auto *newOp = create(getLoc(), getName(),
-                       clonedResultTypes, operands, attrs,
+  auto *newOp = create(getLoc(), getName(), clonedResultTypes, operands, attrs,
                        getPropertiesStorage(), successors, getNumRegions());
   remapPropertySSAValues(newOp, mapper);
   mapper.map(this, newOp);
@@ -1403,7 +1403,7 @@ LogicalResult OpTrait::impl::verifyIsIsolatedFromAbove(Operation *isolatedOp) {
             return op.emitError("operation's operand is unlinked");
           if (!region.isAncestor(operandRegion)) {
             return op.emitOpError("using value defined outside the region")
-                   .attachNote(isolatedOp->getLoc())
+                       .attachNote(isolatedOp->getLoc())
                    << "required by region isolation constraints";
           }
         }
@@ -1419,7 +1419,8 @@ LogicalResult OpTrait::impl::verifyIsIsolatedFromAbove(Operation *isolatedOp) {
           }
           if (!region.isAncestor(valueRegion)) {
             propertyIsolation =
-                op.emitOpError("using property SSA value defined outside the region")
+                op.emitOpError(
+                      "using property SSA value defined outside the region")
                     .attachNote(isolatedOp->getLoc())
                 << "required by region isolation constraints";
           }

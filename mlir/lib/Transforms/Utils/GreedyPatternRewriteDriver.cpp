@@ -535,7 +535,7 @@ bool GreedyPatternRewriteDriver::processWorklist() {
             // the previous results.
             llvm::SmallDenseSet<Operation *> replacementOps;
             for (Value replacement : replacements) {
-              assert(replacement.use_empty() &&
+              assert(replacement.all_use_empty() &&
                      "folder reused existing op for one result but constant "
                      "materialization failed for another result");
               replacementOps.insert(replacement.getDefiningOp());

@@ -45,6 +45,7 @@ LogicalResult verifyNoPropertySSAUses(Value value, Operation *root,
                                       Location loc);
 void replaceUsesOfWithIncludingPropertySSAUses(Operation *op, Value from,
                                                Value to);
+void reportFatalPropertySSAUseError(Value value, StringRef action);
 
 /// Return true when `value` models an ordinary property SSA use at `owner`'s
 /// operation location. Some operation properties describe boundary metadata for

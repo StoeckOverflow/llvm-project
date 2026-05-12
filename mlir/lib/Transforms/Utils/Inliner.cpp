@@ -192,7 +192,7 @@ bool CGUseList::isDead(CallGraphNode *node) const {
   // If the parent operation isn't a symbol, simply check normal SSA deadness.
   Operation *nodeOp = node->getCallableRegion()->getParentOp();
   if (!isa<SymbolOpInterface>(nodeOp))
-    return isMemoryEffectFree(nodeOp) && nodeOp->use_empty();
+    return isMemoryEffectFree(nodeOp) && nodeOp->all_use_empty();
 
   // Otherwise, check the number of symbol uses.
   auto symbolIt = discardableSymNodeUses.find(node);
@@ -203,7 +203,8 @@ bool CGUseList::hasOneUseAndDiscardable(CallGraphNode *node) const {
   // If this isn't a symbol node, check for side-effects and SSA use count.
   Operation *nodeOp = node->getCallableRegion()->getParentOp();
   if (!isa<SymbolOpInterface>(nodeOp))
-    return isMemoryEffectFree(nodeOp) && nodeOp->hasOneUse();
+    return isMemoryEffectFree(nodeOp) && nodeOp->property_use_empty() &&
+           nodeOp->hasOneUse();
 
   // Otherwise, check the number of symbol uses.
   auto symbolIt = discardableSymNodeUses.find(node);

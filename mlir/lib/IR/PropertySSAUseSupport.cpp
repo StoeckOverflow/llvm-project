@@ -4,6 +4,8 @@
 #include "mlir/IR/Operation.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 #include <memory>
 
 using namespace mlir;
@@ -162,6 +164,26 @@ LogicalResult mlir::verifyNoPropertySSAUses(Value value, Operation *root,
   if (hasPropertySSAUses(value, root))
     return emitError(loc) << "value is referenced from property SSA uses";
   return success();
+}
+
+void mlir::reportFatalPropertySSAUseError(Value value, StringRef action) {
+  std::string message;
+  llvm::raw_string_ostream os(message);
+  os << "cannot " << action << "; ";
+  if (auto arg = dyn_cast<BlockArgument>(value)) {
+    os << "block argument #" << arg.getArgNumber();
+  } else if (Operation *defOp = value.getDefiningOp()) {
+    os << "result of '" << defOp->getName() << "' op";
+  } else {
+    os << "value";
+  }
+  os << " has live property SSA use";
+  for (PropertySSAUse &use : value.getPropertyUses()) {
+    os << " owned by '" << use.getOwner()->getName() << "' op";
+    break;
+  }
+  os.flush();
+  llvm::report_fatal_error(StringRef(message));
 }
 
 void mlir::replaceUsesOfWithIncludingPropertySSAUses(Operation *op, Value from,

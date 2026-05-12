@@ -709,10 +709,9 @@ public:
   /// `exceptedUser`. Also notify the listener about every in-place op
   /// modification (for every use that was replaced).
   void replaceAllUsesExcept(Value from, Value to, Operation *exceptedUser) {
-    return replaceUsesWithIf(from, to, [&](OpOperand &use) {
-      Operation *user = use.getOwner();
-      return user != exceptedUser;
-    });
+    SmallPtrSet<Operation *, 1> preservedUsers;
+    preservedUsers.insert(exceptedUser);
+    return replaceAllUsesExcept(from, to, preservedUsers);
   }
   void replaceAllUsesExcept(Value from, Value to,
                             const SmallPtrSetImpl<Operation *> &preservedUsers);

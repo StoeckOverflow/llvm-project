@@ -1854,7 +1854,7 @@ getReplacementValues(ConversionPatternRewriterImpl &impl, ValueRange fromRange,
          "this code path is valid only in 'no rollback' mode");
   SmallVector<Value> repls;
   for (auto [from, to] : llvm::zip_equal(fromRange, toRange)) {
-    if (from.use_empty()) {
+    if (from.all_use_empty()) {
       // The replaced value is dead. No replacement value is needed.
       repls.push_back(Value());
       continue;
@@ -2809,7 +2809,7 @@ LogicalResult OperationLegalizer::legalizeWithPattern(Operation *op) {
     if (!rewriterImpl.config.allowPatternRollback) {
       // Eagerly erase unused materializations.
       for (auto op : rewriterImpl.patternMaterializations) {
-        if (op->use_empty()) {
+        if (op->all_use_empty()) {
           rewriterImpl.unresolvedMaterializations.erase(op);
           op.erase();
         }
@@ -3353,7 +3353,7 @@ static LogicalResult
 legalizeUnresolvedMaterialization(RewriterBase &rewriter,
                                   UnrealizedConversionCastOp op,
                                   const UnresolvedMaterializationInfo &info) {
-  assert(!op.use_empty() &&
+  assert(!op->all_use_empty() &&
          "expected that dead materializations have already been DCE'd");
   Operation::operand_range inputOperands = op.getOperands();
 

@@ -17,12 +17,11 @@
 
 using namespace mlir;
 
-static bool isReferencedFromPropertySSAUses(Value value) {
-  return !value.property_use_empty();
-}
-
-static bool hasArgumentsReferencedFromPropertySSAUses(Block *block) {
-  return llvm::any_of(block->getArguments(), isReferencedFromPropertySSAUses);
+static Value getArgumentReferencedFromPropertySSAUses(Block *block) {
+  for (BlockArgument arg : block->getArguments())
+    if (!arg.property_use_empty())
+      return arg;
+  return {};
 }
 
 //===----------------------------------------------------------------------===//
@@ -77,9 +76,9 @@ void Block::moveBefore(Region *region, llvm::iplist<Block>::iterator iterator) {
 /// Unlink this Block from its parent Region and delete it.
 void Block::erase() {
   assert(getParent() && "Block has no parent");
-  if (LLVM_UNLIKELY(hasArgumentsReferencedFromPropertySSAUses(this)))
-    llvm::report_fatal_error(
-        "cannot erase block with arguments referenced from property SSA uses");
+  if (Value arg = getArgumentReferencedFromPropertySSAUses(this);
+      LLVM_UNLIKELY(arg))
+    reportFatalPropertySSAUseError(arg, "erase block");
   getParent()->getBlocks().erase(this);
 }
 
@@ -212,9 +211,8 @@ BlockArgument Block::insertArgument(args_iterator it, Type type, Location loc) {
 
 void Block::eraseArgument(unsigned index) {
   assert(index < arguments.size());
-  if (LLVM_UNLIKELY(isReferencedFromPropertySSAUses(arguments[index])))
-    llvm::report_fatal_error(
-        "cannot erase block argument referenced from property SSA uses");
+  if (LLVM_UNLIKELY(!arguments[index].property_use_empty()))
+    reportFatalPropertySSAUseError(arguments[index], "erase block argument");
   arguments[index].destroy();
   arguments.erase(arguments.begin() + index);
   for (BlockArgument arg : llvm::drop_begin(arguments, index))

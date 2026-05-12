@@ -1,6 +1,7 @@
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-clone-local-producer))' | FileCheck %s --check-prefix=CLONE
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-replace-dim-value))' | FileCheck %s --check-prefix=REMAP
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-replace-dim-value-except),verify-dependent-tensor-semantics)' | FileCheck %s --check-prefix=EXCEPT
+// RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-rewriter-replace-dim-value-except),verify-dependent-tensor-semantics)' | FileCheck %s --check-prefix=REWRITER-EXCEPT
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-replace-dim-value-if),verify-dependent-tensor-semantics)' | FileCheck %s --check-prefix=IFREMAP
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-replace-op-uses))' | FileCheck %s --check-prefix=OPREMAP
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-replace-first-block-arg))' | FileCheck %s --check-prefix=ARGREMAP
@@ -59,6 +60,23 @@ func.func @replace_dim_value_except() {
 // EXCEPT-NEXT: %[[KEPT:.*]] = dependent_tensor.make () #tensor<[%[[DIM]]], f32> : tensor<?xf32>
 // EXCEPT-NEXT: %[[UPDATED:.*]] = dependent_tensor.make () #tensor<[%[[REPLACEMENT]]], f32> : tensor<?xf32>
 // EXCEPT-NEXT: return
+
+// -----
+
+func.func @rewriter_replace_dim_value_except() {
+  %dim = arith.constant 1 : index
+  %replacement = arith.constant 2 : index
+  %kept = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
+  %updated = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
+  return
+}
+
+// REWRITER-EXCEPT-LABEL: func.func @rewriter_replace_dim_value_except
+// REWRITER-EXCEPT-NEXT: %[[DIM:.*]] = arith.constant 1 : index
+// REWRITER-EXCEPT-NEXT: %[[REPLACEMENT:.*]] = arith.constant 2 : index
+// REWRITER-EXCEPT-NEXT: %[[KEPT:.*]] = dependent_tensor.make () #tensor<[%[[DIM]]], f32> : tensor<?xf32>
+// REWRITER-EXCEPT-NEXT: %[[UPDATED:.*]] = dependent_tensor.make () #tensor<[%[[REPLACEMENT]]], f32> : tensor<?xf32>
+// REWRITER-EXCEPT-NEXT: return
 
 // -----
 

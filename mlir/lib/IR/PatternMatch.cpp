@@ -306,10 +306,17 @@ void RewriterBase::replaceAllUsesWith(Value from, Value to) {
 
 void RewriterBase::replaceAllUsesExcept(
     Value from, Value to, const SmallPtrSetImpl<Operation *> &preservedUsers) {
-  return replaceUsesWithIf(from, to, [&](OpOperand &use) {
-    Operation *user = use.getOwner();
-    return !preservedUsers.contains(user);
-  });
+  for (PropertySSAUse &use :
+       llvm::make_early_inc_range(from.getPropertyUses())) {
+    Operation *op = use.getOwner();
+    if (!preservedUsers.contains(op))
+      modifyOpInPlace(op, [&]() { use.set(to); });
+  }
+  for (OpOperand &operand : llvm::make_early_inc_range(from.getUses())) {
+    Operation *op = operand.getOwner();
+    if (!preservedUsers.contains(op))
+      modifyOpInPlace(op, [&]() { operand.set(to); });
+  }
 }
 
 void RewriterBase::replaceUsesWithIf(Value from, Value to,

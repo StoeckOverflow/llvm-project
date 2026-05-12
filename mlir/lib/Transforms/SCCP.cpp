@@ -93,7 +93,7 @@ static void rewrite(DataFlowSolver &solver, MLIRContext *context,
       // If all of the results of the operation were replaced, try to erase
       // the operation completely.
       if (replacedAll && wouldOpBeTriviallyDead(&op)) {
-        assert(op.use_empty() && "expected all uses to be replaced");
+        assert(op.all_use_empty() && "expected all uses to be replaced");
         op.erase();
         continue;
       }
