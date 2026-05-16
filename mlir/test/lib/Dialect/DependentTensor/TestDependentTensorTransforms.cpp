@@ -430,7 +430,7 @@ struct TestDependentTensorReplaceDimValueIfPass
     return "test-dependent-tensor-replace-dim-value-if";
   }
   StringRef getDescription() const final {
-    return "Exercise replaceUsesWithIf owner approximation for properties";
+    return "Exercise native-only replaceUsesWithIf behavior";
   }
 
   void runOnOperation() override {
@@ -445,8 +445,54 @@ struct TestDependentTensorReplaceDimValueIfPass
       return;
 
     indexArgs.front().replaceUsesWithIf(indexArgs[1], [](OpOperand &use) {
-      return isa<dependent_tensor::MakeOp>(use.getOwner());
+      return isa<arith::AddIOp>(use.getOwner());
     });
+  }
+};
+
+struct TestDependentTensorReplaceDimValueSSAIfPass
+    : public PassWrapper<TestDependentTensorReplaceDimValueSSAIfPass,
+                         OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(
+      TestDependentTensorReplaceDimValueSSAIfPass)
+
+  StringRef getArgument() const final {
+    return "test-dependent-tensor-replace-dim-value-ssa-if";
+  }
+  StringRef getDescription() const final {
+    return "Exercise replaceSSAUsesWithIf for precise property SSA refs";
+  }
+
+  void runOnOperation() override {
+    if (getOperation().getName() != "replace_dim_value_ssa_if" &&
+        getOperation().getName() != "rewriter_replace_dim_value_ssa_if")
+      return;
+
+    SmallVector<BlockArgument> indexArgs;
+    for (BlockArgument arg : getOperation().getArguments())
+      if (arg.getType().isIndex())
+        indexArgs.push_back(arg);
+    if (indexArgs.size() < 2)
+      return signalPassFailure();
+
+    auto shouldReplacePropertyOnly = [](SSAUse use) {
+      return use.isProperty();
+    };
+    if (getOperation().getName() == "replace_dim_value_ssa_if") {
+      indexArgs.front().replaceSSAUsesWithIf(indexArgs[1],
+                                             shouldReplacePropertyOnly);
+      return;
+    }
+
+    bool allUsesReplaced = true;
+    IRRewriter rewriter(getOperation().getContext());
+    rewriter.replaceSSAUsesWithIf(indexArgs.front(), indexArgs[1],
+                                  shouldReplacePropertyOnly, &allUsesReplaced);
+    if (allUsesReplaced) {
+      getOperation().emitOpError(
+          "expected native operand uses to remain unreplaced");
+      return signalPassFailure();
+    }
   }
 };
 
@@ -673,6 +719,72 @@ struct TestDependentTensorCheckPropertyUsesPass
       return;
     }
 
+    if (getOperation().getName() == "check_physical_unified_use_list_api") {
+      Value value = getOperation().getArgument(0);
+      unsigned nativeUseCount = llvm::range_size(value.getUses());
+      unsigned propertyUseCount = llvm::range_size(value.getPropertyUses());
+      unsigned allUseCount = llvm::range_size(value.getAllUses());
+      if (nativeUseCount == 0 || propertyUseCount == 0 ||
+          allUseCount != nativeUseCount + propertyUseCount) {
+        root->emitOpError("expected one raw use-list with filtered views");
+        return signalPassFailure();
+      }
+
+      SmallVector<unsigned> nativeIdentity;
+      for (unsigned i = 0; i < nativeUseCount; ++i)
+        nativeIdentity.push_back(i);
+      value.shuffleUseList(nativeIdentity);
+      if (llvm::range_size(value.getUses()) != nativeUseCount ||
+          llvm::range_size(value.getPropertyUses()) != propertyUseCount ||
+          llvm::range_size(value.getAllUses()) != allUseCount) {
+        root->emitOpError(
+            "expected native use-list shuffle to preserve property uses");
+        return signalPassFailure();
+      }
+
+      Value propertyOnly;
+      for (BlockArgument arg : getOperation().getArguments()) {
+        if (arg.use_empty() && !arg.property_use_empty()) {
+          propertyOnly = arg;
+          break;
+        }
+      }
+      for (Operation &op : getOperation().getBody().front()) {
+        if (propertyOnly)
+          break;
+        if (!isa<arith::ConstantIndexOp>(op))
+          continue;
+        Value result = op.getResult(0);
+        if (result.use_empty() && !result.property_use_empty()) {
+          propertyOnly = result;
+          break;
+        }
+      }
+      if (!propertyOnly)
+        return signalPassFailure();
+      if (!propertyOnly.use_empty() || propertyOnly.hasOneUse() ||
+          !propertyOnly.getUsers().empty()) {
+        root->emitOpError(
+            "expected native use queries to ignore property-only uses");
+        return signalPassFailure();
+      }
+      if (propertyOnly.property_use_empty() || propertyOnly.all_use_empty() ||
+          propertyOnly.getAllUsers().empty() ||
+          llvm::range_size(propertyOnly.getAllUses()) !=
+              llvm::range_size(propertyOnly.getPropertyUses())) {
+        root->emitOpError(
+            "expected all-use queries to include property-only uses");
+        return signalPassFailure();
+      }
+      propertyOnly.shuffleUseList({});
+      if (propertyOnly.property_use_empty() || propertyOnly.all_use_empty()) {
+        root->emitOpError(
+            "expected native empty shuffle to preserve property-only uses");
+        return signalPassFailure();
+      }
+      return;
+    }
+
     Value value;
     for (Operation &op : getOperation().getBody().front()) {
       for (Value result : op.getResults()) {
@@ -780,6 +892,7 @@ struct TestDependentTensorCorruptSemanticsPass
     ModuleOp module = getOperation();
     if (failed(corruptAndVerifyGenericPropertyDominance(module)))
       return signalPassFailure();
+    corruptSelfResultPropertyUse(module);
     corruptDominance(module);
     corruptCycleLikeDimension(module);
     corruptIsolatedCapture(module);
@@ -847,6 +960,17 @@ struct TestDependentTensorCorruptSemanticsPass
     setFirstPropertyValue(makeOp, lateIndex);
     DominanceInfo dominance(module);
     return verifyPropertySSAUseDominance(makeOp, dominance);
+  }
+
+  static void corruptSelfResultPropertyUse(ModuleOp module) {
+    auto func =
+        module.lookupSymbol<func::FuncOp>("generic_self_result_property_use");
+    if (!func)
+      return;
+    dependent_tensor::MakeOp makeOp = findFirstMake(func);
+    if (!makeOp)
+      return;
+    setFirstPropertyValue(makeOp, makeOp.getResult());
   }
 
   static void corruptCycleLikeDimension(ModuleOp module) {
@@ -918,6 +1042,44 @@ struct TestDependentTensorCorruptSemanticsPass
     forOp->setOperand(3, bodyMake.getResult());
   }
 };
+
+struct TestDependentTensorCorruptPropertyUseRegistrationPass
+    : public PassWrapper<TestDependentTensorCorruptPropertyUseRegistrationPass,
+                         OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(
+      TestDependentTensorCorruptPropertyUseRegistrationPass)
+
+  StringRef getArgument() const final {
+    return "test-dependent-tensor-corrupt-property-use-registration";
+  }
+  StringRef getDescription() const final {
+    return "Mutate property SSA values without refreshing use registration";
+  }
+
+  void runOnOperation() override {
+    if (getOperation().getName() != "stale_property_use_registration")
+      return;
+
+    SmallVector<BlockArgument> indexArgs;
+    for (BlockArgument arg : getOperation().getArguments())
+      if (arg.getType().isIndex())
+        indexArgs.push_back(arg);
+    if (indexArgs.size() < 2)
+      return signalPassFailure();
+
+    bool replaced = false;
+    getOperation()->walk([&](Operation *op) {
+      walkDependentTensorPropertyValues(op, [&](Value &propertyValue) {
+        if (!replaced && propertyValue == indexArgs[0]) {
+          propertyValue = indexArgs[1];
+          replaced = true;
+        }
+      });
+    });
+    if (!replaced)
+      return signalPassFailure();
+  }
+};
 } // namespace
 
 namespace mlir {
@@ -933,6 +1095,7 @@ void registerDependentTensorTestPasses() {
   PassRegistration<TestDependentTensorReplaceDimValueExceptPass>();
   PassRegistration<TestDependentTensorRewriterReplaceDimValueExceptPass>();
   PassRegistration<TestDependentTensorReplaceDimValueIfPass>();
+  PassRegistration<TestDependentTensorReplaceDimValueSSAIfPass>();
   PassRegistration<TestDependentTensorReplaceOpUsesPass>();
   PassRegistration<TestDependentTensorRefreshPropertyUsesPass>();
   PassRegistration<TestDependentTensorReplaceFirstBlockArgPass>();
@@ -940,6 +1103,7 @@ void registerDependentTensorTestPasses() {
   PassRegistration<TestDependentTensorDceLocalDimsPass>();
   PassRegistration<TestDependentTensorEraseLiveEntryBlockPass>();
   PassRegistration<TestDependentTensorCorruptSemanticsPass>();
+  PassRegistration<TestDependentTensorCorruptPropertyUseRegistrationPass>();
 }
 } // namespace test
 } // namespace mlir

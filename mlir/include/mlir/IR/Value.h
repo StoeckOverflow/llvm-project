@@ -176,10 +176,15 @@ public:
   /// 'exceptedUser'.
   void replaceAllUsesExcept(Value newValue, Operation *exceptedUser);
 
-  /// Replace all uses of 'this' value with 'newValue' if the given callback
-  /// returns true.
+  /// Replace all native operand uses of 'this' value with 'newValue' if the
+  /// given callback returns true.
   void replaceUsesWithIf(Value newValue,
                          function_ref<bool(OpOperand &)> shouldReplace);
+
+  /// Replace all native and property SSA uses of 'this' value with 'newValue'
+  /// if the given callback returns true.
+  void replaceSSAUsesWithIf(Value newValue,
+                            function_ref<bool(SSAUse)> shouldReplace);
 
   /// Returns true if the value is used outside of the given block.
   bool isUsedOutsideOfBlock(Block *block) const;

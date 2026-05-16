@@ -162,6 +162,46 @@ bool mlir::allResultsUseEmpty(Operation *op, Operation *root) {
   });
 }
 
+LogicalResult mlir::verifyPropertySSAUseRegistration(Operation *op) {
+  if (!op)
+    return success();
+
+  SmallVector<Value *> propertySlots;
+  walkPropertySSAValues(op,
+                        [&](Value &value) { propertySlots.push_back(&value); });
+  if (propertySlots.size() != op->propertySSAUses.size())
+    return op->emitOpError()
+           << "has stale property SSA use registration: expected "
+           << propertySlots.size() << " registered uses, got "
+           << op->propertySSAUses.size();
+
+  for (auto [index, usePtr] : llvm::enumerate(op->propertySSAUses)) {
+    PropertySSAUse &use = *usePtr;
+    if (use.getOwner() != op)
+      return op->emitOpError()
+             << "has property SSA use registration with incorrect owner";
+    if (use.getSlot() != propertySlots[index])
+      return op->emitOpError()
+             << "has stale property SSA use registration for property slot #"
+             << index;
+    Value value = use.get();
+    if (!value)
+      return op->emitOpError()
+             << "has null property SSA use registration for property slot #"
+             << index;
+    bool isLinkedToCurrentValue =
+        llvm::any_of(value.getPropertyUses(), [&](PropertySSAUse &candidate) {
+          return &candidate == &use;
+        });
+    if (!isLinkedToCurrentValue)
+      return op->emitOpError()
+             << "has stale property SSA use-list membership for property slot #"
+             << index;
+  }
+
+  return success();
+}
+
 LogicalResult mlir::verifyNoPropertySSAUses(Value value, Operation *root,
                                             Location loc) {
   if (hasPropertySSAUses(value, root))

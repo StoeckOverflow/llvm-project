@@ -214,6 +214,9 @@ LogicalResult OperationVerifier::verifyOnEntrance(Operation &op) {
              << " type from a different MLIRContext than this operation";
   }
 
+  if (failed(verifyPropertySSAUseRegistration(&op)))
+    return failure();
+
   /// Verify that all of the attributes are okay.
   for (auto attr : op.getDiscardableAttrDictionary()) {
     if (attr.getValue().getContext() != opCtx)

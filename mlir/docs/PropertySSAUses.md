@@ -94,15 +94,18 @@ Property SSA uses participate in the core replacement paths:
 
 * `Value::replaceAllUsesWith`
 * `Value::replaceAllUsesExcept`
-* `Value::replaceUsesWithIf`
+* `Value::replaceSSAUsesWithIf`
 * `RewriterBase::replaceOp`
 * `RewriterBase::replaceAllUsesWith`
-* `RewriterBase::replaceUsesWithIf`
+* `RewriterBase::replaceSSAUsesWithIf`
 
-`replaceUsesWithIf` keeps owner-approximation semantics. Its predicate receives
-an `OpOperand &`, not a property-use slot, so property refs are rewritten for
-owners that have selected native operand uses. Property-only owners are not
-directly selectable by that predicate.
+`replaceUsesWithIf` remains a native operand API. Its predicate receives an
+`OpOperand &`, and only ordinary operand uses are rewritten. It does not
+approximate property replacement through operation ownership.
+
+Use `replaceSSAUsesWithIf` when the predicate must see the exact semantic SSA
+use. Its predicate receives an `SSAUse`, so clients can distinguish ordinary
+operands from property references and select property-only users precisely.
 
 Clone and remap paths call `remapPropertySSAValues` so property-contained values
 follow `IRMapping`. This includes operation and region cloning paths that route
@@ -166,18 +169,26 @@ global replacement for verification. Transformations that directly mutate
 properties must keep property-use nodes in sync. Dialect-specific metadata
 semantics still need dialect-specific verification.
 
+The generic verifier checks that registered `PropertySSAUse` nodes are
+synchronized with the operation's current property `Value` slots and with the
+corresponding value use-list membership. This catches stale direct mutations
+where a property slot is changed but `refreshPropertySSAUses` is not called.
+
 ## Tests
 
 The dependent tensor tests exercise the current infrastructure:
 
 * `dependent-tensor-transforms.mlir` covers RAUW, `replaceAllUsesExcept`,
-  `replaceUsesWithIf`, clone/remap, unified `SSAUse` queries, CSE,
-  canonicalization, and property-aware local dimension DCE.
+  `replaceUsesWithIf`, precise `replaceSSAUsesWithIf`, clone/remap, unified
+  `SSAUse` queries, CSE, canonicalization, and property-aware local dimension
+  DCE.
 * `dependent-tensor-property-ssa-generic.mlir` covers direct
   `RewriterBase::replaceOp`, dialect conversion replacement, function-boundary
   cloning, `remove-dead-values`, and release-relevant block erasure guards.
 * `dependent-tensor-property-ssa-ir-verifier-errors.mlir` covers generic IR
   verifier isolation diagnostics.
+* `dependent-tensor-property-ssa-registration-errors.mlir` covers stale
+  property-use registration diagnostics after direct property mutation.
 * `dependent-tensor-semantic-errors.mlir` covers dependent tensor semantic
   dominance, isolation, function boundary, and loop-carried metadata errors.
 

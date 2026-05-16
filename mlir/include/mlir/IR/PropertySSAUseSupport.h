@@ -47,6 +47,11 @@ void replaceUsesOfWithIncludingPropertySSAUses(Operation *op, Value from,
                                                Value to);
 void reportFatalPropertySSAUseError(Value value, StringRef action);
 
+/// Verify that an operation's registered PropertySSAUse nodes are synchronized
+/// with the operation property Value slots and the corresponding value use-list
+/// membership.
+LogicalResult verifyPropertySSAUseRegistration(Operation *op);
+
 /// Return true when `value` models an ordinary property SSA use at `owner`'s
 /// operation location. Some operation properties describe boundary metadata for
 /// values defined in regions nested under the owner itself; those references

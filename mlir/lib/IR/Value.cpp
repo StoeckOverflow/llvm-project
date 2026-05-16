@@ -14,12 +14,6 @@
 using namespace mlir;
 using namespace mlir::detail;
 
-// Property SSA refs model second-class SSA edges. They are tracked by a
-// secondary intrusive list on ValueImpl. For replaceUsesWithIf, property refs
-// cannot be matched against an OpOperand predicate directly; the approximation
-// is to update property refs owned by operations that had at least one selected
-// ordinary operand use.
-
 /// If this value is the result of an Operation, return the operation that
 /// defines it.
 Operation *Value::getDefiningOp() const {
@@ -133,19 +127,18 @@ void Value::replaceAllUsesExcept(Value newValue, Operation *exceptedUser) {
 /// returns true.
 void Value::replaceUsesWithIf(Value newValue,
                               function_ref<bool(OpOperand &)> shouldReplace) {
-  llvm::SmallPtrSet<OpOperand *, 8> replacedUses;
-  llvm::SmallPtrSet<Operation *, 8> replacedOwners;
-  for (OpOperand &use : getUses())
-    if (shouldReplace(use)) {
-      replacedUses.insert(&use);
-      replacedOwners.insert(use.getOwner());
-    }
-  for (PropertySSAUse &use : llvm::make_early_inc_range(getPropertyUses())) {
-    if (replacedOwners.contains(use.getOwner()))
-      use.set(newValue);
-  }
   for (OpOperand &use : llvm::make_early_inc_range(getUses()))
-    if (replacedUses.contains(&use))
+    if (shouldReplace(use))
+      use.set(newValue);
+}
+
+void Value::replaceSSAUsesWithIf(Value newValue,
+                                 function_ref<bool(SSAUse)> shouldReplace) {
+  SmallVector<SSAUse> uses;
+  for (SSAUse use : getAllUses())
+    uses.push_back(use);
+  for (SSAUse use : uses)
+    if (use.get() == *this && shouldReplace(use))
       use.set(newValue);
 }
 

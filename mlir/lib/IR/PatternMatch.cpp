@@ -323,28 +323,12 @@ void RewriterBase::replaceUsesWithIf(Value from, Value to,
                                      function_ref<bool(OpOperand &)> functor,
                                      bool *allUsesReplaced) {
   bool allReplaced = true;
-  llvm::SmallPtrSet<OpOperand *, 8> replacedUses;
-  llvm::SmallPtrSet<Operation *, 8> replacedOwners;
-  for (OpOperand &operand : from.getUses()) {
+  for (OpOperand &operand : llvm::make_early_inc_range(from.getUses())) {
     bool replace = functor(operand);
-    if (replace) {
-      replacedUses.insert(&operand);
-      replacedOwners.insert(operand.getOwner());
-    }
     allReplaced &= replace;
-  }
-  for (PropertySSAUse &use :
-       llvm::make_early_inc_range(from.getPropertyUses())) {
-    Operation *op = use.getOwner();
-    bool replace = replacedOwners.contains(op);
-    if (replace) {
-      modifyOpInPlace(op, [&]() { use.set(to); });
-    }
-    allReplaced &= replace;
-  }
-  for (OpOperand &operand : llvm::make_early_inc_range(from.getUses()))
-    if (replacedUses.contains(&operand))
+    if (replace)
       modifyOpInPlace(operand.getOwner(), [&]() { operand.set(to); });
+  }
   if (allUsesReplaced)
     *allUsesReplaced = allReplaced;
 }
@@ -358,6 +342,40 @@ void RewriterBase::replaceUsesWithIf(ValueRange from, ValueRange to,
     bool r = true;
     replaceUsesWithIf(std::get<0>(it), std::get<1>(it), functor,
                       /*allUsesReplaced=*/allUsesReplaced ? &r : nullptr);
+    allReplaced &= r;
+  }
+  if (allUsesReplaced)
+    *allUsesReplaced = allReplaced;
+}
+
+void RewriterBase::replaceSSAUsesWithIf(Value from, Value to,
+                                        function_ref<bool(SSAUse)> functor,
+                                        bool *allUsesReplaced) {
+  bool allReplaced = true;
+  SmallVector<SSAUse> uses(llvm::to_vector(from.getAllUses()));
+  for (SSAUse use : uses) {
+    if (use.get() != from)
+      continue;
+    bool replace = functor(use);
+    allReplaced &= replace;
+    if (!replace)
+      continue;
+    Operation *op = use.getOwner();
+    modifyOpInPlace(op, [&]() { use.set(to); });
+  }
+  if (allUsesReplaced)
+    *allUsesReplaced = allReplaced;
+}
+
+void RewriterBase::replaceSSAUsesWithIf(ValueRange from, ValueRange to,
+                                        function_ref<bool(SSAUse)> functor,
+                                        bool *allUsesReplaced) {
+  assert(from.size() == to.size() && "incorrect number of replacements");
+  bool allReplaced = true;
+  for (auto it : llvm::zip_equal(from, to)) {
+    bool r = true;
+    replaceSSAUsesWithIf(std::get<0>(it), std::get<1>(it), functor,
+                         /*allUsesReplaced=*/allUsesReplaced ? &r : nullptr);
     allReplaced &= r;
   }
   if (allUsesReplaced)

@@ -1144,6 +1144,7 @@ private:
   friend void remapPropertySSAValues(Operation *, IRMapping &);
   friend void replaceUsesOfWithIncludingPropertySSAUses(Operation *, Value,
                                                         Value);
+  friend LogicalResult verifyPropertySSAUseRegistration(Operation *);
 
   // allow ilist_node_with_parent to access the 'getParent' method.
   friend class llvm::ilist_node_with_parent<Operation, Block>;

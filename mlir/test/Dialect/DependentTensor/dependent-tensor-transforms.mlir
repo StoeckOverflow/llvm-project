@@ -3,6 +3,7 @@
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-replace-dim-value-except),verify-dependent-tensor-semantics)' | FileCheck %s --check-prefix=EXCEPT
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-rewriter-replace-dim-value-except),verify-dependent-tensor-semantics)' | FileCheck %s --check-prefix=REWRITER-EXCEPT
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-replace-dim-value-if),verify-dependent-tensor-semantics)' | FileCheck %s --check-prefix=IFREMAP
+// RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-replace-dim-value-ssa-if),verify-dependent-tensor-semantics)' | FileCheck %s --check-prefix=SSAIF
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-replace-op-uses))' | FileCheck %s --check-prefix=OPREMAP
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-replace-first-block-arg))' | FileCheck %s --check-prefix=ARGREMAP
 // RUN: mlir-opt %s -pass-pipeline='builtin.module(func.func(test-dependent-tensor-check-property-uses))'
@@ -80,22 +81,50 @@ func.func @rewriter_replace_dim_value_except() {
 
 // -----
 
-// replaceUsesWithIf predicates receive OpOperand &, not dependent tensor
-// property slots. The owner approximation updates property refs on an owner
-// with a selected ordinary operand use, while property-only refs on other
-// owners remain unchanged.
+// replaceUsesWithIf remains a native OpOperand API. Property refs are not
+// approximated through their owner; use replaceSSAUsesWithIf for semantic uses.
 func.func @replace_dim_value_if(%dim: index, %replacement: index,
                                 %boundary: tensor<?xf32>)
     #types[%boundary : #tensor<[%dim], f32>] {
-  %selected = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
+  %selected = arith.addi %dim, %dim : index
   return
 }
 
 // IFREMAP-LABEL: func.func @replace_dim_value_if
 // IFREMAP-SAME: (%[[DIM:.*]]: index, %[[REPLACEMENT:.*]]: index, %[[BOUNDARY:.*]]: tensor<?xf32>)
 // IFREMAP-SAME: #types[%[[BOUNDARY]] : #tensor<[%[[DIM]]], f32>]
-// IFREMAP-NEXT: %[[SELECTED:.*]] = dependent_tensor.make () #tensor<[%[[REPLACEMENT]]], f32> : tensor<?xf32>
+// IFREMAP-NEXT: %[[SELECTED:.*]] = arith.addi %[[REPLACEMENT]], %[[REPLACEMENT]] : index
 // IFREMAP-NEXT: return
+
+// -----
+
+func.func @replace_dim_value_ssa_if(%dim: index, %replacement: index,
+                                    %t: tensor<?xf32>)
+    #types[%t : #tensor<[%dim], f32>] {
+  %native = arith.addi %dim, %dim : index
+  return
+}
+
+// SSAIF-LABEL: func.func @replace_dim_value_ssa_if
+// SSAIF-SAME: (%[[DIM:.*]]: index, %[[REPLACEMENT:.*]]: index, %[[T:.*]]: tensor<?xf32>)
+// SSAIF-SAME: #types[%[[T]] : #tensor<[%[[REPLACEMENT]]], f32>]
+// SSAIF-NEXT: %[[NATIVE:.*]] = arith.addi %[[DIM]], %[[DIM]] : index
+// SSAIF-NEXT: return
+
+// -----
+
+func.func @rewriter_replace_dim_value_ssa_if(%dim: index, %replacement: index,
+                                             %t: tensor<?xf32>)
+    #types[%t : #tensor<[%dim], f32>] {
+  %native = arith.addi %dim, %dim : index
+  return
+}
+
+// SSAIF-LABEL: func.func @rewriter_replace_dim_value_ssa_if
+// SSAIF-SAME: (%[[DIM:.*]]: index, %[[REPLACEMENT:.*]]: index, %[[T:.*]]: tensor<?xf32>)
+// SSAIF-SAME: #types[%[[T]] : #tensor<[%[[REPLACEMENT]]], f32>]
+// SSAIF-NEXT: %[[NATIVE:.*]] = arith.addi %[[DIM]], %[[DIM]] : index
+// SSAIF-NEXT: return
 
 // -----
 
@@ -168,6 +197,20 @@ func.func @check_property_use_list_api(%dim: index, %t: tensor<?xf32>)
   %result = scf.for %iv = %lb to %ub step %step iter_args(%arg = %t) -> (tensor<?xf32>) {
     scf.yield %arg : tensor<?xf32>
   }
+  return
+}
+
+// -----
+
+func.func @check_physical_unified_use_list_api(%dim: index,
+                                               %property_only: index,
+                                               %t: tensor<?xf32>,
+                                               %boundary: tensor<?xf32>)
+    #types[%t : #tensor<[%dim], f32>, %boundary : #tensor<[%property_only], f32>] {
+  %unused_property_dim = arith.constant 8 : index
+  %one = arith.constant 1 : index
+  %native = arith.addi %dim, %one : index
+  %selected = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
   return
 }
 
