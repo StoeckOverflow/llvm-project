@@ -12,6 +12,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Dominance.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/PropertySSAUseSupport.h"
@@ -633,9 +634,40 @@ struct TestDependentTensorCheckPropertyUsesPass
         root->emitOpError("expected intrusive property SSA uses");
         return signalPassFailure();
       }
-      if (!value.use_empty() || !value.getUsers().empty()) {
+      unsigned nativeUseCount = llvm::range_size(value.getUses());
+      unsigned propertyUseCount = llvm::range_size(value.getPropertyUses());
+      unsigned allUseCount = llvm::range_size(value.getAllUses());
+      if (nativeUseCount == 0 || propertyUseCount == 0 ||
+          allUseCount != nativeUseCount + propertyUseCount) {
+        root->emitOpError()
+            << "expected unified SSA use range to include native and property "
+               "uses, got native="
+            << nativeUseCount << ", property=" << propertyUseCount
+            << ", all=" << allUseCount;
+        return signalPassFailure();
+      }
+      scf::ForOp forOp;
+      getOperation().walk([&](scf::ForOp candidate) {
+        if (!forOp)
+          forOp = candidate;
+      });
+      unsigned ownerOperandUseCount = 0;
+      unsigned ownerPropertyUseCount = 0;
+      if (forOp)
+        forOp->walkSSAUses([&](SSAUse use) {
+          if (use.isOperand())
+            ++ownerOperandUseCount;
+          else
+            ++ownerPropertyUseCount;
+        });
+      if (!forOp || ownerOperandUseCount == 0 || ownerPropertyUseCount == 0) {
+        root->emitOpError("expected operation unified SSA use walk to include "
+                          "native and property uses");
+        return signalPassFailure();
+      }
+      if (value.use_empty() || value.getUsers().empty()) {
         root->emitOpError(
-            "expected native use-list to ignore property SSA uses");
+            "expected native use-list to remain operand-only but non-empty");
         return signalPassFailure();
       }
       return;
@@ -746,7 +778,10 @@ struct TestDependentTensorCorruptSemanticsPass
 
   void runOnOperation() override {
     ModuleOp module = getOperation();
+    if (failed(corruptAndVerifyGenericPropertyDominance(module)))
+      return signalPassFailure();
     corruptDominance(module);
+    corruptCycleLikeDimension(module);
     corruptIsolatedCapture(module);
     corruptFuncBoundaryIsolatedCapture(module);
     corruptScfForBoundaryDominance(module);
@@ -787,6 +822,47 @@ struct TestDependentTensorCorruptSemanticsPass
       for (Value result : op.getResults())
         if (result.getType().isIndex())
           lateIndex = result;
+    if (lateIndex)
+      setFirstPropertyValue(makeOp, lateIndex);
+  }
+
+  static LogicalResult
+  corruptAndVerifyGenericPropertyDominance(ModuleOp module) {
+    auto func =
+        module.lookupSymbol<func::FuncOp>("generic_bad_property_dominance");
+    if (!func)
+      return success();
+    dependent_tensor::MakeOp makeOp = findFirstMake(func);
+    if (!makeOp)
+      return success();
+
+    Value lateIndex;
+    for (Operation &op : func.getBody().front())
+      for (Value result : op.getResults())
+        if (result.getType().isIndex())
+          lateIndex = result;
+    if (!lateIndex)
+      return success();
+
+    setFirstPropertyValue(makeOp, lateIndex);
+    DominanceInfo dominance(module);
+    return verifyPropertySSAUseDominance(makeOp, dominance);
+  }
+
+  static void corruptCycleLikeDimension(ModuleOp module) {
+    auto func =
+        module.lookupSymbol<func::FuncOp>("semantic_cycle_like_dimension");
+    if (!func)
+      return;
+    dependent_tensor::MakeOp makeOp = findFirstMake(func);
+    if (!makeOp)
+      return;
+
+    Value lateIndex;
+    func.walk([&](dependent_tensor::DimOp dimOp) {
+      if (!lateIndex)
+        lateIndex = dimOp.getResult();
+    });
     if (lateIndex)
       setFirstPropertyValue(makeOp, lateIndex);
   }

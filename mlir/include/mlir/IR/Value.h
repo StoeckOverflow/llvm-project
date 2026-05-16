@@ -28,7 +28,12 @@ class OpPrintingFlags;
 class OpResult;
 class PropertySSAUse;
 class Region;
+class SSAUse;
+class ValueAllUseIterator;
 class Value;
+
+/// Classify the storage kind backing an SSA use.
+enum class SSAUseKind { Operand, Property };
 
 //===----------------------------------------------------------------------===//
 // Value
@@ -233,6 +238,17 @@ public:
   /// Returns true if this value has no native or property SSA uses.
   bool all_use_empty() const { return use_empty() && property_use_empty(); }
 
+  /// This class implements an iterator over native and property SSA uses.
+  using all_use_iterator = ValueAllUseIterator;
+  using all_use_range = iterator_range<all_use_iterator>;
+
+  all_use_iterator all_use_begin() const;
+  all_use_iterator all_use_end() const;
+
+  /// Return a range of native and property SSA uses. Native-only APIs above
+  /// intentionally retain their historical operand-only meaning.
+  all_use_range getAllUses() const;
+
   //===--------------------------------------------------------------------===//
   // Users
 
@@ -391,6 +407,104 @@ public:
 
 private:
   Value *slot = nullptr;
+};
+
+//===----------------------------------------------------------------------===//
+// SSAUse
+//===----------------------------------------------------------------------===//
+
+/// A non-owning view over any SSA use of a Value.
+///
+/// This deliberately does not make property references into normal operands.
+/// It only provides a common traversal and mutation surface for infrastructure
+/// that wants semantic SSA dependencies.
+class SSAUse {
+public:
+  SSAUse() = default;
+  SSAUse(OpOperand *operand) : kind(SSAUseKind::Operand), opaque(operand) {}
+  SSAUse(PropertySSAUse *use) : kind(SSAUseKind::Property), opaque(use) {}
+
+  SSAUseKind getKind() const { return kind; }
+  bool isOperand() const { return kind == SSAUseKind::Operand; }
+  bool isProperty() const { return kind == SSAUseKind::Property; }
+
+  OpOperand &getOperand() const {
+    assert(isOperand() && "expected native operand use");
+    return *static_cast<OpOperand *>(opaque);
+  }
+  PropertySSAUse &getPropertyUse() const {
+    assert(isProperty() && "expected property SSA use");
+    return *static_cast<PropertySSAUse *>(opaque);
+  }
+
+  Operation *getOwner() const {
+    return isOperand() ? getOperand().getOwner() : getPropertyUse().getOwner();
+  }
+  Value get() const {
+    return isOperand() ? getOperand().get() : getPropertyUse().get();
+  }
+  void set(Value newValue) const {
+    if (isOperand())
+      return getOperand().set(newValue);
+    getPropertyUse().set(newValue);
+  }
+
+private:
+  SSAUseKind kind = SSAUseKind::Operand;
+  void *opaque = nullptr;
+};
+
+/// Iterator over the staged unified SSA use view for a Value.
+class ValueAllUseIterator
+    : public llvm::iterator_facade_base<ValueAllUseIterator,
+                                        std::forward_iterator_tag, SSAUse> {
+public:
+  using operand_iterator = Value::use_iterator;
+  using property_iterator = Value::property_use_iterator;
+
+  ValueAllUseIterator() = default;
+  ValueAllUseIterator(operand_iterator operandIt, operand_iterator operandEnd,
+                      property_iterator propertyIt,
+                      property_iterator propertyEnd)
+      : operandIt(operandIt), operandEnd(operandEnd), propertyIt(propertyIt),
+        propertyEnd(propertyEnd), inProperties(operandIt == operandEnd) {}
+
+  SSAUse operator*() const {
+    if (inProperties)
+      return SSAUse(&*propertyIt);
+    return SSAUse(&*operandIt);
+  }
+
+  using llvm::iterator_facade_base<
+      ValueAllUseIterator, std::forward_iterator_tag, SSAUse>::operator++;
+  ValueAllUseIterator &operator++() {
+    assert(*this != ValueAllUseIterator() && "incrementing past end()");
+    if (!inProperties) {
+      ++operandIt;
+      if (operandIt == operandEnd)
+        inProperties = true;
+      return *this;
+    }
+    ++propertyIt;
+    return *this;
+  }
+
+  bool operator==(const ValueAllUseIterator &rhs) const {
+    bool lhsAtEnd = inProperties && propertyIt == propertyEnd;
+    bool rhsAtEnd = rhs.inProperties && rhs.propertyIt == rhs.propertyEnd;
+    if (lhsAtEnd || rhsAtEnd)
+      return lhsAtEnd == rhsAtEnd;
+    return inProperties == rhs.inProperties &&
+           (inProperties ? propertyIt == rhs.propertyIt
+                         : operandIt == rhs.operandIt);
+  }
+
+private:
+  operand_iterator operandIt;
+  operand_iterator operandEnd;
+  property_iterator propertyIt;
+  property_iterator propertyEnd;
+  bool inProperties = true;
 };
 
 //===----------------------------------------------------------------------===//

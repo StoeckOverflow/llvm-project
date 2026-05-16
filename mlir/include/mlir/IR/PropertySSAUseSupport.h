@@ -61,6 +61,7 @@ bool crossesPropertySSAUseIsolatedFromAboveBoundary(Operation *owner,
 /// Verify generic SSA dominance/isolation for an owner-site property SSA use.
 /// Dialects are still responsible for stronger semantic rules attached to
 /// their property metadata.
+LogicalResult verifySSAUseDominance(SSAUse use, DominanceInfo &dominance);
 LogicalResult verifyPropertySSAUseDominance(Operation *owner, Value value,
                                             DominanceInfo &dominance);
 LogicalResult verifyPropertySSAUseDominance(Operation *owner,

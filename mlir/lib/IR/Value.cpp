@@ -76,6 +76,20 @@ bool Value::hasNUsesOrMore(unsigned n) const {
   return hasNItemsOrMore(use_begin(), use_end(), n);
 }
 
+Value::all_use_iterator Value::all_use_begin() const {
+  return all_use_iterator(use_begin(), use_end(), property_use_begin(),
+                          property_use_end());
+}
+
+Value::all_use_iterator Value::all_use_end() const {
+  return all_use_iterator(use_end(), use_end(), property_use_end(),
+                          property_use_end());
+}
+
+Value::all_use_range Value::getAllUses() const {
+  return {all_use_begin(), all_use_end()};
+}
+
 //===----------------------------------------------------------------------===//
 // Value::UseLists
 //===----------------------------------------------------------------------===//
@@ -92,30 +106,24 @@ void Value::replaceAllUsesWith(Value newValue) {
 /// listed in 'exceptions' .
 void Value::replaceAllUsesExcept(
     Value newValue, const SmallPtrSetImpl<Operation *> &exceptions) {
-  for (PropertySSAUse &use :
-       llvm::make_early_inc_range(getPropertyUses())) {
+  for (PropertySSAUse &use : llvm::make_early_inc_range(getPropertyUses()))
     if (exceptions.count(use.getOwner()) == 0)
       use.set(newValue);
-  }
-  for (OpOperand &use : llvm::make_early_inc_range(getUses())) {
+  for (OpOperand &use : llvm::make_early_inc_range(getUses()))
     if (exceptions.count(use.getOwner()) == 0)
       use.set(newValue);
-  }
 }
 
 /// Replace all uses of 'this' value with 'newValue', updating anything in the
 /// IR that uses 'this' to use the other value instead except if the user is
 /// 'exceptedUser'.
 void Value::replaceAllUsesExcept(Value newValue, Operation *exceptedUser) {
-  for (PropertySSAUse &use :
-       llvm::make_early_inc_range(getPropertyUses())) {
+  for (PropertySSAUse &use : llvm::make_early_inc_range(getPropertyUses()))
     if (use.getOwner() != exceptedUser)
       use.set(newValue);
-  }
-  for (OpOperand &use : llvm::make_early_inc_range(getUses())) {
+  for (OpOperand &use : llvm::make_early_inc_range(getUses()))
     if (use.getOwner() != exceptedUser)
       use.set(newValue);
-  }
 }
 
 /// Replace all uses of 'this' value with 'newValue' if the given callback
@@ -129,8 +137,7 @@ void Value::replaceUsesWithIf(Value newValue,
       replacedUses.insert(&use);
       replacedOwners.insert(use.getOwner());
     }
-  for (PropertySSAUse &use :
-       llvm::make_early_inc_range(getPropertyUses())) {
+  for (PropertySSAUse &use : llvm::make_early_inc_range(getPropertyUses())) {
     if (replacedOwners.contains(use.getOwner()))
       use.set(newValue);
   }
@@ -147,12 +154,9 @@ void Value::dropAllPropertyUses() {
 SmallVector<Operation *> Value::getAllUsers() const {
   SmallVector<Operation *> users;
   llvm::SmallPtrSet<Operation *, 8> seen;
-  for (Operation *user : getUsers())
-    if (seen.insert(user).second)
-      users.push_back(user);
-  for (Operation *user : getPropertyUsers())
-    if (seen.insert(user).second)
-      users.push_back(user);
+  for (SSAUse use : getAllUses())
+    if (seen.insert(use.getOwner()).second)
+      users.push_back(use.getOwner());
   return users;
 }
 

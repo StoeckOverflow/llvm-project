@@ -23,6 +23,12 @@ Property SSA references are tracked separately with `PropertySSAUse` nodes.
 They are second-class uses: explicit, opt-in SSA edges that preserve existing
 operand semantics while still being visible to property-aware clients.
 
+MLIR also exposes a staged unified use view through `SSAUse`. An `SSAUse` is a
+non-owning wrapper over either an `OpOperand` or a `PropertySSAUse`; it does not
+change the underlying storage or make properties ordinary operands. This gives
+generic infrastructure one traversal surface for semantic SSA dependencies
+while preserving native operand APIs as operand-only views.
+
 The direct property-use APIs are:
 
 * `Value::getPropertyUses()`
@@ -32,8 +38,11 @@ The direct property-use APIs are:
 
 The combined native-plus-property APIs are:
 
+* `Value::getAllUses()`
+* `Value::all_use_begin()` / `Value::all_use_end()`
 * `Value::all_use_empty()`
 * `Value::getAllUsers()`
+* `Operation::walkSSAUses(function_ref<void(SSAUse)>)`
 * `Operation::all_use_empty()`
 * `allUseEmpty(Value, Operation *root = nullptr)`
 * `getAllUsers(Value, Operation *root = nullptr)`
@@ -100,8 +109,9 @@ through the shared IR clone support.
 
 ## Dominance and Isolation
 
-Generic IR verification checks owner-site property SSA uses with
-`verifyPropertySSAUseDominance`.
+Generic IR verification walks `Operation::walkSSAUses` and checks native
+operands and owner-site property SSA uses through the same staged traversal.
+Property-specific clients may still call `verifyPropertySSAUseDominance`.
 
 The verifier enforces that:
 
@@ -147,6 +157,8 @@ property-aware helper.
 
 Property uses are not operands. They do not participate in operand numbering,
 operand segment attributes, operand parsing, or `OpOperand` mutation callbacks.
+Use `SSAUse::getKind()` to distinguish ordinary operands from property uses
+when using the unified traversal.
 
 Release-mode safety is improved in the shared erase paths, but it is not a
 global replacement for verification. Transformations that directly mutate
@@ -158,8 +170,8 @@ semantics still need dialect-specific verification.
 The dependent tensor tests exercise the current infrastructure:
 
 * `dependent-tensor-transforms.mlir` covers RAUW, `replaceAllUsesExcept`,
-  `replaceUsesWithIf`, clone/remap, CSE, canonicalization, and property-aware
-  local dimension DCE.
+  `replaceUsesWithIf`, clone/remap, unified `SSAUse` queries, CSE,
+  canonicalization, and property-aware local dimension DCE.
 * `dependent-tensor-property-ssa-generic.mlir` covers direct
   `RewriterBase::replaceOp`, dialect conversion replacement, function-boundary
   cloning, `remove-dead-values`, and release-relevant block erasure guards.
@@ -171,11 +183,12 @@ The dependent tensor tests exercise the current infrastructure:
 ## Future Work
 
 Property SSA uses should remain separate from native operands unless MLIR
-intentionally grows a merged use abstraction. Useful future work includes:
+intentionally grows a physically merged use-list abstraction. Useful future
+work includes:
 
 * auditing more dialect-specific passes that use raw `use_empty`;
 * adding broader inliner and dialect-conversion coverage;
-* adding richer combined-use iterators for clients that need to inspect both
-  native and property users uniformly;
+* auditing clients that should migrate from property-specific helpers to the
+  unified `SSAUse` view;
 * moving operation-owned `PropertySSAUse` nodes into trailing storage if the
   feature becomes widely used beyond value-dependent type metadata.

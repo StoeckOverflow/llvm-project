@@ -447,16 +447,22 @@ OperationVerifier::verifyDominanceOfContainedRegions(Operation &op,
         bool isReachable = domInfo.isReachableFromEntry(&block);
         for (auto &op : block) {
           if (isReachable) {
-            // Check that operands properly dominate this use.
-            for (const auto &operand : llvm::enumerate(op.getOperands())) {
-              if (domInfo.properlyDominates(operand.value(), &op))
-                continue;
-
-              diagnoseInvalidOperandDominance(op, operand.index());
-              return failure();
-            }
-
-            if (failed(verifyPropertySSAUseDominance(&op, domInfo)))
+            // Check that all SSA uses properly dominate this use site.
+            LogicalResult dominanceResult = success();
+            op.walkSSAUses([&](SSAUse use) {
+              if (failed(dominanceResult))
+                return;
+              if (use.isOperand()) {
+                if (domInfo.properlyDominates(use.get(), &op))
+                  return;
+                diagnoseInvalidOperandDominance(
+                    op, use.getOperand().getOperandNumber());
+                dominanceResult = failure();
+                return;
+              }
+              dominanceResult = verifySSAUseDominance(use, domInfo);
+            });
+            if (failed(dominanceResult))
               return failure();
           }
 

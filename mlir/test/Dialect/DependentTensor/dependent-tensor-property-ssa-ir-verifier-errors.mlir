@@ -12,6 +12,19 @@ func.func @generic_verifier_accepts_valid_boundary_metadata(
 
 // -----
 
+func.func @generic_bad_property_dominance() {
+  %dim = arith.constant 1 : index
+  // The test pass mutates this op's property slot, but not its ordinary
+  // operand, to reference %late. This isolates the generic property SSA
+  // dominance helper from native operand dominance.
+  // expected-error@below {{'dependent_tensor.make' op property SSA value does not dominate this operation}}
+  %t = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
+  %late = arith.constant 2 : index
+  return
+}
+
+// -----
+
 func.func @semantic_func_boundary_isolated_capture_source(%outer: index) {
   return
 }

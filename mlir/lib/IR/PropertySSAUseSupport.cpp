@@ -74,9 +74,12 @@ void mlir::refreshPropertySSAUses(Operation *op) {
 }
 
 void mlir::remapPropertySSAValues(Operation *op, IRMapping &mapping) {
-  for (std::unique_ptr<PropertySSAUse> &use : op->propertySSAUses)
-    if (Value mapped = mapping.lookupOrNull(use->get()))
-      use->set(mapped);
+  op->walkSSAUses([&](SSAUse use) {
+    if (!use.isProperty())
+      return;
+    if (Value mapped = mapping.lookupOrNull(use.get()))
+      use.set(mapped);
+  });
 }
 
 void mlir::replacePropertySSAValue(Operation *root, Value from, Value to) {
@@ -191,9 +194,10 @@ void mlir::replaceUsesOfWithIncludingPropertySSAUses(Operation *op, Value from,
   if (!op || from == to)
     return;
   op->replaceUsesOfWith(from, to);
-  for (std::unique_ptr<PropertySSAUse> &use : op->propertySSAUses)
-    if (use->get() == from)
-      use->set(to);
+  op->walkSSAUses([&](SSAUse use) {
+    if (use.isProperty() && use.get() == from)
+      use.set(to);
+  });
 }
 
 bool mlir::isOwnerSitePropertySSAUse(Operation *owner, Value value) {
@@ -242,13 +246,25 @@ LogicalResult mlir::verifyPropertySSAUseDominance(Operation *owner, Value value,
   return success();
 }
 
+LogicalResult mlir::verifySSAUseDominance(SSAUse use,
+                                          DominanceInfo &dominance) {
+  if (use.isProperty())
+    return verifyPropertySSAUseDominance(use.getOwner(), use.get(), dominance);
+  if (!dominance.properlyDominates(use.get(), use.getOwner()))
+    return use.getOwner()->emitError("operand #")
+           << use.getOperand().getOperandNumber()
+           << " does not dominate this use";
+  return success();
+}
+
 LogicalResult mlir::verifyPropertySSAUseDominance(Operation *owner,
                                                   DominanceInfo &dominance) {
   LogicalResult result = success();
-  walkPropertySSAValues(owner, [&](Value &value) {
+  owner->walkSSAUses([&](SSAUse use) {
     if (failed(result))
       return;
-    result = verifyPropertySSAUseDominance(owner, value, dominance);
+    if (use.isProperty())
+      result = verifySSAUseDominance(use, dominance);
   });
   return result;
 }

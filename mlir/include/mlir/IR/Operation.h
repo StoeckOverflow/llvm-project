@@ -18,8 +18,8 @@
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/Region.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Twine.h"
 #include <memory>
 #include <optional>
@@ -419,6 +419,16 @@ public:
 
   OpOperand &getOpOperand(unsigned idx) {
     return getOperandStorage().getOperands()[idx];
+  }
+
+  /// Walk all SSA uses owned by this operation. This includes ordinary
+  /// operands and second-class property SSA uses, while preserving native
+  /// operand APIs as operand-only views.
+  void walkSSAUses(function_ref<void(SSAUse)> callback) {
+    for (OpOperand &operand : getOpOperands())
+      callback(SSAUse(&operand));
+    for (std::unique_ptr<PropertySSAUse> &use : propertySSAUses)
+      callback(SSAUse(use.get()));
   }
 
   // Support operand type iteration.
@@ -1133,7 +1143,7 @@ private:
   friend void dropPropertySSAUses(Operation *);
   friend void remapPropertySSAValues(Operation *, IRMapping &);
   friend void replaceUsesOfWithIncludingPropertySSAUses(Operation *, Value,
-                                                       Value);
+                                                        Value);
 
   // allow ilist_node_with_parent to access the 'getParent' method.
   friend class llvm::ilist_node_with_parent<Operation, Block>;
