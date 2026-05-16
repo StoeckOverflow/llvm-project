@@ -34,8 +34,13 @@ namespace detail {
 /// facilities for operand use management.
 class IROperandBase {
 public:
+  enum class Kind { OpOperand, BlockOperand, PropertySSAUse };
+
   /// Return the owner of this operand.
   Operation *getOwner() const { return owner; }
+
+  /// Return the kind of this use node.
+  Kind getKind() const { return kind; }
 
   /// Return the next operand on the use-list of the value we are referring to.
   /// This should generally only be used by the internal implementation details
@@ -58,8 +63,8 @@ public:
   }
 
 protected:
-  IROperandBase(Operation *owner) : owner(owner) {}
-  IROperandBase(IROperandBase &&other) : owner(other.owner) {
+  IROperandBase(Operation *owner, Kind kind) : owner(owner), kind(kind) {}
+  IROperandBase(IROperandBase &&other) : owner(other.owner), kind(other.kind) {
     *this = std::move(other);
   }
   IROperandBase &operator=(IROperandBase &&other) {
@@ -111,6 +116,9 @@ protected:
 private:
   /// The operation owner of this operand.
   Operation *const owner;
+
+  /// The concrete kind of this use node.
+  const Kind kind;
 };
 } // namespace detail
 
@@ -126,9 +134,10 @@ private:
 template <typename DerivedT, typename IRValueT>
 class IROperand : public detail::IROperandBase {
 public:
-  IROperand(Operation *owner) : detail::IROperandBase(owner) {}
+  IROperand(Operation *owner)
+      : detail::IROperandBase(owner, DerivedT::getUseKind()) {}
   IROperand(Operation *owner, IRValueT value)
-      : detail::IROperandBase(owner), value(value) {
+      : detail::IROperandBase(owner, DerivedT::getUseKind()), value(value) {
     insertIntoCurrent();
   }
 
@@ -195,7 +204,7 @@ template <typename OperandType>
 class IRObjectWithUseList {
 public:
   ~IRObjectWithUseList() {
-    assert(use_empty() && "Cannot destroy a value that still has uses!");
+    assert(raw_use_empty() && "Cannot destroy a value that still has uses!");
   }
 
   /// Drop all uses of this object from their respective owners.
@@ -224,15 +233,29 @@ public:
                indices.size() &&
            "indices vector expected to have a number of elements equal to the "
            "number of uses");
-    SmallVector<detail::IROperandBase *> shuffled(indices.size());
-    detail::IROperandBase *ptr = firstUse;
-    for (size_t idx = 0; idx < indices.size();
-         idx++, ptr = ptr->getNextOperandUsingThisValue())
-      shuffled[indices[idx]] = ptr;
+    SmallVector<detail::IROperandBase *> rawUses;
+    SmallVector<detail::IROperandBase *> matchingUses;
+    for (detail::IROperandBase *ptr = firstUse; ptr;
+         ptr = ptr->getNextOperandUsingThisValue()) {
+      rawUses.push_back(ptr);
+      if (OperandType::classof(ptr))
+        matchingUses.push_back(ptr);
+    }
+    if (rawUses.empty())
+      return;
 
-    initFirstUse(shuffled.front());
+    SmallVector<detail::IROperandBase *> shuffledMatching(indices.size());
+    for (size_t idx = 0; idx < indices.size(); ++idx)
+      shuffledMatching[indices[idx]] = matchingUses[idx];
+
+    auto nextShuffled = shuffledMatching.begin();
+    for (detail::IROperandBase *&use : rawUses)
+      if (OperandType::classof(use))
+        use = *nextShuffled++;
+
+    initFirstUse(rawUses.front());
     auto *current = firstUse;
-    for (auto &next : llvm::drop_begin(shuffled)) {
+    for (auto &next : llvm::drop_begin(rawUses)) {
       current->linkTo(next);
       current = next;
     }
@@ -254,11 +277,14 @@ public:
 
   /// Returns true if this value has exactly one use.
   bool hasOneUse() const {
-    return firstUse && firstUse->getNextOperandUsingThisValue() == nullptr;
+    use_iterator it = use_begin();
+    if (it == use_end())
+      return false;
+    return ++it == use_end();
   }
 
   /// Returns true if this value has no uses.
-  bool use_empty() const { return firstUse == nullptr; }
+  bool use_empty() const { return use_begin() == use_end(); }
 
   //===--------------------------------------------------------------------===//
   // Users
@@ -279,6 +305,12 @@ protected:
   /// Return the first operand that is using this value, for use by custom
   /// use/def iterators.
   OperandType *getFirstUse() const { return (OperandType *)firstUse; }
+
+  /// Return the first raw use node, for use by custom filtered iterators.
+  detail::IROperandBase *getFirstUseBase() const { return firstUse; }
+
+  /// Returns true if there are no raw use nodes of any kind.
+  bool raw_use_empty() const { return firstUse == nullptr; }
 
 private:
   /// Set use as the first use of the chain.
@@ -305,7 +337,9 @@ class ValueUseIterator
                                         std::forward_iterator_tag,
                                         OperandType> {
 public:
-  ValueUseIterator(detail::IROperandBase *use = nullptr) : current(use) {}
+  ValueUseIterator(detail::IROperandBase *use = nullptr) : current(use) {
+    skipToMatchingUse();
+  }
 
   /// Returns the operation that owns this use.
   Operation *getUser() const { return current->getOwner(); }
@@ -319,7 +353,8 @@ public:
                                    OperandType>::operator++;
   ValueUseIterator &operator++() {
     assert(current && "incrementing past end()!");
-    current = (OperandType *)current->getNextOperandUsingThisValue();
+    current = current->getNextOperandUsingThisValue();
+    skipToMatchingUse();
     return *this;
   }
 
@@ -329,6 +364,12 @@ public:
 
 protected:
   detail::IROperandBase *current;
+
+private:
+  void skipToMatchingUse() {
+    while (current && !OperandType::classof(current))
+      current = current->getNextOperandUsingThisValue();
+  }
 };
 
 //===----------------------------------------------------------------------===//

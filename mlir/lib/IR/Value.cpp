@@ -77,13 +77,11 @@ bool Value::hasNUsesOrMore(unsigned n) const {
 }
 
 Value::all_use_iterator Value::all_use_begin() const {
-  return all_use_iterator(use_begin(), use_end(), property_use_begin(),
-                          property_use_end());
+  return all_use_iterator(impl->getFirstUseBase());
 }
 
 Value::all_use_iterator Value::all_use_end() const {
-  return all_use_iterator(use_end(), use_end(), property_use_end(),
-                          property_use_end());
+  return all_use_iterator();
 }
 
 Value::all_use_range Value::getAllUses() const {
@@ -93,6 +91,11 @@ Value::all_use_range Value::getAllUses() const {
 //===----------------------------------------------------------------------===//
 // Value::UseLists
 //===----------------------------------------------------------------------===//
+
+void Value::dropAllUses() {
+  while (!all_use_empty())
+    (*all_use_begin()).drop();
+}
 
 void Value::replaceAllUsesWith(Value newValue) {
   assert(*this != newValue && "cannot RAUW a value with itself");

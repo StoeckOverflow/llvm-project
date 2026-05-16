@@ -19,15 +19,16 @@ MLIR's native use-list model is unchanged:
 * Property-contained SSA values are not `OpOperand`s and are not included in
   those native queries.
 
-Property SSA references are tracked separately with `PropertySSAUse` nodes.
-They are second-class uses: explicit, opt-in SSA edges that preserve existing
-operand semantics while still being visible to property-aware clients.
+Property SSA references are tracked with `PropertySSAUse` nodes. These nodes are
+not `OpOperand`s and remain owned by their operation, but they are linked into
+the same per-value use-list as native operands. Native APIs are filtered views
+over that mixed list.
 
-MLIR also exposes a staged unified use view through `SSAUse`. An `SSAUse` is a
-non-owning wrapper over either an `OpOperand` or a `PropertySSAUse`; it does not
-change the underlying storage or make properties ordinary operands. This gives
-generic infrastructure one traversal surface for semantic SSA dependencies
-while preserving native operand APIs as operand-only views.
+MLIR exposes the combined use-list through `SSAUse`. An `SSAUse` is a non-owning
+wrapper over either an `OpOperand` or a `PropertySSAUse`; it does not make
+properties ordinary operands. This gives generic infrastructure one traversal
+surface for semantic SSA dependencies while preserving native operand APIs as
+operand-only views.
 
 The direct property-use APIs are:
 
@@ -110,7 +111,7 @@ through the shared IR clone support.
 ## Dominance and Isolation
 
 Generic IR verification walks `Operation::walkSSAUses` and checks native
-operands and owner-site property SSA uses through the same staged traversal.
+operands and owner-site property SSA uses through the same unified traversal.
 Property-specific clients may still call `verifyPropertySSAUseDominance`.
 
 The verifier enforces that:
@@ -150,7 +151,7 @@ The following generic paths are property-aware today:
 
 ## Limitations
 
-Native MLIR use-list APIs remain native-only. A pass that manually calls
+Native MLIR operand use-list APIs remain native-only. A pass that manually calls
 `Value::use_empty()` or `Operation::use_empty()` to decide semantic liveness may
 still ignore property SSA users unless it has been audited or routes through a
 property-aware helper.
@@ -182,9 +183,9 @@ The dependent tensor tests exercise the current infrastructure:
 
 ## Future Work
 
-Property SSA uses should remain separate from native operands unless MLIR
-intentionally grows a physically merged use-list abstraction. Useful future
-work includes:
+Property SSA uses should remain separate from native operands at the API level
+unless MLIR intentionally changes operand semantics. Useful future work
+includes:
 
 * auditing more dialect-specific passes that use raw `use_empty`;
 * adding broader inliner and dialect-conversion coverage;

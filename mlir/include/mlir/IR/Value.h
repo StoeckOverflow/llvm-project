@@ -41,11 +41,6 @@ enum class SSAUseKind { Operand, Property };
 
 namespace detail {
 
-class PropertySSAUseList : public IRObjectWithUseList<PropertySSAUse> {
-public:
-  PropertySSAUseList() = default;
-};
-
 /// The base class for all derived Value classes. It contains all of the
 /// components that are shared across Value classes.
 class alignas(8) ValueImpl : public IRObjectWithUseList<OpOperand> {
@@ -79,12 +74,14 @@ public:
   /// Return the kind of this value.
   Kind getKind() const { return typeAndKind.getInt(); }
 
-  /// Return the secondary use-list for property SSA references.
-  IRObjectWithUseList<PropertySSAUse> &getPropertySSAUseList() {
-    return propertySSAUses;
+  /// Return the first raw use node in the physically unified value use-list.
+  IROperandBase *getFirstUseBase() const {
+    return IRObjectWithUseList<OpOperand>::getFirstUseBase();
   }
-  const IRObjectWithUseList<PropertySSAUse> &getPropertySSAUseList() const {
-    return propertySSAUses;
+
+  /// Returns true if this value has no native or property SSA uses.
+  bool raw_use_empty() const {
+    return IRObjectWithUseList<OpOperand>::raw_use_empty();
   }
 
 protected:
@@ -100,9 +97,6 @@ protected:
 
   /// The type of this result and the kind.
   llvm::PointerIntPair<Type, 3, Kind> typeAndKind;
-
-  /// Secondary use-list for SSA values referenced from operation properties.
-  PropertySSAUseList propertySSAUses;
 };
 } // namespace detail
 
@@ -162,8 +156,9 @@ public:
   // UseLists
   //===--------------------------------------------------------------------===//
 
-  /// Drop all uses of this object from their respective owners.
-  void dropAllUses() { return impl->dropAllUses(); }
+  /// Drop all native and property SSA uses of this object from their respective
+  /// owners.
+  void dropAllUses();
 
   /// Replace all uses of 'this' value with the new value, updating anything in
   /// the IR that uses 'this' to use the other value instead.  When this returns
@@ -232,11 +227,11 @@ public:
 
   /// Returns true if this value has no property SSA uses.
   bool property_use_empty() const {
-    return impl->getPropertySSAUseList().use_empty();
+    return property_use_begin() == property_use_end();
   }
 
   /// Returns true if this value has no native or property SSA uses.
-  bool all_use_empty() const { return use_empty() && property_use_empty(); }
+  bool all_use_empty() const { return impl->raw_use_empty(); }
 
   /// This class implements an iterator over native and property SSA uses.
   using all_use_iterator = ValueAllUseIterator;
@@ -266,7 +261,7 @@ public:
   using property_use_range = iterator_range<property_use_iterator>;
 
   property_use_iterator property_use_begin() const {
-    return impl->getPropertySSAUseList().use_begin();
+    return property_use_iterator(impl->getFirstUseBase());
   }
   property_use_iterator property_use_end() const {
     return property_use_iterator();
@@ -328,6 +323,13 @@ raw_ostream &operator<<(raw_ostream &os, Value value);
 /// contain a reference to a specific `Value`.
 class OpOperand : public IROperand<OpOperand, Value> {
 public:
+  static detail::IROperandBase::Kind getUseKind() {
+    return detail::IROperandBase::Kind::OpOperand;
+  }
+  static bool classof(const detail::IROperandBase *use) {
+    return use->getKind() == getUseKind();
+  }
+
   /// Provide the use list that is attached to the given value.
   static IRObjectWithUseList<OpOperand> *getUseList(Value value) {
     return value.getImpl();
@@ -356,7 +358,9 @@ private:
 class PropertySSAUse : public detail::IROperandBase {
 public:
   PropertySSAUse(Operation *owner, Value *slot)
-      : detail::IROperandBase(owner), slot(slot) {
+      : detail::IROperandBase(owner,
+                              detail::IROperandBase::Kind::PropertySSAUse),
+        slot(slot) {
     if (Value value = get())
       insertInto(getUseList(value));
   }
@@ -369,8 +373,16 @@ public:
   PropertySSAUse &operator=(PropertySSAUse &&other) = delete;
 
   /// Provide the property use-list attached to the given value.
-  static IRObjectWithUseList<PropertySSAUse> *getUseList(Value value) {
-    return &value.getImpl()->getPropertySSAUseList();
+  static detail::IROperandBase::Kind getUseKind() {
+    return detail::IROperandBase::Kind::PropertySSAUse;
+  }
+  static bool classof(const detail::IROperandBase *use) {
+    return use->getKind() == getUseKind();
+  }
+
+  /// Provide the physically unified use-list attached to the given value.
+  static IRObjectWithUseList<OpOperand> *getUseList(Value value) {
+    return value.getImpl();
   }
 
   /// Return the current value referenced by this property slot.
@@ -421,6 +433,11 @@ private:
 class SSAUse {
 public:
   SSAUse() = default;
+  SSAUse(detail::IROperandBase *use)
+      : kind(use->getKind() == detail::IROperandBase::Kind::OpOperand
+                 ? SSAUseKind::Operand
+                 : SSAUseKind::Property),
+        opaque(use) {}
   SSAUse(OpOperand *operand) : kind(SSAUseKind::Operand), opaque(operand) {}
   SSAUse(PropertySSAUse *use) : kind(SSAUseKind::Property), opaque(use) {}
 
@@ -448,63 +465,41 @@ public:
       return getOperand().set(newValue);
     getPropertyUse().set(newValue);
   }
+  void drop() const {
+    if (isOperand())
+      return getOperand().drop();
+    getPropertyUse().drop();
+  }
 
 private:
   SSAUseKind kind = SSAUseKind::Operand;
   void *opaque = nullptr;
 };
 
-/// Iterator over the staged unified SSA use view for a Value.
+/// Iterator over the physically unified SSA use-list for a Value.
 class ValueAllUseIterator
     : public llvm::iterator_facade_base<ValueAllUseIterator,
                                         std::forward_iterator_tag, SSAUse> {
 public:
-  using operand_iterator = Value::use_iterator;
-  using property_iterator = Value::property_use_iterator;
-
   ValueAllUseIterator() = default;
-  ValueAllUseIterator(operand_iterator operandIt, operand_iterator operandEnd,
-                      property_iterator propertyIt,
-                      property_iterator propertyEnd)
-      : operandIt(operandIt), operandEnd(operandEnd), propertyIt(propertyIt),
-        propertyEnd(propertyEnd), inProperties(operandIt == operandEnd) {}
+  ValueAllUseIterator(detail::IROperandBase *use) : current(use) {}
 
-  SSAUse operator*() const {
-    if (inProperties)
-      return SSAUse(&*propertyIt);
-    return SSAUse(&*operandIt);
-  }
+  SSAUse operator*() const { return SSAUse(current); }
 
   using llvm::iterator_facade_base<
       ValueAllUseIterator, std::forward_iterator_tag, SSAUse>::operator++;
   ValueAllUseIterator &operator++() {
     assert(*this != ValueAllUseIterator() && "incrementing past end()");
-    if (!inProperties) {
-      ++operandIt;
-      if (operandIt == operandEnd)
-        inProperties = true;
-      return *this;
-    }
-    ++propertyIt;
+    current = current->getNextOperandUsingThisValue();
     return *this;
   }
 
   bool operator==(const ValueAllUseIterator &rhs) const {
-    bool lhsAtEnd = inProperties && propertyIt == propertyEnd;
-    bool rhsAtEnd = rhs.inProperties && rhs.propertyIt == rhs.propertyEnd;
-    if (lhsAtEnd || rhsAtEnd)
-      return lhsAtEnd == rhsAtEnd;
-    return inProperties == rhs.inProperties &&
-           (inProperties ? propertyIt == rhs.propertyIt
-                         : operandIt == rhs.operandIt);
+    return current == rhs.current;
   }
 
 private:
-  operand_iterator operandIt;
-  operand_iterator operandEnd;
-  property_iterator propertyIt;
-  property_iterator propertyEnd;
-  bool inProperties = true;
+  detail::IROperandBase *current = nullptr;
 };
 
 //===----------------------------------------------------------------------===//

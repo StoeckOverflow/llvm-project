@@ -31,6 +31,13 @@ class BlockOperand : public IROperand<BlockOperand, Block *> {
 public:
   using IROperand<BlockOperand, Block *>::IROperand;
 
+  static detail::IROperandBase::Kind getUseKind() {
+    return detail::IROperandBase::Kind::BlockOperand;
+  }
+  static bool classof(const detail::IROperandBase *use) {
+    return use->getKind() == getUseKind();
+  }
+
   /// Provide the use list that is attached to the given block.
   static IRObjectWithUseList<BlockOperand> *getUseList(Block *value);
 

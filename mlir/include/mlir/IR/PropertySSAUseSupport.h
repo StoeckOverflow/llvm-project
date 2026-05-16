@@ -70,8 +70,8 @@ LogicalResult verifyPropertySSAUseDominance(Operation *owner,
 // Future direction: if property SSA references become common beyond
 // value-dependent type metadata, consider moving operation-owned
 // PropertySSAUse nodes into trailing storage instead of the current op-local
-// vector. Keep the list separate from native OpOperand uses unless MLIR
-// intentionally grows an opt-in merged use iterator.
+// vector. The nodes are operation-owned today but participate in the same
+// per-value use-list as native OpOperand uses.
 
 } // namespace mlir
 
