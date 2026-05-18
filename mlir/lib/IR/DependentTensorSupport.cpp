@@ -12,6 +12,12 @@ mlir::hash_value(const DependentTensorValueSemantics &semantics) {
                                semantics.dimValues.end()));
 }
 
+llvm::hash_code
+mlir::hash_value(const DependentTensorDimValueSemantics &semantics) {
+  return llvm::hash_combine_range(semantics.dimValues.begin(),
+                                  semantics.dimValues.end());
+}
+
 void mlir::walkDependentTensorPropertyValues(
     Operation *op, function_ref<void(Value &)> callback) {
   walkPropertySSAValues(op, callback);
@@ -62,24 +68,32 @@ void mlir::replaceUsesOfWithIncludingDependentTensorProperties(Operation *op,
   replaceUsesOfWithIncludingPropertySSAUses(op, from, to);
 }
 
-ParseResult mlir::dependent_tensor::parseTensorSpec(
+ParseResult mlir::dependent_tensor::parseTensorSpecBody(
     OpAsmParser &parser, SmallVectorImpl<OpAsmParser::UnresolvedOperand> &dims,
     Type &elementType) {
-  if (parser.parseHashKeyword("tensor") || parser.parseLess())
+  if (parser.parseLess())
     return failure();
-  if (parser.parseCommaSeparatedList(
-          OpAsmParser::Delimiter::Square, [&]() -> ParseResult {
-            OpAsmParser::UnresolvedOperand dim;
-            if (parser.parseOperand(dim))
-              return failure();
-            dims.push_back(dim);
-            return success();
-          }))
+  if (parser.parseCommaSeparatedList(OpAsmParser::Delimiter::Square,
+                                     [&]() -> ParseResult {
+                                       OpAsmParser::UnresolvedOperand dim;
+                                       if (parser.parseOperand(dim))
+                                         return failure();
+                                       dims.push_back(dim);
+                                       return success();
+                                     }))
     return failure();
   if (parser.parseComma() || parser.parseType(elementType) ||
       parser.parseGreater())
     return failure();
   return success();
+}
+
+ParseResult mlir::dependent_tensor::parseTensorSpec(
+    OpAsmParser &parser, SmallVectorImpl<OpAsmParser::UnresolvedOperand> &dims,
+    Type &elementType) {
+  if (parser.parseHashKeyword("tensor"))
+    return failure();
+  return parseTensorSpecBody(parser, dims, elementType);
 }
 
 ParseResult mlir::dependent_tensor::parseTensorSpec(
@@ -92,8 +106,8 @@ ParseResult mlir::dependent_tensor::parseTensorSpec(
   if (static_cast<int64_t>(dims.size()) != valueType.getRank())
     return parser.emitError(specLoc, "dependent tensor rank mismatch");
   if (elementType != valueType.getElementType())
-    return parser.emitError(specLoc,
-                            "dependent tensor element type must match value type");
+    return parser.emitError(
+        specLoc, "dependent tensor element type must match value type");
   return success();
 }
 

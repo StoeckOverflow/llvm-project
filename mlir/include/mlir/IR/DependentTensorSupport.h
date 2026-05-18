@@ -1,8 +1,8 @@
 #ifndef MLIR_IR_DEPENDENTTENSORSUPPORT_H
 #define MLIR_IR_DEPENDENTTENSORSUPPORT_H
 
-#include "mlir/IR/DependentTensorInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/DependentTensorInterfaces.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/OpImplementation.h"
@@ -15,8 +15,8 @@ class Operation;
 /// Compatibility wrappers for the generic property SSA use layer. New generic
 /// IR code should use PropertySSAUseSupport directly; dependent_tensor-specific
 /// code may use these names when that reads more clearly.
-void walkDependentTensorPropertyValues(
-    Operation *op, function_ref<void(Value &)> callback);
+void walkDependentTensorPropertyValues(Operation *op,
+                                       function_ref<void(Value &)> callback);
 void remapDependentTensorPropertyValues(Operation *op, IRMapping &mapping);
 void replaceDependentTensorPropertyValue(Operation *root, Value from, Value to);
 void replaceDependentTensorPropertyValueIf(
@@ -40,6 +40,10 @@ parseTensorSpec(OpAsmParser &parser,
 ParseResult
 parseTensorSpec(OpAsmParser &parser, RankedTensorType valueType,
                 SmallVectorImpl<OpAsmParser::UnresolvedOperand> &dims);
+ParseResult
+parseTensorSpecBody(OpAsmParser &parser,
+                    SmallVectorImpl<OpAsmParser::UnresolvedOperand> &dims,
+                    Type &elementType);
 void printTensorSpec(OpAsmPrinter &printer, ValueRange dims, Type elementType);
 } // namespace dependent_tensor
 

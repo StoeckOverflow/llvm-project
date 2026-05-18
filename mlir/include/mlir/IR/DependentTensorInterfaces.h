@@ -29,7 +29,16 @@ struct DependentTensorValueSemantics {
   }
 };
 
+struct DependentTensorDimValueSemantics {
+  SmallVector<Value, 1> dimValues;
+
+  bool operator==(const DependentTensorDimValueSemantics &other) const {
+    return dimValues == other.dimValues;
+  }
+};
+
 llvm::hash_code hash_value(const DependentTensorValueSemantics &semantics);
+llvm::hash_code hash_value(const DependentTensorDimValueSemantics &semantics);
 } // namespace mlir
 
 #include "mlir/IR/DependentTensorInterfaces.h.inc"

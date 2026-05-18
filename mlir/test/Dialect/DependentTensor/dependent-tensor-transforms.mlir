@@ -328,3 +328,34 @@ func.func @generic_dce_keeps_property_only_dim(%a: index, %b: index) -> f32 {
 // CSE-LABEL: func.func @generic_dce_keeps_property_only_dim
 // CSE: %[[DIM:.*]] = arith.muli
 // CSE: dependent_tensor.make () #tensor<[%[[DIM]]], f32>
+
+// -----
+
+func.func @fold_dependent_dim(%m : index, %n : index) -> index {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
+  %d0 = dependent_tensor.dim %t, %c0 : tensor<?x?xf32>
+  %d1 = dependent_tensor.dim %t, %c1 : tensor<?x?xf32>
+  %sum = arith.addi %d0, %d1 : index
+  return %sum : index
+}
+
+// CANON-LABEL: func.func @fold_dependent_dim
+// CANON-SAME: (%[[M:.*]]: index, %[[N:.*]]: index) -> index
+// CANON-NEXT: %[[SUM:.*]] = arith.addi %[[M]], %[[N]] : index
+// CANON-NEXT: return %[[SUM]] : index
+
+// -----
+
+func.func @keep_dynamic_dependent_dim(%m : index, %n : index, %i : index) -> index {
+  %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
+  %d = dependent_tensor.dim %t, %i : tensor<?x?xf32>
+  return %d : index
+}
+
+// CANON-LABEL: func.func @keep_dynamic_dependent_dim
+// CANON-SAME: (%[[M:.*]]: index, %[[N:.*]]: index, %[[I:.*]]: index) -> index
+// CANON-NEXT: %[[T:.*]] = dependent_tensor.make () #tensor<[%[[M]], %[[N]]], f32> : tensor<?x?xf32>
+// CANON-NEXT: %[[D:.*]] = dependent_tensor.dim %[[T]], %[[I]] : tensor<?x?xf32>
+// CANON-NEXT: return %[[D]] : index

@@ -41,7 +41,9 @@ def MakeOp : DependentTensor_Op<"make", [
   let hasVerifier = 1;
 }
 
-def DimOp : DependentTensor_Op<"dim", [Pure]> {
+def DimOp : DependentTensor_Op<"dim", [
+    Pure, DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
+      ["walkPropertySSAValues"]>]> {
   let summary = "query a dependent tensor dimension";
   let description = [{
     `dependent_tensor.dim` mirrors `tensor.dim` for the dependent tensor
@@ -51,14 +53,18 @@ def DimOp : DependentTensor_Op<"dim", [Pure]> {
 
   let arguments = (ins
     AnyRankedTensor:$source,
-    Index:$dimension
+    Index:$dimension,
+    DependentTensorDimValueSemanticsProp:$dim_value_semantics
   );
   let results = (outs Index:$result);
   let hasCustomAssemblyFormat = 1;
   let hasVerifier = 1;
+  let hasFolder = 1;
 }
 
-def ExtractOp : DependentTensor_Op<"extract", [Pure]> {
+def ExtractOp : DependentTensor_Op<"extract", [
+    Pure, DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
+      ["walkPropertySSAValues"]>]> {
   let summary = "extract an element from a dependent tensor";
   let description = [{
     `dependent_tensor.extract` is the scalar read primitive used by tests to
@@ -68,7 +74,8 @@ def ExtractOp : DependentTensor_Op<"extract", [Pure]> {
 
   let arguments = (ins
     AnyRankedTensor:$source,
-    Variadic<Index>:$indices
+    Variadic<Index>:$indices,
+    DependentTensorValueSemanticsProp:$source_semantics
   );
   let results = (outs AnyType:$result);
   let hasCustomAssemblyFormat = 1;

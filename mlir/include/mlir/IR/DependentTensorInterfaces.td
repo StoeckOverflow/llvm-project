@@ -35,6 +35,29 @@ def DependentTensorValueSemanticsProp
   let hashProperty = "::mlir::hash_value($_storage)";
 }
 
+def DependentTensorDimValueSemanticsProp
+    : Property<"::mlir::DependentTensorDimValueSemantics",
+               "dependent tensor dimension value assertion"> {
+  // Value-bearing properties are contextual and intentionally not serializable
+  // through attributes/bytecode in this prototype. Custom assembly owns parsing
+  // and printing of the SSA references.
+  let convertToAttribute = [{
+    (void)$_storage;
+    return ::mlir::ArrayAttr::get($_ctxt, {});
+  }];
+  let convertFromAttribute = [{
+    $_storage = {};
+    return ::mlir::success();
+  }];
+  let readFromMlirBytecode = [{
+    $_storage = {};
+  }];
+  let writeToMlirBytecode = [{
+    (void)$_storage;
+  }];
+  let hashProperty = "::mlir::hash_value($_storage)";
+}
+
 def DependentTensorPropertyOpInterface
     : OpInterface<"DependentTensorPropertyOpInterface"> {
   let cppNamespace = "::mlir";

@@ -48,3 +48,41 @@ func.func @insert_swapped_property(%m : index, %n : index, %i : index, %j : inde
   %u = dependent_tensor.insert %v into %t[%i, %j] #tensor<[%n, %m], f32> : f32 into tensor<?x?xf32>
   return
 }
+
+
+// -----
+
+func.func @dim_assertion_nonconstant(%m : index, %n : index, %i : index) {
+  %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
+  // expected-error@+1 {{'dependent_tensor.dim' op requires constant dimension operand for #dim assertion}}
+  %d = dependent_tensor.dim %t, %i, #dim %m : tensor<?x?xf32>
+  return
+}
+
+// -----
+
+func.func @dim_assertion_mismatch(%m : index, %n : index) {
+  %c0 = arith.constant 0 : index
+  %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
+  // expected-error@+1 {{'dependent_tensor.dim' op #dim assertion must match source semantics}}
+  %d = dependent_tensor.dim %t, %c0, #dim %n : tensor<?x?xf32>
+  return
+}
+
+// -----
+
+func.func @extract_assertion_mismatch(%m : index, %n : index, %i : index, %j : index) {
+  %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
+  // expected-error@+1 {{'dependent_tensor.extract' op source tensor assertion must match source semantics}}
+  %e = dependent_tensor.extract %t[%i, %j] #tensor<[%n, %m], f32> : tensor<?x?xf32> -> f32
+  return
+}
+
+// -----
+
+func.func @extract_result_type_mismatch(%m : index, %n : index, %i : index, %j : index) {
+  %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
+  // expected-error@+1 {{extract result type must match tensor element type}}
+  %e = dependent_tensor.extract %t[%i, %j] #tensor<[%m, %n], f32> : tensor<?x?xf32> -> i32
+  return
+}
