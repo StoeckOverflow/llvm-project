@@ -21,10 +21,13 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Twine.h"
-#include <memory>
 #include <optional>
 
 namespace mlir {
+class Operation;
+class PropertyOperand;
+void walkPropertyOperands(Operation *op,
+                          function_ref<void(PropertyOperand &)> callback);
 namespace detail {
 /// This is a "tag" used for mapping the properties storage in
 /// llvm::TrailingObjects.
@@ -427,8 +430,8 @@ public:
   void walkSSAUses(function_ref<void(SSAUse)> callback) {
     for (OpOperand &operand : getOpOperands())
       callback(SSAUse(&operand));
-    for (std::unique_ptr<PropertySSAUse> &use : propertySSAUses)
-      callback(SSAUse(use.get()));
+    walkPropertyOperands(
+        this, [&](PropertyOperand &operand) { callback(SSAUse(&operand)); });
   }
 
   // Support operand type iteration.
@@ -1125,9 +1128,6 @@ private:
   /// This holds general named attributes for the operation.
   DictionaryAttr attrs;
 
-  /// Intrusive property SSA uses owned by this operation.
-  SmallVector<std::unique_ptr<PropertySSAUse>> propertySSAUses;
-
   // allow ilist_traits access to 'block' field.
   friend struct llvm::ilist_traits<Operation>;
 
@@ -1138,13 +1138,13 @@ private:
   friend class Value;
 
   // allow property SSA helpers to register and refresh property use nodes.
-  friend void registerPropertySSAUses(Operation *);
-  friend void refreshPropertySSAUses(Operation *);
-  friend void dropPropertySSAUses(Operation *);
+  friend void attachPropertyOperands(Operation *);
+  friend void detachPropertyOperands(Operation *);
+  friend void reattachPropertyOperands(Operation *);
   friend void remapPropertySSAValues(Operation *, IRMapping &);
   friend void replaceUsesOfWithIncludingPropertySSAUses(Operation *, Value,
                                                         Value);
-  friend LogicalResult verifyPropertySSAUseRegistration(Operation *);
+  friend LogicalResult verifyPropertyOperandAttachment(Operation *);
 
   // allow ilist_node_with_parent to access the 'getParent' method.
   friend class llvm::ilist_node_with_parent<Operation, Block>;

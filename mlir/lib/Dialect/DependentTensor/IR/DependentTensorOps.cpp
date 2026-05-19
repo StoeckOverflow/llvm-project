@@ -35,7 +35,7 @@ static DependentTensorValueSemantics buildStored(unsigned valueIndex,
   DependentTensorValueSemantics stored;
   stored.valueIndex = valueIndex;
   stored.rank = type.getRank();
-  stored.dimValues.assign(dimValues.begin(), dimValues.end());
+  stored.assignDimValues(dimValues);
   return stored;
 }
 
@@ -93,7 +93,7 @@ getCallResultSemantics(OpResult result, func::CallOp call, func::FuncOp callee,
           result.getResultNumber())) {
     SmallVector<Value> mappedDims;
     mappedDims.reserve(stored->dimValues.size());
-    for (Value dimValue : stored->dimValues) {
+    for (Value dimValue : stored->getDimValues()) {
       auto arg = dyn_cast<BlockArgument>(dimValue);
       if (!arg || arg.getOwner() != &callee.getBody().front() ||
           arg.getArgNumber() >= call.getNumOperands())
@@ -119,7 +119,7 @@ FailureOr<TensorValueSemantics> dependent_tensor::decodeStoredSemantics(
   unsigned valueIndex = getValueIndex(value);
   if (stored.valueIndex != valueIndex || stored.rank != rankedType.getRank())
     return failure();
-  return buildValueSemantics(rankedType, stored.dimValues);
+  return buildValueSemantics(rankedType, stored.getDimValues());
 }
 
 FailureOr<TensorValueSemantics>
@@ -237,10 +237,10 @@ verifyStoredSemantics(Operation *op, Value value,
   if (stored.dimValues.size() != static_cast<size_t>(rankedType.getRank()))
     return op->emitOpError(
         "requires one dependent dimension value per result dimension");
-  if (!dimOperands.empty() && !llvm::equal(stored.dimValues, dimOperands))
+  if (!dimOperands.empty() && !llvm::equal(stored.getDimValues(), dimOperands))
     return op->emitOpError(
         "requires dependent dimension operands to match stored semantics");
-  for (auto [dim, dimValue] : llvm::enumerate(stored.dimValues)) {
+  for (auto [dim, dimValue] : llvm::enumerate(stored.getDimValues())) {
     if (!rankedType.isDynamicDim(dim))
       return op->emitOpError(
           "requires dependent result dimensions to be dynamic");
@@ -311,14 +311,15 @@ LogicalResult MakeOp::verify() {
   return success();
 }
 
-void MakeOp::walkPropertySSAValues(function_ref<void(Value &)> callback) {
-  for (Value &value : getProperties().result_semantics.dimValues)
-    callback(value);
+void MakeOp::walkPropertySSAUses(
+    function_ref<void(PropertyOperand &)> callback) {
+  for (PropertyOperand &operand : getProperties().result_semantics.dimValues)
+    callback(operand);
 }
 
-void MakeOp::walkDependentTensorPropertyValues(
-    function_ref<void(Value &)> callback) {
-  walkPropertySSAValues(callback);
+void MakeOp::walkDependentTensorPropertyUses(
+    function_ref<void(PropertyOperand &)> callback) {
+  walkPropertySSAUses(callback);
 }
 
 FailureOr<DependentTensorValueSemantics>
@@ -357,8 +358,7 @@ ParseResult DimOp::parse(OpAsmParser &parser, OperationState &result) {
     if (parser.resolveOperand(assertedDim, parser.getBuilder().getIndexType(),
                               resolvedDims))
       return failure();
-    props.dim_value_semantics.dimValues.assign(resolvedDims.begin(),
-                                               resolvedDims.end());
+    props.dim_value_semantics.assignDimValues(resolvedDims);
   }
 
   result.addTypes(parser.getBuilder().getIndexType());
@@ -385,7 +385,7 @@ void DimOp::print(OpAsmPrinter &p) {
   p.printOperand(getDimension());
   if (Value asserted = getPrintableDimAssertion(
           getSource(), getDimension(),
-          getProperties().dim_value_semantics.dimValues)) {
+          getProperties().dim_value_semantics.getDimValues())) {
     p << ", #dim ";
     p.printOperand(asserted);
   }
@@ -401,7 +401,8 @@ LogicalResult DimOp::verify() {
   if (failed(sourceInfo))
     return emitOpError("requires source with dependent_tensor semantics");
 
-  ValueRange assertedDims = getProperties().dim_value_semantics.dimValues;
+  SmallVector<Value, 1> assertedDims =
+      getProperties().dim_value_semantics.getDimValues();
   if (assertedDims.empty())
     return success();
   if (assertedDims.size() != 1)
@@ -420,9 +421,10 @@ LogicalResult DimOp::verify() {
   return success();
 }
 
-void DimOp::walkPropertySSAValues(function_ref<void(Value &)> callback) {
-  for (Value &value : getProperties().dim_value_semantics.dimValues)
-    callback(value);
+void DimOp::walkPropertySSAUses(
+    function_ref<void(PropertyOperand &)> callback) {
+  for (PropertyOperand &operand : getProperties().dim_value_semantics.dimValues)
+    callback(operand);
 }
 
 OpFoldResult DimOp::fold(FoldAdaptor adaptor) {
@@ -513,7 +515,8 @@ void ExtractOp::print(OpAsmPrinter &p) {
   printValueList(p, getIndices());
 
   auto sourceType = cast<RankedTensorType>(getSource().getType());
-  ValueRange storedDims = getProperties().source_semantics.dimValues;
+  SmallVector<Value, 4> storedDims =
+      getProperties().source_semantics.getDimValues();
   if (!storedDims.empty()) {
     p << ' ';
     dependent_tensor::printTensorSpec(p, storedDims,
@@ -556,9 +559,10 @@ LogicalResult ExtractOp::verify() {
   return success();
 }
 
-void ExtractOp::walkPropertySSAValues(function_ref<void(Value &)> callback) {
-  for (Value &value : getProperties().source_semantics.dimValues)
-    callback(value);
+void ExtractOp::walkPropertySSAUses(
+    function_ref<void(PropertyOperand &)> callback) {
+  for (PropertyOperand &operand : getProperties().source_semantics.dimValues)
+    callback(operand);
 }
 
 ParseResult InsertOp::parse(OpAsmParser &parser, OperationState &result) {
@@ -652,20 +656,21 @@ LogicalResult InsertOp::verify() {
                                    getProperties().result_semantics,
                                    getResultDimValues())))
     return failure();
-  if (getProperties().result_semantics.dimValues != destInfo->dimValues)
+  if (getProperties().result_semantics.getDimValues() != destInfo->dimValues)
     return emitOpError(
         "stored result semantics must match destination semantics");
   return success();
 }
 
-void InsertOp::walkPropertySSAValues(function_ref<void(Value &)> callback) {
-  for (Value &value : getProperties().result_semantics.dimValues)
-    callback(value);
+void InsertOp::walkPropertySSAUses(
+    function_ref<void(PropertyOperand &)> callback) {
+  for (PropertyOperand &operand : getProperties().result_semantics.dimValues)
+    callback(operand);
 }
 
-void InsertOp::walkDependentTensorPropertyValues(
-    function_ref<void(Value &)> callback) {
-  walkPropertySSAValues(callback);
+void InsertOp::walkDependentTensorPropertyUses(
+    function_ref<void(PropertyOperand &)> callback) {
+  walkPropertySSAUses(callback);
 }
 
 FailureOr<DependentTensorValueSemantics>

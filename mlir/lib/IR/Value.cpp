@@ -103,7 +103,7 @@ void Value::replaceAllUsesWith(Value newValue) {
 /// listed in 'exceptions' .
 void Value::replaceAllUsesExcept(
     Value newValue, const SmallPtrSetImpl<Operation *> &exceptions) {
-  for (PropertySSAUse &use : llvm::make_early_inc_range(getPropertyUses()))
+  for (PropertyOperand &use : llvm::make_early_inc_range(getPropertyUses()))
     if (exceptions.count(use.getOwner()) == 0)
       use.set(newValue);
   for (OpOperand &use : llvm::make_early_inc_range(getUses()))
@@ -115,7 +115,7 @@ void Value::replaceAllUsesExcept(
 /// IR that uses 'this' to use the other value instead except if the user is
 /// 'exceptedUser'.
 void Value::replaceAllUsesExcept(Value newValue, Operation *exceptedUser) {
-  for (PropertySSAUse &use : llvm::make_early_inc_range(getPropertyUses()))
+  for (PropertyOperand &use : llvm::make_early_inc_range(getPropertyUses()))
     if (use.getOwner() != exceptedUser)
       use.set(newValue);
   for (OpOperand &use : llvm::make_early_inc_range(getUses()))

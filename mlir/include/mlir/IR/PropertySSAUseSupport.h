@@ -18,16 +18,18 @@ namespace mlir {
 class DominanceInfo;
 class Operation;
 
-/// Properties may contain SSA `Value` references. These references are
+/// Properties may contain embedded SSA use nodes. These references are
 /// second-class SSA edges: they are not MLIR operands and are not visible
-/// through native `Value::getUses()`, `Value::getUsers()`, or `use_empty()`.
+/// through native `Value::getUses()`, `Value::getUsers()`, or `use_empty()`,
+/// but they are physically linked into the same per-Value use-list.
 ///
-/// Operations that store such references expose their mutable slots with
-/// `PropertySSAUseOpInterface::walkPropertySSAValues`.
-void walkPropertySSAValues(Operation *op, function_ref<void(Value &)> callback);
-void registerPropertySSAUses(Operation *op);
-void refreshPropertySSAUses(Operation *op);
-void dropPropertySSAUses(Operation *op);
+/// Operations that store such references expose their embedded operands with
+/// `PropertySSAUseOpInterface::walkPropertySSAUses`.
+void walkPropertyOperands(Operation *op,
+                          function_ref<void(PropertyOperand &)> callback);
+void attachPropertyOperands(Operation *op);
+void detachPropertyOperands(Operation *op);
+void reattachPropertyOperands(Operation *op);
 void remapPropertySSAValues(Operation *op, IRMapping &mapping);
 void replacePropertySSAValue(Operation *root, Value from, Value to);
 void replacePropertySSAValueIf(
@@ -47,10 +49,9 @@ void replaceUsesOfWithIncludingPropertySSAUses(Operation *op, Value from,
                                                Value to);
 void reportFatalPropertySSAUseError(Value value, StringRef action);
 
-/// Verify that an operation's registered PropertySSAUse nodes are synchronized
-/// with the operation property Value slots and the corresponding value use-list
-/// membership.
-LogicalResult verifyPropertySSAUseRegistration(Operation *op);
+/// Verify that an operation's embedded PropertyOperands are attached to their
+/// owner and linked into the corresponding value use-lists.
+LogicalResult verifyPropertyOperandAttachment(Operation *op);
 
 /// Return true when `value` models an ordinary property SSA use at `owner`'s
 /// operation location. Some operation properties describe boundary metadata for
@@ -71,12 +72,6 @@ LogicalResult verifyPropertySSAUseDominance(Operation *owner, Value value,
                                             DominanceInfo &dominance);
 LogicalResult verifyPropertySSAUseDominance(Operation *owner,
                                             DominanceInfo &dominance);
-
-// Future direction: if property SSA references become common beyond
-// value-dependent type metadata, consider moving operation-owned
-// PropertySSAUse nodes into trailing storage instead of the current op-local
-// vector. The nodes are operation-owned today but participate in the same
-// per-value use-list as native OpOperand uses.
 
 } // namespace mlir
 

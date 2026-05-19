@@ -21,19 +21,53 @@ namespace mlir {
 struct DependentTensorValueSemantics {
   uint32_t valueIndex = 0;
   int64_t rank = 0;
-  SmallVector<Value, 4> dimValues;
+  SmallVector<PropertyOperand, 4> dimValues;
+
+  void appendDimValuesTo(SmallVectorImpl<Value> &values) const {
+    for (const PropertyOperand &operand : dimValues)
+      values.push_back(operand.get());
+  }
+  SmallVector<Value, 4> getDimValues() const {
+    SmallVector<Value, 4> values;
+    values.reserve(dimValues.size());
+    appendDimValuesTo(values);
+    return values;
+  }
+  void assignDimValues(ValueRange values) {
+    dimValues.clear();
+    dimValues.reserve(values.size());
+    for (Value value : values)
+      dimValues.emplace_back(value);
+  }
 
   bool operator==(const DependentTensorValueSemantics &other) const {
     return valueIndex == other.valueIndex && rank == other.rank &&
-           dimValues == other.dimValues;
+           getDimValues() == other.getDimValues();
   }
 };
 
 struct DependentTensorDimValueSemantics {
-  SmallVector<Value, 1> dimValues;
+  SmallVector<PropertyOperand, 1> dimValues;
+
+  void appendDimValuesTo(SmallVectorImpl<Value> &values) const {
+    for (const PropertyOperand &operand : dimValues)
+      values.push_back(operand.get());
+  }
+  SmallVector<Value, 1> getDimValues() const {
+    SmallVector<Value, 1> values;
+    values.reserve(dimValues.size());
+    appendDimValuesTo(values);
+    return values;
+  }
+  void assignDimValues(ValueRange values) {
+    dimValues.clear();
+    dimValues.reserve(values.size());
+    for (Value value : values)
+      dimValues.emplace_back(value);
+  }
 
   bool operator==(const DependentTensorDimValueSemantics &other) const {
-    return dimValues == other.dimValues;
+    return getDimValues() == other.getDimValues();
   }
 };
 

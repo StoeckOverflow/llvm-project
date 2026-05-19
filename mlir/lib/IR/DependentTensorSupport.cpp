@@ -6,21 +6,21 @@ using namespace mlir;
 
 llvm::hash_code
 mlir::hash_value(const DependentTensorValueSemantics &semantics) {
+  SmallVector<Value, 4> dimValues = semantics.getDimValues();
   return llvm::hash_combine(
       semantics.valueIndex, semantics.rank,
-      llvm::hash_combine_range(semantics.dimValues.begin(),
-                               semantics.dimValues.end()));
+      llvm::hash_combine_range(dimValues.begin(), dimValues.end()));
 }
 
 llvm::hash_code
 mlir::hash_value(const DependentTensorDimValueSemantics &semantics) {
-  return llvm::hash_combine_range(semantics.dimValues.begin(),
-                                  semantics.dimValues.end());
+  SmallVector<Value, 1> dimValues = semantics.getDimValues();
+  return llvm::hash_combine_range(dimValues.begin(), dimValues.end());
 }
 
-void mlir::walkDependentTensorPropertyValues(
-    Operation *op, function_ref<void(Value &)> callback) {
-  walkPropertySSAValues(op, callback);
+void mlir::walkDependentTensorPropertyUses(
+    Operation *op, function_ref<void(PropertyOperand &)> callback) {
+  walkPropertyOperands(op, callback);
 }
 
 void mlir::remapDependentTensorPropertyValues(Operation *op,

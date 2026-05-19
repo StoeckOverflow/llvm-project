@@ -163,11 +163,11 @@ def ForOp : SCF_Op<"for",
        DeclareOpInterfaceMethods<RegionBranchOpInterface,
         ["getEntrySuccessorOperands", "getSuccessorInputs"]>,
        DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
-        ["walkPropertySSAValues"]>,
+        ["walkPropertySSAUses"]>,
        DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
         ["getDependentTensorResultSemantics",
          "getDependentTensorBlockArgumentSemantics",
-         "walkDependentTensorPropertyValues"]>,
+         "walkDependentTensorPropertyUses"]>,
        SingleBlockImplicitTerminator<"scf::YieldOp">,
        RecursiveMemoryEffects]> {
   let summary = "for operation";

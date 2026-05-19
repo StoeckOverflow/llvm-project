@@ -32,7 +32,7 @@ buildInfoFromStored(RankedTensorType type,
     return failure();
   TensorValueSemantics info{type, {}};
   info.dimValues.reserve(stored.dimValues.size());
-  for (Value dimValue : stored.dimValues) {
+  for (Value dimValue : stored.getDimValues()) {
     if (!dimValue || !dimValue.getType().isIndex())
       return failure();
     info.dimValues.push_back(dimValue);
@@ -60,7 +60,7 @@ verifyStoredTensorSemantics(Operation *owner, StringRef kind, Type type,
     return owner->emitOpError() << "requires one dependent dimension value per "
                                 << kind << " tensor dimension";
 
-  for (auto [dim, dimValue] : llvm::enumerate(stored.dimValues)) {
+  for (auto [dim, dimValue] : llvm::enumerate(stored.getDimValues())) {
     if (!rankedType.isDynamicDim(dim))
       return owner->emitOpError()
              << "requires dependent " << kind
@@ -220,7 +220,7 @@ static LogicalResult verifyCallSemantics(func::CallOp call) {
         dyn_cast<RankedTensorType>(callee.getArgumentTypes()[i]);
     SmallVector<Value> mappedDims;
     mappedDims.reserve(stored->dimValues.size());
-    for (Value dimValue : stored->dimValues) {
+    for (Value dimValue : stored->getDimValues()) {
       auto arg = dyn_cast<BlockArgument>(dimValue);
       if (!arg || callee.isExternal() ||
           arg.getOwner() != &callee.getBody().front() ||
@@ -231,7 +231,7 @@ static LogicalResult verifyCallSemantics(func::CallOp call) {
       mappedDims.push_back(call.getOperand(arg.getArgNumber()));
     }
     DependentTensorValueSemantics mapped = *stored;
-    mapped.dimValues = std::move(mappedDims);
+    mapped.assignDimValues(mappedDims);
     auto expected = buildInfoFromStored(rankedArgType, mapped);
     if (failed(actual) || failed(expected))
       return call.emitOpError()

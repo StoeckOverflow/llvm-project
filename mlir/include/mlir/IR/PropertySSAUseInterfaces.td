@@ -16,14 +16,14 @@ def PropertySSAUseOpInterface : OpInterface<"PropertySSAUseOpInterface"> {
   let description = [{
     Interface for operations whose properties contain SSA Value references.
 
-    These references are second-class SSA edges: they are not OpOperands and do
-    not participate in native use-lists, but generic IR infrastructure can use
-    this interface to update, remap, query, and verify the Value slots.
+    These references are second-class SSA edges: they are not OpOperands, but
+    embedded PropertyOperands participate directly in the same physical use-list
+    as native operands.
   }];
   let methods = [
-    InterfaceMethod<"Walk mutable SSA Value slots stored in op properties.",
-      "void", "walkPropertySSAValues",
-      (ins "::llvm::function_ref<void(::mlir::Value &)>":$callback), [{}]>
+    InterfaceMethod<"Walk embedded SSA operands stored in op properties.",
+      "void", "walkPropertySSAUses",
+      (ins "::llvm::function_ref<void(::mlir::PropertyOperand &)>":$callback), [{}]>
   ];
 }
 

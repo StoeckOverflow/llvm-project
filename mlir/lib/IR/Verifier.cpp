@@ -214,7 +214,7 @@ LogicalResult OperationVerifier::verifyOnEntrance(Operation &op) {
              << " type from a different MLIRContext than this operation";
   }
 
-  if (failed(verifyPropertySSAUseRegistration(&op)))
+  if (failed(verifyPropertyOperandAttachment(&op)))
     return failure();
 
   /// Verify that all of the attributes are okay.

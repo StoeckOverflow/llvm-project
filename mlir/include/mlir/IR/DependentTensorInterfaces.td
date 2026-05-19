@@ -79,9 +79,9 @@ def DependentTensorPropertyOpInterface
         return ::mlir::failure();
       }]
     >,
-    InterfaceMethod<"Walk SSA values stored in dependent tensor properties.",
-      "void", "walkDependentTensorPropertyValues",
-      (ins "::llvm::function_ref<void(::mlir::Value &)>":$callback), [{}]>
+    InterfaceMethod<"Walk embedded SSA operands stored in dependent tensor properties.",
+      "void", "walkDependentTensorPropertyUses",
+      (ins "::llvm::function_ref<void(::mlir::PropertyOperand &)>":$callback), [{}]>
   ];
 }
 

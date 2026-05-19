@@ -220,7 +220,7 @@ static ParseResult resolveDependentTensorTypesBoundary(
         return parser.emitError(
             dim.location,
             "dependent tensor boundary dims must be index values");
-      info.dimValues.push_back(it->second);
+      info.dimValues.emplace_back(it->second);
     }
     out.push_back(std::move(info));
     return success();
@@ -541,7 +541,7 @@ void FuncOp::print(OpAsmPrinter &p) {
       p << " : ";
       auto type =
           cast<RankedTensorType>(getArgument(semantics.valueIndex).getType());
-      dependent_tensor::printTensorSpec(p, semantics.dimValues,
+      dependent_tensor::printTensorSpec(p, semantics.getDimValues(),
                                         type.getElementType());
     });
     p << "]";
@@ -550,7 +550,7 @@ void FuncOp::print(OpAsmPrinter &p) {
       auto printResultSemantics = [&](const auto &semantics) {
         auto type = cast<RankedTensorType>(
             getFunctionType().getResult(semantics.valueIndex));
-        dependent_tensor::printTensorSpec(p, semantics.dimValues,
+        dependent_tensor::printTensorSpec(p, semantics.getDimValues(),
                                           type.getElementType());
       };
       if (resultSemantics.size() == 1) {
@@ -572,20 +572,21 @@ void FuncOp::print(OpAsmPrinter &p) {
   }
 }
 
-void FuncOp::walkPropertySSAValues(function_ref<void(Value &)> callback) {
+void FuncOp::walkPropertySSAUses(
+    function_ref<void(PropertyOperand &)> callback) {
   for (DependentTensorValueSemantics &semantics :
        getProperties().dependentTensorArgSemantics)
-    for (Value &value : semantics.dimValues)
-      callback(value);
+    for (PropertyOperand &operand : semantics.dimValues)
+      callback(operand);
   for (DependentTensorValueSemantics &semantics :
        getProperties().dependentTensorResultSemantics)
-    for (Value &value : semantics.dimValues)
-      callback(value);
+    for (PropertyOperand &operand : semantics.dimValues)
+      callback(operand);
 }
 
-void FuncOp::walkDependentTensorPropertyValues(
-    function_ref<void(Value &)> callback) {
-  walkPropertySSAValues(callback);
+void FuncOp::walkDependentTensorPropertyUses(
+    function_ref<void(PropertyOperand &)> callback) {
+  walkPropertySSAUses(callback);
 }
 
 FailureOr<DependentTensorValueSemantics>

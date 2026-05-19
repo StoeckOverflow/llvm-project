@@ -15,6 +15,7 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/PropertySSAUseSupport.h"
 #include "llvm/Support/SHA1.h"
 #include <numeric>
 #include <optional>
@@ -198,8 +199,11 @@ LogicalResult OperationState::setProperties(
     assert(!properties);
     return op->setPropertiesFromAttribute(propertiesAttr, emitError);
   }
-  if (properties)
+  if (properties) {
+    detachPropertyOperands(op);
     propertiesSetter(op->getPropertiesStorage(), properties);
+    attachPropertyOperands(op);
+  }
   return success();
 }
 

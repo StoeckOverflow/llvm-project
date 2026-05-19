@@ -293,7 +293,7 @@ void RewriterBase::finalizeOpModification(Operation *op) {
 }
 
 void RewriterBase::replaceAllUsesWith(Value from, Value to) {
-  for (PropertySSAUse &use :
+  for (PropertyOperand &use :
        llvm::make_early_inc_range(from.getPropertyUses())) {
     Operation *op = use.getOwner();
     modifyOpInPlace(op, [&]() { use.set(to); });
@@ -306,7 +306,7 @@ void RewriterBase::replaceAllUsesWith(Value from, Value to) {
 
 void RewriterBase::replaceAllUsesExcept(
     Value from, Value to, const SmallPtrSetImpl<Operation *> &preservedUsers) {
-  for (PropertySSAUse &use :
+  for (PropertyOperand &use :
        llvm::make_early_inc_range(from.getPropertyUses())) {
     Operation *op = use.getOwner();
     if (!preservedUsers.contains(op))

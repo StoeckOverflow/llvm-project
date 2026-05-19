@@ -15,8 +15,8 @@ class Operation;
 /// Compatibility wrappers for the generic property SSA use layer. New generic
 /// IR code should use PropertySSAUseSupport directly; dependent_tensor-specific
 /// code may use these names when that reads more clearly.
-void walkDependentTensorPropertyValues(Operation *op,
-                                       function_ref<void(Value &)> callback);
+void walkDependentTensorPropertyUses(
+    Operation *op, function_ref<void(PropertyOperand &)> callback);
 void remapDependentTensorPropertyValues(Operation *op, IRMapping &mapping);
 void replaceDependentTensorPropertyValue(Operation *root, Value from, Value to);
 void replaceDependentTensorPropertyValueIf(

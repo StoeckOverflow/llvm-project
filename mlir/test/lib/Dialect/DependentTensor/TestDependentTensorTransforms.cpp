@@ -363,10 +363,12 @@ struct TestDependentTensorReplaceDimValueExceptPass
 
     Operation *exceptedOwner = nullptr;
     for (Operation &op : getOperation().getBody().front()) {
-      walkDependentTensorPropertyValues(&op, [&](Value &propertyValue) {
-        if (!exceptedOwner && propertyValue == indexResults.front())
-          exceptedOwner = &op;
-      });
+      walkDependentTensorPropertyUses(
+          &op, [&](PropertyOperand &propertyOperand) {
+            Value propertyValue = propertyOperand.get();
+            if (!exceptedOwner && propertyValue == indexResults.front())
+              exceptedOwner = &op;
+          });
       if (exceptedOwner)
         break;
     }
@@ -404,10 +406,12 @@ struct TestDependentTensorRewriterReplaceDimValueExceptPass
 
     Operation *exceptedOwner = nullptr;
     for (Operation &op : getOperation().getBody().front()) {
-      walkDependentTensorPropertyValues(&op, [&](Value &propertyValue) {
-        if (!exceptedOwner && propertyValue == indexResults.front())
-          exceptedOwner = &op;
-      });
+      walkDependentTensorPropertyUses(
+          &op, [&](PropertyOperand &propertyOperand) {
+            Value propertyValue = propertyOperand.get();
+            if (!exceptedOwner && propertyValue == indexResults.front())
+              exceptedOwner = &op;
+          });
       if (exceptedOwner)
         break;
     }
@@ -550,10 +554,10 @@ struct TestDependentTensorRefreshPropertyUsesPass
     Value oldValue = indexArgs[0];
     Value newValue = indexArgs[1];
     bool replaced = false;
-    walkDependentTensorPropertyValues(
-        getOperation(), [&](Value &propertyValue) {
-          if (!replaced && propertyValue == oldValue) {
-            propertyValue = newValue;
+    walkDependentTensorPropertyUses(
+        getOperation(), [&](PropertyOperand &propertyOperand) {
+          if (!replaced && propertyOperand.get() == oldValue) {
+            propertyOperand.set(newValue);
             replaced = true;
           }
         });
@@ -561,7 +565,7 @@ struct TestDependentTensorRefreshPropertyUsesPass
       return signalPassFailure();
 
     Operation *owner = getOperation();
-    refreshPropertySSAUses(owner);
+    reattachPropertyOperands(owner);
     if (!oldValue.property_use_empty() || newValue.property_use_empty()) {
       getOperation().emitOpError("expected refreshed property SSA use-list");
       return signalPassFailure();
@@ -620,7 +624,7 @@ struct TestDependentTensorCheckPropertyUsesPass
     if (getOperation().getName() == "check_repeated_property_users") {
       Value value = getOperation().getArgument(0);
       unsigned propertyUseCount = 0;
-      for (PropertySSAUse &use : value.getPropertyUses())
+      for (PropertyOperand &use : value.getPropertyUses())
         if (root->isAncestor(use.getOwner()))
           ++propertyUseCount;
       if (propertyUseCount != 3) {
@@ -902,14 +906,14 @@ struct TestDependentTensorCorruptSemanticsPass
 
   static void setFirstPropertyValue(Operation *op, Value replacement) {
     bool replaced = false;
-    walkDependentTensorPropertyValues(op, [&](Value &propertyValue) {
+    walkDependentTensorPropertyUses(op, [&](PropertyOperand &propertyOperand) {
       if (!replaced) {
-        propertyValue = replacement;
+        propertyOperand.set(replacement);
         replaced = true;
       }
     });
     if (replaced)
-      refreshPropertySSAUses(op);
+      reattachPropertyOperands(op);
   }
 
   static dependent_tensor::MakeOp findFirstMake(func::FuncOp func) {
@@ -1015,8 +1019,8 @@ struct TestDependentTensorCorruptSemanticsPass
     auto &semantics = victim.getProperties().dependentTensorArgSemantics;
     if (semantics.empty() || semantics.front().dimValues.empty())
       return;
-    semantics.front().dimValues.front() = source.getArgument(0);
-    refreshPropertySSAUses(victim);
+    semantics.front().dimValues.front().set(source.getArgument(0));
+    reattachPropertyOperands(victim);
   }
 
   static void corruptScfForBoundaryDominance(ModuleOp module) {
@@ -1043,21 +1047,23 @@ struct TestDependentTensorCorruptSemanticsPass
   }
 };
 
-struct TestDependentTensorCorruptPropertyUseRegistrationPass
-    : public PassWrapper<TestDependentTensorCorruptPropertyUseRegistrationPass,
-                         OperationPass<func::FuncOp>> {
+struct TestDependentTensorCorruptPropertyOperandAttachmentPass
+    : public PassWrapper<
+          TestDependentTensorCorruptPropertyOperandAttachmentPass,
+          OperationPass<func::FuncOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(
-      TestDependentTensorCorruptPropertyUseRegistrationPass)
+      TestDependentTensorCorruptPropertyOperandAttachmentPass)
 
   StringRef getArgument() const final {
-    return "test-dependent-tensor-corrupt-property-use-registration";
+    return "test-dependent-tensor-corrupt-property-operand-attachment";
   }
   StringRef getDescription() const final {
-    return "Mutate property SSA values without refreshing use registration";
+    return "Detach an embedded property operand to test attachment "
+           "verification";
   }
 
   void runOnOperation() override {
-    if (getOperation().getName() != "stale_property_use_registration")
+    if (getOperation().getName() != "stale_property_operand_attachment")
       return;
 
     SmallVector<BlockArgument> indexArgs;
@@ -1069,12 +1075,13 @@ struct TestDependentTensorCorruptPropertyUseRegistrationPass
 
     bool replaced = false;
     getOperation()->walk([&](Operation *op) {
-      walkDependentTensorPropertyValues(op, [&](Value &propertyValue) {
-        if (!replaced && propertyValue == indexArgs[0]) {
-          propertyValue = indexArgs[1];
-          replaced = true;
-        }
-      });
+      walkDependentTensorPropertyUses(
+          op, [&](PropertyOperand &propertyOperand) {
+            if (!replaced && propertyOperand.get() == indexArgs[0]) {
+              propertyOperand.detach();
+              replaced = true;
+            }
+          });
     });
     if (!replaced)
       return signalPassFailure();
@@ -1103,7 +1110,7 @@ void registerDependentTensorTestPasses() {
   PassRegistration<TestDependentTensorDceLocalDimsPass>();
   PassRegistration<TestDependentTensorEraseLiveEntryBlockPass>();
   PassRegistration<TestDependentTensorCorruptSemanticsPass>();
-  PassRegistration<TestDependentTensorCorruptPropertyUseRegistrationPass>();
+  PassRegistration<TestDependentTensorCorruptPropertyOperandAttachmentPass>();
 }
 } // namespace test
 } // namespace mlir

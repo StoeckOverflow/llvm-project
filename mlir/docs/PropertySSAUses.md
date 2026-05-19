@@ -1,206 +1,117 @@
-# Property SSA Uses
+# DependentTensor Dialect Prototype
 
-MLIR operation properties may store SSA `Value` handles. This is useful for
-value-dependent metadata, such as dependent tensor refinements whose dynamic
-dimensions are represented by SSA values. These references are real SSA edges
-for dominance, replacement, cloning, erasure, and liveness, but they are not
-native MLIR operands.
+## 1. Core Idea
 
-This document describes the current model and the APIs that property-aware
-infrastructure should use.
+* `DependentTensor` models tensors whose shape semantics can depend on SSA
+  values.
+* A dynamic dimension is stored as metadata, but it is still a real SSA edge.
+* Textual IR stays compact: dependent dimensions print inside `#tensor<...>`
+  annotations instead of becoming ordinary operands.
+* The key invariant is that property SSA edges are tracked by embedded
+  `PropertyOperand`s, not by operation-owned sidecar registration objects.
 
-## Native Uses and Property Uses
+## 2. Architecture
 
-MLIR's native use-list model is unchanged:
+* DependentTensor dialect ops define the local tensor semantics.
+* Dependent tensor property structs store ranks, value indices, and dimension
+  SSA references.
+* Property SSA-use infrastructure exposes embedded `PropertyOperand`s through
+  `PropertySSAUseOpInterface`.
+* Verification, rewrites, cloning, dominance, and liveness use the combined
+  `SSAUse` view when semantic SSA edges matter.
 
-* `Value::getUses()`, `Value::getUsers()`, and `Value::use_empty()` describe
-  native operand uses.
-* `Operation::use_empty()` describes native uses of operation results.
-* Property-contained SSA values are not `OpOperand`s and are not included in
-  those native queries.
+## 3. Dialect Operations
 
-Property SSA references are tracked with `PropertySSAUse` nodes. These nodes are
-not `OpOperand`s and remain owned by their operation, but they are linked into
-the same per-value use-list as native operands. Native APIs are filtered views
-over that mixed list.
+* `dependent_tensor.make` creates a tensor value with dependent shape metadata.
+* `dependent_tensor.dim` materializes one dependent dimension value.
+* `dependent_tensor.extract` reads an element while preserving source
+  semantics.
+* `dependent_tensor.insert` writes an element and carries result semantics.
 
-MLIR exposes the combined use-list through `SSAUse`. An `SSAUse` is a non-owning
-wrapper over either an `OpOperand` or a `PropertySSAUse`; it does not make
-properties ordinary operands. This gives generic infrastructure one traversal
-surface for semantic SSA dependencies while preserving native operand APIs as
-operand-only views.
+## 4. Boundary Operations
 
-The direct property-use APIs are:
+* `func.func` stores dependent tensor semantics for arguments and results.
+* `func.call` maps callee boundary semantics onto caller operands and results.
+* `scf.for` carries dependent tensor semantics across init operands, region
+  block arguments, yielded values, and loop results.
 
-* `Value::getPropertyUses()`
-* `Value::getPropertyUsers()`
-* `Value::property_use_empty()`
-* `Operation::property_use_empty()`
+## 5. Property Operand Infrastructure
 
-The combined native-plus-property APIs are:
+* `PropertyOperand` is the property-side peer of `OpOperand`.
+* It stores a `Value`, has `get`, `set`, `drop`, `attach`, and `detach`, and is
+  valid in detached/null form during property construction.
+* `SSAUse` wraps either an `OpOperand *` or a `PropertyOperand *`.
+* `Value::getUses()` remains native-only.
+* `Value::getPropertyUses()` returns embedded property operands.
+* `Value::getAllUses()` returns the combined native-plus-property SSA view.
 
-* `Value::getAllUses()`
-* `Value::all_use_begin()` / `Value::all_use_end()`
-* `Value::all_use_empty()`
-* `Value::getAllUsers()`
-* `Operation::walkSSAUses(function_ref<void(SSAUse)>)`
-* `Operation::all_use_empty()`
-* `allUseEmpty(Value, Operation *root = nullptr)`
-* `getAllUsers(Value, Operation *root = nullptr)`
-* `allResultsUseEmpty(Operation *, Operation *root = nullptr)`
+## 6. Physical Use-List Layout
 
-Use the combined APIs when a transformation is asking whether a value or
-operation result is semantically live.
+* `OpOperand` and `PropertyOperand` link into the same physical per-`Value`
+  use-list.
+* Native iterators filter that list to ordinary operands.
+* Property iterators filter that list to embedded property operands.
+* All-use iterators expose both kinds without making property operands ordinary
+  operation operands.
+* There is no `Operation::propertySSAUses` vector and no sidecar
+  `PropertySSAUse` node allocation.
 
-## Why Property Uses Are Second-Class
+## 7. Semantic Dataflow Example
 
-Property references are kept separate from native operands for three reasons.
+```mlir
+func.func @example(%m: index, %i: index) -> f32 {
+  %t = dependent_tensor.make () #tensor<[%m], f32> : tensor<?xf32>
+  %v = dependent_tensor.extract %t[%i] : tensor<?xf32>
+  return %v : f32
+}
+```
 
-First, existing MLIR passes and dialects rely on `OpOperand` meaning "ordinary
-operation operand" with stable operand numbering, mutation hooks, and parsing
-semantics. Silently mixing property references into native use iteration would
-change long-standing assumptions.
+* Native edges:
+  * `%t -> dependent_tensor.extract`
+  * `%i -> dependent_tensor.extract`
+  * `%v -> return`
+* Property edges:
+  * `%m -> PropertyOperand` embedded in `%t`'s result semantics.
+* Combined graph sketch:
+  * `%m` defines the symbolic tensor dimension.
+  * `%t` carries that dimension through metadata.
+  * `%v` is produced by a native read from `%t`.
+* Exact use-lists:
+  * `%m.getUses()` is empty in this example.
+  * `%m.getPropertyUses()` contains the `PropertyOperand` in
+    `dependent_tensor.make`.
+  * `%m.getAllUses()` contains that same property edge.
 
-Second, property references often describe metadata about an operation boundary
-or result rather than an executable operand of the operation. Treating them as
-operands would overstate their operational meaning.
+## 8. Replacement, Remapping, and Dominance
 
-Third, the explicit API boundary makes migration tractable. Clients that care
-about semantic liveness, dominance, or replacement can opt into the combined
-queries without changing every native operand walk in MLIR at once.
+* RAUW updates embedded property operands.
+* `replaceAllUsesWith`, `replaceAllUsesExcept`, and
+  `replaceSSAUsesWithIf` handle property uses directly.
+* `replaceUsesWithIf` intentionally remains native-operand-only.
+* `IRMapping` and cloning remap property operands after native operands are
+  remapped.
+* Generic dominance verification walks `Operation::walkSSAUses`.
+* `IsolatedFromAbove` rejects illegal property captures across isolated
+  operation boundaries.
 
-## Registration and Mutation
+## 9. Edge Cases
 
-Operations that store SSA values in properties expose the mutable property slots
-through `PropertySSAUseOpInterface::walkPropertySSAValues`.
+* Native liveness APIs such as `use_empty()` intentionally miss property-only
+  liveness.
+* Property-aware liveness should use `all_use_empty`, `getAllUses`, or the
+  dependent tensor helper APIs.
+* Direct mutation must go through `PropertyOperand::set`.
+* Property-use cycles and owner self-references are infrastructure-possible.
+* `dropAllReferences()` drops property operands so cyclic property references
+  can be broken during cleanup.
+* Region boundary metadata is verified by the dependent tensor semantic
+  verifier, because those references are not always ordinary owner-site uses.
 
-The infrastructure helpers are:
+## 10. Kernel Examples
 
-* `walkPropertySSAValues(Operation *, function_ref<void(Value &)>)`
-* `registerPropertySSAUses(Operation *)`
-* `refreshPropertySSAUses(Operation *)`
-* `dropPropertySSAUses(Operation *)`
-* `remapPropertySSAValues(Operation *, IRMapping &)`
-* `replaceUsesOfWithIncludingPropertySSAUses(Operation *, Value from, Value to)`
-
-Operation creation registers property uses. Operation destruction drops the
-operation-owned property-use nodes. Direct property mutations that change stored
-`Value`s must either update the relevant `PropertySSAUse` node or call
-`refreshPropertySSAUses`.
-
-## Replacement, Clone, and Remap
-
-Property SSA uses participate in the core replacement paths:
-
-* `Value::replaceAllUsesWith`
-* `Value::replaceAllUsesExcept`
-* `Value::replaceSSAUsesWithIf`
-* `RewriterBase::replaceOp`
-* `RewriterBase::replaceAllUsesWith`
-* `RewriterBase::replaceSSAUsesWithIf`
-
-`replaceUsesWithIf` remains a native operand API. Its predicate receives an
-`OpOperand &`, and only ordinary operand uses are rewritten. It does not
-approximate property replacement through operation ownership.
-
-Use `replaceSSAUsesWithIf` when the predicate must see the exact semantic SSA
-use. Its predicate receives an `SSAUse`, so clients can distinguish ordinary
-operands from property references and select property-only users precisely.
-
-Clone and remap paths call `remapPropertySSAValues` so property-contained values
-follow `IRMapping`. This includes operation and region cloning paths that route
-through the shared IR clone support.
-
-## Dominance and Isolation
-
-Generic IR verification walks `Operation::walkSSAUses` and checks native
-operands and owner-site property SSA uses through the same unified traversal.
-Property-specific clients may still call `verifyPropertySSAUseDominance`.
-
-The verifier enforces that:
-
-* an owner-site property value dominates the owning operation, using MLIR
-  `DominanceInfo`;
-* a property value does not illegally cross an `IsolatedFromAbove` boundary.
-
-Some property references describe operation boundary metadata for values defined
-inside a region owned by the operation itself. Those are not ordinary owner-site
-uses, so their stronger semantics remain dialect-specific. Dependent tensor
-function boundary, result, and loop-carried metadata are verified by the
-dependent tensor semantic verifier.
-
-## Erasure and Liveness
-
-Release-visible erasure guards reject several unsafe cases:
-
-* `Operation::erase` rejects operation results with live property SSA users.
-* `Block::eraseArgument` rejects erased arguments with live property SSA users.
-* `Block::erase` rejects blocks whose arguments have live property SSA users.
-
-`RewriterBase::eraseOp` and `RewriterBase::eraseBlock` use property-aware debug
-assertions. Property-aware DCE should use `all_use_empty` or
-`allResultsUseEmpty` rather than native-only `use_empty`.
-
-The following generic paths are property-aware today:
-
-* RAUW and selected replace APIs;
-* operation/region clone and remap;
-* generic verifier dominance/isolation;
-* central erase paths listed above;
-* `RewriterBase` replacement and erase checks;
-* CSE dead-operation checks;
-* `remove-dead-values`;
-* dependent tensor semantic verification and local dimension DCE.
-
-## Limitations
-
-Native MLIR operand use-list APIs remain native-only. A pass that manually calls
-`Value::use_empty()` or `Operation::use_empty()` to decide semantic liveness may
-still ignore property SSA users unless it has been audited or routes through a
-property-aware helper.
-
-Property uses are not operands. They do not participate in operand numbering,
-operand segment attributes, operand parsing, or `OpOperand` mutation callbacks.
-Use `SSAUse::getKind()` to distinguish ordinary operands from property uses
-when using the unified traversal.
-
-Release-mode safety is improved in the shared erase paths, but it is not a
-global replacement for verification. Transformations that directly mutate
-properties must keep property-use nodes in sync. Dialect-specific metadata
-semantics still need dialect-specific verification.
-
-The generic verifier checks that registered `PropertySSAUse` nodes are
-synchronized with the operation's current property `Value` slots and with the
-corresponding value use-list membership. This catches stale direct mutations
-where a property slot is changed but `refreshPropertySSAUses` is not called.
-
-## Tests
-
-The dependent tensor tests exercise the current infrastructure:
-
-* `dependent-tensor-transforms.mlir` covers RAUW, `replaceAllUsesExcept`,
-  `replaceUsesWithIf`, precise `replaceSSAUsesWithIf`, clone/remap, unified
-  `SSAUse` queries, CSE, canonicalization, and property-aware local dimension
-  DCE.
-* `dependent-tensor-property-ssa-generic.mlir` covers direct
-  `RewriterBase::replaceOp`, dialect conversion replacement, function-boundary
-  cloning, `remove-dead-values`, and release-relevant block erasure guards.
-* `dependent-tensor-property-ssa-ir-verifier-errors.mlir` covers generic IR
-  verifier isolation diagnostics.
-* `dependent-tensor-property-ssa-registration-errors.mlir` covers stale
-  property-use registration diagnostics after direct property mutation.
-* `dependent-tensor-semantic-errors.mlir` covers dependent tensor semantic
-  dominance, isolation, function boundary, and loop-carried metadata errors.
-
-## Future Work
-
-Property SSA uses should remain separate from native operands at the API level
-unless MLIR intentionally changes operand semantics. Useful future work
-includes:
-
-* auditing more dialect-specific passes that use raw `use_empty`;
-* adding broader inliner and dialect-conversion coverage;
-* auditing clients that should migrate from property-specific helpers to the
-  unified `SSAUse` view;
-* moving operation-owned `PropertySSAUse` nodes into trailing storage if the
-  feature becomes widely used beyond value-dependent type metadata.
+* Matmul examples use property operands to carry `M`, `N`, and `K` shape
+  relationships through tensor values.
+* Conv2D im2col examples use property operands to preserve image, filter, and
+  lowered matrix dimensions.
+* These examples exercise semantic dataflow without changing native operand
+  numbering or textual IR syntax.

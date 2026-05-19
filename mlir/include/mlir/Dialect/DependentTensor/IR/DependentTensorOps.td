@@ -20,10 +20,10 @@ class DependentTensor_Op<string mnemonic, list<Trait> traits = []>
 
 def MakeOp : DependentTensor_Op<"make", [
     Pure, DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
-      ["walkPropertySSAValues"]>,
+      ["walkPropertySSAUses"]>,
     DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
       ["getDependentTensorResultSemantics",
-       "walkDependentTensorPropertyValues"]>]> {
+       "walkDependentTensorPropertyUses"]>]> {
   let summary = "construct a property-native dependent tensor value";
   let description = [{
     `dependent_tensor.make` constructs a tensor value whose dependency semantics
@@ -43,7 +43,7 @@ def MakeOp : DependentTensor_Op<"make", [
 
 def DimOp : DependentTensor_Op<"dim", [
     Pure, DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
-      ["walkPropertySSAValues"]>]> {
+      ["walkPropertySSAUses"]>]> {
   let summary = "query a dependent tensor dimension";
   let description = [{
     `dependent_tensor.dim` mirrors `tensor.dim` for the dependent tensor
@@ -64,7 +64,7 @@ def DimOp : DependentTensor_Op<"dim", [
 
 def ExtractOp : DependentTensor_Op<"extract", [
     Pure, DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
-      ["walkPropertySSAValues"]>]> {
+      ["walkPropertySSAUses"]>]> {
   let summary = "extract an element from a dependent tensor";
   let description = [{
     `dependent_tensor.extract` is the scalar read primitive used by tests to
@@ -85,10 +85,10 @@ def ExtractOp : DependentTensor_Op<"extract", [
 def InsertOp : DependentTensor_Op<"insert", [
     Pure, AttrSizedOperandSegments,
     DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
-      ["walkPropertySSAValues"]>,
+      ["walkPropertySSAUses"]>,
     DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
       ["getDependentTensorResultSemantics",
-       "walkDependentTensorPropertyValues"]>]> {
+       "walkDependentTensorPropertyUses"]>]> {
   let summary = "insert an element into a dependent tensor";
   let description = [{
     `dependent_tensor.insert` mirrors `tensor.insert`. Its result semantics are

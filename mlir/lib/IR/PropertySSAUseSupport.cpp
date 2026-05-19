@@ -26,51 +26,47 @@ static bool isInPropertySSAUseScope(Operation *root, Operation *owner) {
   return !root || (owner && root->isAncestor(owner));
 }
 
-void mlir::walkPropertySSAValues(Operation *op,
-                                 function_ref<void(Value &)> callback) {
+void mlir::walkPropertyOperands(
+    Operation *op, function_ref<void(PropertyOperand &)> callback) {
   if (!op)
     return;
-  auto skipNullCallback = [&](Value &value) {
-    if (value)
-      callback(value);
-  };
   if (std::optional<RegisteredOperationName> registeredInfo =
           op->getName().getRegisteredInfo()) {
     // Property SSA refs live in concrete op properties, so only ops that
-    // explicitly register the interface can expose mutable Value slots. Avoid
+    // explicitly register the interface can expose embedded operands. Avoid
     // dialect fallback interfaces here: this helper is also used from teardown
     // assertions, where a dialect may be destroying cached unrelated IR.
     if (auto *iface = registeredInfo->getInterface<PropertySSAUseOpInterface>())
-      iface->walkPropertySSAValues(iface, op, skipNullCallback);
+      iface->walkPropertySSAUses(iface, op, callback);
     return;
   }
   auto iface = dyn_cast<PropertySSAUseOpInterface>(op);
   if (!iface)
     return;
-  iface.walkPropertySSAValues(skipNullCallback);
+  iface.walkPropertySSAUses(callback);
 }
 
-void mlir::dropPropertySSAUses(Operation *op) {
+void mlir::detachPropertyOperands(Operation *op) {
   if (!op)
     return;
-  for (std::unique_ptr<PropertySSAUse> &use : op->propertySSAUses)
-    use->unlink();
-  op->propertySSAUses.clear();
-}
-
-void mlir::registerPropertySSAUses(Operation *op) {
-  if (!op)
-    return;
-  walkPropertySSAValues(op, [&](Value &value) {
-    if (value)
-      op->propertySSAUses.push_back(
-          std::make_unique<PropertySSAUse>(op, &value));
+  walkPropertyOperands(op, [](PropertyOperand &operand) {
+    if (operand.getOwner())
+      operand.detach();
   });
 }
 
-void mlir::refreshPropertySSAUses(Operation *op) {
-  dropPropertySSAUses(op);
-  registerPropertySSAUses(op);
+void mlir::attachPropertyOperands(Operation *op) {
+  if (!op)
+    return;
+  walkPropertyOperands(op, [&](PropertyOperand &operand) {
+    if (!operand.getOwner())
+      operand.attach(op);
+  });
+}
+
+void mlir::reattachPropertyOperands(Operation *op) {
+  detachPropertyOperands(op);
+  attachPropertyOperands(op);
 }
 
 void mlir::remapPropertySSAValues(Operation *op, IRMapping &mapping) {
@@ -91,7 +87,8 @@ void mlir::replacePropertySSAValueIf(
     function_ref<bool(Operation *)> shouldReplaceOwner) {
   if (!from || !to)
     return;
-  for (PropertySSAUse &use : llvm::make_early_inc_range(from.getPropertyUses()))
+  for (PropertyOperand &use :
+       llvm::make_early_inc_range(from.getPropertyUses()))
     if (isInPropertySSAUseScope(root, use.getOwner()) &&
         shouldReplaceOwner(use.getOwner()))
       use.set(to);
@@ -102,7 +99,7 @@ bool mlir::hasPropertySSAUses(Value value, Operation *root) {
     return false;
   if (!root)
     return !value.property_use_empty();
-  return llvm::any_of(value.getPropertyUses(), [&](PropertySSAUse &use) {
+  return llvm::any_of(value.getPropertyUses(), [&](PropertyOperand &use) {
     return isInPropertySSAUseScope(root, use.getOwner());
   });
 }
@@ -162,44 +159,34 @@ bool mlir::allResultsUseEmpty(Operation *op, Operation *root) {
   });
 }
 
-LogicalResult mlir::verifyPropertySSAUseRegistration(Operation *op) {
+LogicalResult mlir::verifyPropertyOperandAttachment(Operation *op) {
   if (!op)
     return success();
 
-  SmallVector<Value *> propertySlots;
-  walkPropertySSAValues(op,
-                        [&](Value &value) { propertySlots.push_back(&value); });
-  if (propertySlots.size() != op->propertySSAUses.size())
-    return op->emitOpError()
-           << "has stale property SSA use registration: expected "
-           << propertySlots.size() << " registered uses, got "
-           << op->propertySSAUses.size();
-
-  for (auto [index, usePtr] : llvm::enumerate(op->propertySSAUses)) {
-    PropertySSAUse &use = *usePtr;
-    if (use.getOwner() != op)
-      return op->emitOpError()
-             << "has property SSA use registration with incorrect owner";
-    if (use.getSlot() != propertySlots[index])
-      return op->emitOpError()
-             << "has stale property SSA use registration for property slot #"
-             << index;
-    Value value = use.get();
-    if (!value)
-      return op->emitOpError()
-             << "has null property SSA use registration for property slot #"
-             << index;
-    bool isLinkedToCurrentValue =
-        llvm::any_of(value.getPropertyUses(), [&](PropertySSAUse &candidate) {
-          return &candidate == &use;
-        });
-    if (!isLinkedToCurrentValue)
-      return op->emitOpError()
-             << "has stale property SSA use-list membership for property slot #"
-             << index;
-  }
-
-  return success();
+  unsigned index = 0;
+  LogicalResult result = success();
+  walkPropertyOperands(op, [&](PropertyOperand &operand) {
+    if (failed(result))
+      return;
+    if (operand.getOwner() != op) {
+      result = op->emitOpError()
+               << "has property operand with incorrect or missing owner";
+      return;
+    }
+    Value value = operand.get();
+    if (value &&
+        !llvm::any_of(value.getPropertyUses(), [&](PropertyOperand &candidate) {
+          return &candidate == &operand;
+        })) {
+      result = op->emitOpError()
+               << "has stale property SSA use-list membership for property "
+                  "operand #"
+               << index;
+      return;
+    }
+    ++index;
+  });
+  return result;
 }
 
 LogicalResult mlir::verifyNoPropertySSAUses(Value value, Operation *root,
@@ -221,7 +208,7 @@ void mlir::reportFatalPropertySSAUseError(Value value, StringRef action) {
     os << "value";
   }
   os << " has live property SSA use";
-  for (PropertySSAUse &use : value.getPropertyUses()) {
+  for (PropertyOperand &use : value.getPropertyUses()) {
     os << " owned by '" << use.getOwner()->getName() << "' op";
     break;
   }

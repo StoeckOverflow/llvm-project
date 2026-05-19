@@ -88,7 +88,8 @@ getDependentTensorSemanticsFromValue(Value value) {
       return failure();
     return iface.getDependentTensorResultSemantics(result.getResultNumber());
   }
-  return getDependentTensorSemanticsFromBlockArgument(cast<BlockArgument>(value));
+  return getDependentTensorSemanticsFromBlockArgument(
+      cast<BlockArgument>(value));
 }
 
 //===----------------------------------------------------------------------===//
@@ -405,12 +406,12 @@ static void populateDependentTensorLoopSemantics(ForOp forOp) {
   properties.dependentTensorResultSemantics.clear();
 
   if (forOp.getInitArgs().size() != forOp.getNumResults()) {
-    refreshPropertySSAUses(forOp);
+    reattachPropertyOperands(forOp);
     return;
   }
   if (forOp.getBody()->getNumArguments() <
       forOp.getNumInductionVars() + forOp.getInitArgs().size()) {
-    refreshPropertySSAUses(forOp);
+    reattachPropertyOperands(forOp);
     return;
   }
 
@@ -433,7 +434,7 @@ static void populateDependentTensorLoopSemantics(ForOp forOp) {
     resultSemantics.rank = rankedType.getRank();
     properties.dependentTensorResultSemantics.push_back(resultSemantics);
   }
-  refreshPropertySSAUses(forOp);
+  reattachPropertyOperands(forOp);
 }
 
 LogicalResult ForOp::verify() {
@@ -749,26 +750,26 @@ ForOp::getDependentTensorBlockArgumentSemantics(unsigned regionNumber,
   populateDependentTensorLoopSemantics(*this);
   if (const DependentTensorValueSemantics *semantics =
           findDependentTensorSemantics(
-              getProperties().dependentTensorIterArgSemantics,
-              argumentNumber))
+              getProperties().dependentTensorIterArgSemantics, argumentNumber))
     return *semantics;
   return failure();
 }
 
-void ForOp::walkPropertySSAValues(function_ref<void(Value &)> callback) {
+void ForOp::walkPropertySSAUses(
+    function_ref<void(PropertyOperand &)> callback) {
   for (DependentTensorValueSemantics &semantics :
        getProperties().dependentTensorIterArgSemantics)
-    for (Value &value : semantics.dimValues)
-      callback(value);
+    for (PropertyOperand &operand : semantics.dimValues)
+      callback(operand);
   for (DependentTensorValueSemantics &semantics :
        getProperties().dependentTensorResultSemantics)
-    for (Value &value : semantics.dimValues)
-      callback(value);
+    for (PropertyOperand &operand : semantics.dimValues)
+      callback(operand);
 }
 
-void ForOp::walkDependentTensorPropertyValues(
-    function_ref<void(Value &)> callback) {
-  walkPropertySSAValues(callback);
+void ForOp::walkDependentTensorPropertyUses(
+    function_ref<void(PropertyOperand &)> callback) {
+  walkPropertySSAUses(callback);
 }
 
 MutableArrayRef<OpOperand> ForOp::getInitsMutable() {

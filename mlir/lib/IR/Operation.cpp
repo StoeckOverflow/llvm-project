@@ -157,7 +157,7 @@ Operation *Operation::create(Location location, OperationName name,
 
   // This must be done after properties are initalized.
   op->setAttrs(attributes);
-  registerPropertySSAUses(op);
+  attachPropertyOperands(op);
 
   return op;
 }
@@ -188,7 +188,7 @@ Operation::Operation(Location location, OperationName name, unsigned numResults,
 // allocated via malloc.
 Operation::~Operation() {
   assert(block == nullptr && "operation destroyed but still in a block");
-  dropPropertySSAUses(this);
+  detachPropertyOperands(this);
 #ifndef NDEBUG
   if (!use_empty()) {
     {
@@ -366,21 +366,22 @@ Attribute Operation::getPropertiesAsAttribute() {
 LogicalResult Operation::setPropertiesFromAttribute(
     Attribute attr, function_ref<InFlightDiagnostic()> emitError) {
   std::optional<RegisteredOperationName> info = getRegisteredInfo();
+  detachPropertyOperands(this);
   if (LLVM_UNLIKELY(!info)) {
     *getPropertiesStorage().as<Attribute *>() = attr;
-    refreshPropertySSAUses(this);
+    attachPropertyOperands(this);
     return success();
   }
   LogicalResult result = info->setOpPropertiesFromAttribute(
       this->getName(), this->getPropertiesStorage(), attr, emitError);
-  if (succeeded(result))
-    refreshPropertySSAUses(this);
+  attachPropertyOperands(this);
   return result;
 }
 
 void Operation::copyProperties(OpaqueProperties rhs) {
+  detachPropertyOperands(this);
   name.copyOpProperties(getPropertiesStorage(), rhs);
-  refreshPropertySSAUses(this);
+  attachPropertyOperands(this);
 }
 
 llvm::hash_code Operation::hashProperties() {
@@ -600,6 +601,7 @@ void Operation::moveAfter(Block *block,
 void Operation::dropAllReferences() {
   for (auto &op : getOpOperands())
     op.drop();
+  walkPropertyOperands(this, [](PropertyOperand &operand) { operand.drop(); });
 
   for (auto &region : getRegions())
     region.dropAllReferences();
@@ -1408,7 +1410,10 @@ LogicalResult OpTrait::impl::verifyIsIsolatedFromAbove(Operation *isolatedOp) {
           }
         }
         LogicalResult propertyIsolation = success();
-        walkPropertySSAValues(&op, [&](Value &propertyValue) {
+        walkPropertyOperands(&op, [&](PropertyOperand &propertyOperand) {
+          Value propertyValue = propertyOperand.get();
+          if (!propertyValue)
+            return;
           if (failed(propertyIsolation))
             return;
           auto *valueRegion = propertyValue.getParentRegion();

@@ -26,7 +26,7 @@ class Operation;
 class OpOperand;
 class OpPrintingFlags;
 class OpResult;
-class PropertySSAUse;
+class PropertyOperand;
 class Region;
 class SSAUse;
 class ValueAllUseIterator;
@@ -262,7 +262,7 @@ public:
   //===--------------------------------------------------------------------===//
   // Property Uses
 
-  using property_use_iterator = ValueUseIterator<PropertySSAUse>;
+  using property_use_iterator = ValueUseIterator<PropertyOperand>;
   using property_use_range = iterator_range<property_use_iterator>;
 
   property_use_iterator property_use_begin() const {
@@ -276,7 +276,7 @@ public:
   }
 
   using property_user_iterator =
-      ValueUserIterator<property_use_iterator, PropertySSAUse>;
+      ValueUserIterator<property_use_iterator, PropertyOperand>;
   using property_user_range = iterator_range<property_user_iterator>;
 
   property_user_iterator property_user_begin() const {
@@ -354,32 +354,58 @@ private:
 };
 
 //===----------------------------------------------------------------------===//
-// PropertySSAUse
+// PropertyOperand
 //===----------------------------------------------------------------------===//
 
-/// This class represents a second-class SSA use from an operation property.
-/// Unlike `OpOperand`, the use points at an existing `Value` slot owned by the
-/// operation's property storage.
-class PropertySSAUse : public detail::IROperandBase {
+/// This class represents an SSA use embedded directly in operation property
+/// storage. Unlike `OpOperand`, it is not part of the operation's ordinary
+/// operand list and has no operand number, but it participates in the same
+/// physical per-Value use-list.
+class PropertyOperand : public detail::IROperandBase {
 public:
-  PropertySSAUse(Operation *owner, Value *slot)
+  PropertyOperand()
+      : detail::IROperandBase(nullptr,
+                              detail::IROperandBase::Kind::PropertyOperand) {}
+  explicit PropertyOperand(Value value)
+      : detail::IROperandBase(nullptr,
+                              detail::IROperandBase::Kind::PropertyOperand),
+        value(value) {}
+  PropertyOperand(Operation *owner, Value value)
       : detail::IROperandBase(owner,
-                              detail::IROperandBase::Kind::PropertySSAUse),
-        slot(slot) {
-    if (Value value = get())
+                              detail::IROperandBase::Kind::PropertyOperand),
+        value(value) {
+    if (owner && value)
       insertInto(getUseList(value));
   }
-  PropertySSAUse(PropertySSAUse &&other)
-      : detail::IROperandBase(std::move(other)), slot(other.slot) {
-    other.slot = nullptr;
-    if (Value value = get())
-      insertInto(getUseList(value));
-  }
-  PropertySSAUse &operator=(PropertySSAUse &&other) = delete;
 
-  /// Provide the property use-list attached to the given value.
+  PropertyOperand(const PropertyOperand &other)
+      : detail::IROperandBase(nullptr,
+                              detail::IROperandBase::Kind::PropertyOperand),
+        value(other.value) {}
+  PropertyOperand &operator=(const PropertyOperand &other) {
+    setValuePreservingOwner(other.value);
+    return *this;
+  }
+
+  PropertyOperand(PropertyOperand &&other)
+      : detail::IROperandBase(std::move(other)), value(other.value) {
+    other.value = Value();
+    if (getOwner() && value)
+      insertInto(getUseList(value));
+  }
+  PropertyOperand &operator=(PropertyOperand &&other) {
+    if (this == &other)
+      return *this;
+    detail::IROperandBase::operator=(std::move(other));
+    value = other.value;
+    other.value = Value();
+    if (getOwner() && value)
+      insertInto(getUseList(value));
+    return *this;
+  }
+
   static detail::IROperandBase::Kind getUseKind() {
-    return detail::IROperandBase::Kind::PropertySSAUse;
+    return detail::IROperandBase::Kind::PropertyOperand;
   }
   static bool classof(const detail::IROperandBase *use) {
     return use->getKind() == getUseKind();
@@ -390,40 +416,47 @@ public:
     return value.getImpl();
   }
 
-  /// Return the current value referenced by this property slot.
-  Value get() const { return slot ? *slot : Value(); }
-
-  /// Return the mutable property slot represented by this use.
-  Value *getSlot() const { return slot; }
-
-  /// Set the property slot to a new value and relink this use.
-  void set(Value newValue) {
-    removeFromCurrent();
-    if (slot)
-      *slot = newValue;
-    if (newValue)
-      insertInto(getUseList(newValue));
+  /// Attach this embedded operand to its owning operation and link it into the
+  /// referenced value's use-list if non-null.
+  void attach(Operation *owner) {
+    assert(owner && "expected non-null property operand owner");
+    assert(!getOwner() && "property operand is already attached");
+    setOwner(owner);
+    if (value)
+      insertInto(getUseList(value));
   }
 
-  /// Returns true if this property use contains the given value.
-  bool is(Value value) const { return get() == value; }
+  /// Detach this embedded operand from its owning operation without clearing
+  /// the stored value.
+  void detach() {
+    removeFromCurrent();
+    setOwner(nullptr);
+  }
 
-  /// Drop this property use and clear the underlying slot.
+  /// Return the current value referenced by this property operand.
+  Value get() const { return value; }
+
+  /// Set the current value and update use-list membership when attached.
+  void set(Value newValue) { setValuePreservingOwner(newValue); }
+
+  /// Returns true if this property operand contains the given value.
+  bool is(Value other) const { return value == other; }
+
+  /// Drop this property operand and clear the underlying value.
   void drop() {
     detail::IROperandBase::drop();
-    if (slot)
-      *slot = Value();
-  }
-
-  /// Unlink this property use without mutating the underlying property slot.
-  void unlink() {
-    removeFromCurrent();
-    nextUse = nullptr;
-    back = nullptr;
+    value = Value();
   }
 
 private:
-  Value *slot = nullptr;
+  void setValuePreservingOwner(Value newValue) {
+    removeFromCurrent();
+    value = newValue;
+    if (getOwner() && value)
+      insertInto(getUseList(value));
+  }
+
+  Value value;
 };
 
 //===----------------------------------------------------------------------===//
@@ -444,7 +477,7 @@ public:
                  : SSAUseKind::Property),
         opaque(use) {}
   SSAUse(OpOperand *operand) : kind(SSAUseKind::Operand), opaque(operand) {}
-  SSAUse(PropertySSAUse *use) : kind(SSAUseKind::Property), opaque(use) {}
+  SSAUse(PropertyOperand *use) : kind(SSAUseKind::Property), opaque(use) {}
 
   SSAUseKind getKind() const { return kind; }
   bool isOperand() const { return kind == SSAUseKind::Operand; }
@@ -454,9 +487,9 @@ public:
     assert(isOperand() && "expected native operand use");
     return *static_cast<OpOperand *>(opaque);
   }
-  PropertySSAUse &getPropertyUse() const {
+  PropertyOperand &getPropertyUse() const {
     assert(isProperty() && "expected property SSA use");
-    return *static_cast<PropertySSAUse *>(opaque);
+    return *static_cast<PropertyOperand *>(opaque);
   }
 
   Operation *getOwner() const {

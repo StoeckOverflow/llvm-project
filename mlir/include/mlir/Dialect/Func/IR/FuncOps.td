@@ -252,10 +252,10 @@ def FuncOp : Func_Op<"func", [
   AffineScope, AutomaticAllocationScope,
   FunctionOpInterface, IsolatedFromAbove, OpAsmOpInterface,
   DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
-    ["walkPropertySSAValues"]>,
+    ["walkPropertySSAUses"]>,
   DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
     ["getDependentTensorBlockArgumentSemantics",
-     "walkDependentTensorPropertyValues"]>
+     "walkDependentTensorPropertyUses"]>
 ]> {
   let summary = "An operation with a name containing a single `SSACFG` region";
   let description = [{

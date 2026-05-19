@@ -34,7 +34,7 @@ namespace detail {
 /// facilities for operand use management.
 class IROperandBase {
 public:
-  enum class Kind { OpOperand, BlockOperand, PropertySSAUse };
+  enum class Kind { OpOperand, BlockOperand, PropertyOperand };
 
   /// Return the owner of this operand.
   Operation *getOwner() const { return owner; }
@@ -70,6 +70,7 @@ protected:
   IROperandBase &operator=(IROperandBase &&other) {
     removeFromCurrent();
     other.removeFromCurrent();
+    owner = other.owner;
     other.back = nullptr;
     nextUse = nullptr;
     back = nullptr;
@@ -95,17 +96,23 @@ protected:
     *back = nextUse;
     if (nextUse)
       nextUse->back = back;
+    back = nullptr;
+    nextUse = nullptr;
   }
 
   /// Insert this operand into the given use list.
   template <typename UseListT>
   void insertInto(UseListT *useList) {
+    assert(!back && !nextUse && "operand is already linked into a use-list");
     back = &useList->firstUse;
     nextUse = useList->firstUse;
     if (nextUse)
       nextUse->back = &nextUse;
     useList->firstUse = this;
   }
+
+  /// Set the operation owner of this operand.
+  void setOwner(Operation *newOwner) { owner = newOwner; }
 
   /// The next operand in the use-chain.
   IROperandBase *nextUse = nullptr;
@@ -115,7 +122,7 @@ protected:
 
 private:
   /// The operation owner of this operand.
-  Operation *const owner;
+  Operation *owner;
 
   /// The concrete kind of this use node.
   const Kind kind;
