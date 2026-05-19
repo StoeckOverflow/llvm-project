@@ -77,7 +77,7 @@ func.func @kernel_insert_property_mismatch(
       %Cinit : #tensor<[%m, %n], f32>
     ] -> #tensor<[%m, %n], f32> {
   %c0 = arith.constant 0 : index
-  %v = dependent_tensor.extract %Cinit[%c0, %c0] : tensor<?x?xf32>
+  %v = dependent_tensor.extract %Cinit[%c0, %c0] : f32
   // expected-error@+1 {{'dependent_tensor.insert' op stored result semantics must match destination semantics}}
   %bad = dependent_tensor.insert %v into %Cinit[%c0, %c0] #tensor<[%m, %k], f32> : f32 into tensor<?x?xf32>
   return %bad : tensor<?x?xf32>

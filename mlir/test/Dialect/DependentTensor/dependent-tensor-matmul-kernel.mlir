@@ -16,10 +16,10 @@ func.func @dependent_matmul_kernel(
   %c1 = arith.constant 1 : index
   %Cout = scf.for %i = %c0 to %n step %c1 iter_args(%row = %Cinit) -> (tensor<?x?xf32>) {
     %next = scf.for %j = %c0 to %m step %c1 iter_args(%col = %row) -> (tensor<?x?xf32>) {
-      %sum0 = dependent_tensor.extract %col[%i, %j] : tensor<?x?xf32>
+      %sum0 = arith.constant 0.000000e+00 : f32
       %sum = scf.for %p = %c0 to %k step %c1 iter_args(%acc = %sum0) -> (f32) {
-        %a = dependent_tensor.extract %A[%i, %p] : tensor<?x?xf32>
-        %b = dependent_tensor.extract %B[%p, %j] : tensor<?x?xf32>
+        %a = dependent_tensor.extract %A[%i, %p] : f32
+        %b = dependent_tensor.extract %B[%p, %j] : f32
         %mul = arith.mulf %a, %b : f32
         %next_acc = arith.addf %acc, %mul : f32
         scf.yield %next_acc : f32

@@ -42,7 +42,7 @@ func.func @make_reordered(%k : index, %m : index) {
 func.func @primitive_roundtrip(%m : index, %n : index, %i : index, %j : index, %v : f32) {
   %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
   %d = dependent_tensor.dim %t, %i : tensor<?x?xf32>
-  %e = dependent_tensor.extract %t[%i, %j] #tensor<[%m, %n], f32> : tensor<?x?xf32> -> f32
+  %e = dependent_tensor.extract %t[%i, %j] #tensor<[%m, %n], f32> : f32
   %u = dependent_tensor.insert %v into %t[%i, %j] #tensor<[%m, %n], f32> : f32 into tensor<?x?xf32>
   return
 }
@@ -51,7 +51,7 @@ func.func @primitive_roundtrip(%m : index, %n : index, %i : index, %j : index, %
 // CHECK-SAME: (%[[M:arg[0-9]+]]: index, %[[N:arg[0-9]+]]: index, %[[I:arg[0-9]+]]: index, %[[J:arg[0-9]+]]: index, %[[V:arg[0-9]+]]: f32)
 // CHECK-NEXT: %[[T:.*]] = dependent_tensor.make () #tensor<[%[[M]], %[[N]]], f32> : tensor<?x?xf32>
 // CHECK-NEXT: %[[D:.*]] = dependent_tensor.dim %[[T]], %[[I]] : tensor<?x?xf32>
-// CHECK-NEXT: %[[E:.*]] = dependent_tensor.extract %[[T]][%[[I]], %[[J]]] #tensor<[%[[M]], %[[N]]], f32> : tensor<?x?xf32> -> f32
+// CHECK-NEXT: %[[E:.*]] = dependent_tensor.extract %[[T]][%[[I]], %[[J]]] #tensor<[%[[M]], %[[N]]], f32> : f32
 // CHECK-NEXT: %[[U:.*]] = dependent_tensor.insert %[[V]] into %[[T]][%[[I]], %[[J]]] #tensor<[%[[M]], %[[N]]], f32> : f32 into tensor<?x?xf32>
 // CHECK-NEXT: return
 

@@ -92,7 +92,7 @@ func.func @remove_dead_values_keeps_property_only_dim(%a: index, %b: index) -> f
   %c0 = arith.constant 0 : index
   %dim = arith.muli %a, %b : index
   %t = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
-  %v = dependent_tensor.extract %t[%c0] : tensor<?xf32>
+  %v = dependent_tensor.extract %t[%c0] : f32
   return %v : f32
 }
 

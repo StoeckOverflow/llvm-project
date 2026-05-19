@@ -443,7 +443,6 @@ ParseResult ExtractOp::parse(OpAsmParser &parser, OperationState &result) {
   SmallVector<OpAsmParser::UnresolvedOperand> indices;
   SmallVector<OpAsmParser::UnresolvedOperand> sourceDims;
   Type sourceElementType;
-  Type sourceType;
   Type resultType;
   bool hasSourceSpec = false;
   SMLoc specLoc;
@@ -457,35 +456,21 @@ ParseResult ExtractOp::parse(OpAsmParser &parser, OperationState &result) {
                                               sourceElementType))
       return failure();
   }
-  if (parser.parseColonType(sourceType))
+  if (parser.parseColonType(resultType))
     return failure();
 
-  auto tensorType = dyn_cast<RankedTensorType>(sourceType);
-  if (!tensorType)
-    return parser.emitError(parser.getCurrentLocation(),
-                            "expected ranked tensor source type");
-
-  SMLoc resultTypeLoc = parser.getCurrentLocation();
-  if (succeeded(parser.parseOptionalArrow())) {
-    resultTypeLoc = parser.getCurrentLocation();
-    if (parser.parseType(resultType))
-      return failure();
-  } else {
-    resultType = tensorType.getElementType();
-  }
+  auto tensorType = RankedTensorType::get(
+      SmallVector<int64_t>(indices.size(), ShapedType::kDynamic), resultType);
 
   if (hasSourceSpec) {
     if (static_cast<int64_t>(sourceDims.size()) != tensorType.getRank())
       return parser.emitError(specLoc, "dependent tensor rank mismatch");
-    if (sourceElementType != tensorType.getElementType())
+    if (sourceElementType != resultType)
       return parser.emitError(
-          specLoc, "dependent tensor element type must match value type");
+          specLoc, "dependent tensor element type must match result type");
   }
-  if (resultType != tensorType.getElementType())
-    return parser.emitError(
-        resultTypeLoc, "extract result type must match tensor element type");
 
-  if (parser.resolveOperand(source, sourceType, result.operands))
+  if (parser.resolveOperand(source, tensorType, result.operands))
     return failure();
   SmallVector<Type> indexTypes(indices.size(),
                                parser.getBuilder().getIndexType());
@@ -531,8 +516,6 @@ void ExtractOp::print(OpAsmPrinter &p) {
   }
 
   p << " : ";
-  p.printType(getSource().getType());
-  p << " -> ";
   p.printType(getResult().getType());
 }
 

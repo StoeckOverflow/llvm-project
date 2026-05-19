@@ -12,12 +12,12 @@ func.func @conv2d_nhwc_hwcf_written_with_primitives(
     %out_oh = scf.for %ohi = %c0 to %oh step %c1 iter_args(%out1 = %out0) -> (tensor<?x?x?x?xf32>) {
       %out_ow = scf.for %owi = %c0 to %ow step %c1 iter_args(%out2 = %out1) -> (tensor<?x?x?x?xf32>) {
         %out_f = scf.for %fi = %c0 to %f step %c1 iter_args(%out3 = %out2) -> (tensor<?x?x?x?xf32>) {
-          %sum0 = dependent_tensor.extract %out3[%ni, %ohi, %owi, %fi] : tensor<?x?x?x?xf32>
+          %sum0 = dependent_tensor.extract %out3[%ni, %ohi, %owi, %fi] : f32
           %sum_kh = scf.for %khi = %c0 to %kh step %c1 iter_args(%acc0 = %sum0) -> (f32) {
             %sum_kw = scf.for %kwi = %c0 to %kw step %c1 iter_args(%acc1 = %acc0) -> (f32) {
               %sum_c = scf.for %ci = %c0 to %c step %c1 iter_args(%acc2 = %acc1) -> (f32) {
-                %iv = dependent_tensor.extract %input[%ni, %ohi, %owi, %ci] : tensor<?x?x?x?xf32>
-                %fv = dependent_tensor.extract %filter[%khi, %kwi, %ci, %fi] : tensor<?x?x?x?xf32>
+                %iv = dependent_tensor.extract %input[%ni, %ohi, %owi, %ci] : f32
+                %fv = dependent_tensor.extract %filter[%khi, %kwi, %ci, %fi] : f32
                 %prod = arith.mulf %iv, %fv : f32
                 %next = arith.addf %acc2, %prod : f32
                 scf.yield %next : f32

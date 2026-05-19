@@ -24,12 +24,12 @@ func.func @dependent_conv2d_im2col_kernel(
     %Y1 = scf.for %co = %c0 to %cout step %c1 iter_args(%yc = %yn) -> (tensor<?x?x?x?xf32>) {
       %Y2 = scf.for %oh_idx = %c0 to %oh step %c1 iter_args(%yh = %yc) -> (tensor<?x?x?x?xf32>) {
         %Y3 = scf.for %ow_idx = %c0 to %ow step %c1 iter_args(%yw = %yh) -> (tensor<?x?x?x?xf32>) {
-          %sum0 = dependent_tensor.extract %yw[%n_idx, %co, %oh_idx, %ow_idx] : tensor<?x?x?x?xf32>
+          %sum0 = dependent_tensor.extract %yw[%n_idx, %co, %oh_idx, %ow_idx] : f32
           %sum_ci = scf.for %ci = %c0 to %cin step %c1 iter_args(%acc_ci = %sum0) -> (f32) {
             %sum_kh = scf.for %kh_idx = %c0 to %kh step %c1 iter_args(%acc_kh = %acc_ci) -> (f32) {
               %sum_kw = scf.for %kw_idx = %c0 to %kw step %c1 iter_args(%acc_kw = %acc_kh) -> (f32) {
-                %x = dependent_tensor.extract %X[%n_idx, %ci, %oh_idx, %ow_idx, %kh_idx, %kw_idx] : tensor<?x?x?x?x?x?xf32>
-                %k = dependent_tensor.extract %K[%co, %ci, %kh_idx, %kw_idx] : tensor<?x?x?x?xf32>
+                %x = dependent_tensor.extract %X[%n_idx, %ci, %oh_idx, %ow_idx, %kh_idx, %kw_idx] : f32
+                %k = dependent_tensor.extract %K[%co, %ci, %kh_idx, %kw_idx] : f32
                 %mul = arith.mulf %x, %k : f32
                 %next = arith.addf %acc_kw, %mul : f32
                 scf.yield %next : f32

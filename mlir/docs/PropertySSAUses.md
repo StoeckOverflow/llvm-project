@@ -61,7 +61,7 @@
 ```mlir
 func.func @example(%m: index, %i: index) -> f32 {
   %t = dependent_tensor.make () #tensor<[%m], f32> : tensor<?xf32>
-  %v = dependent_tensor.extract %t[%i] : tensor<?xf32>
+  %v = dependent_tensor.extract %t[%i] : f32
   return %v : f32
 }
 ```

@@ -25,9 +25,9 @@ func.func @make_element_type_mismatch(%m : index, %n : index) {
 // -----
 
 func.func @extract_rank_mismatch(%m : index, %n : index, %i : index) {
-  %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+1 {{'dependent_tensor.extract' op requires one index operand per tensor dimension}}
-  %e = dependent_tensor.extract %t[%i] : tensor<?x?xf32>
+  %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32> // expected-note {{prior use here}}
+  // expected-error@+1 {{use of value '%t' expects different type than prior uses: 'tensor<?xf32>' vs 'tensor<?x?xf32>'}}
+  %e = dependent_tensor.extract %t[%i] : f32
   return
 }
 
@@ -74,7 +74,7 @@ func.func @dim_assertion_mismatch(%m : index, %n : index) {
 func.func @extract_assertion_mismatch(%m : index, %n : index, %i : index, %j : index) {
   %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
   // expected-error@+1 {{'dependent_tensor.extract' op source tensor assertion must match source semantics}}
-  %e = dependent_tensor.extract %t[%i, %j] #tensor<[%n, %m], f32> : tensor<?x?xf32> -> f32
+  %e = dependent_tensor.extract %t[%i, %j] #tensor<[%n, %m], f32> : f32
   return
 }
 
@@ -82,7 +82,7 @@ func.func @extract_assertion_mismatch(%m : index, %n : index, %i : index, %j : i
 
 func.func @extract_result_type_mismatch(%m : index, %n : index, %i : index, %j : index) {
   %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+1 {{extract result type must match tensor element type}}
-  %e = dependent_tensor.extract %t[%i, %j] #tensor<[%m, %n], f32> : tensor<?x?xf32> -> i32
+  // expected-error@+1 {{dependent tensor element type must match result type}}
+  %e = dependent_tensor.extract %t[%i, %j] #tensor<[%m, %n], f32> : i32
   return
 }

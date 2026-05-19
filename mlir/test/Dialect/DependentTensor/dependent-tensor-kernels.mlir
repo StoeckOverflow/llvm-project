@@ -16,10 +16,10 @@ func.func @matmul_kernel(
   %c1 = arith.constant 1 : index
   %Cout = scf.for %i = %c0 to %m step %c1 iter_args(%row = %Cinit) -> (tensor<?x?xf32>) {
     %next = scf.for %j = %c0 to %n step %c1 iter_args(%col = %row) -> (tensor<?x?xf32>) {
-      %sum0 = dependent_tensor.extract %col[%i, %j] : tensor<?x?xf32>
+      %sum0 = arith.constant 0.000000e+00 : f32
       %sum = scf.for %kk = %c0 to %k step %c1 iter_args(%acc = %sum0) -> (f32) {
-        %av = dependent_tensor.extract %A[%i, %kk] : tensor<?x?xf32>
-        %bv = dependent_tensor.extract %B[%kk, %j] : tensor<?x?xf32>
+        %av = dependent_tensor.extract %A[%i, %kk] : f32
+        %bv = dependent_tensor.extract %B[%kk, %j] : f32
         %prod = arith.mulf %av, %bv : f32
         %acc_next = arith.addf %acc, %prod : f32
         scf.yield %acc_next : f32
@@ -61,10 +61,10 @@ func.func @gemm_kernel(
   %c1 = arith.constant 1 : index
   %Cout = scf.for %i = %c0 to %m step %c1 iter_args(%row = %Cinit) -> (tensor<?x?xf32>) {
     %next = scf.for %j = %c0 to %n step %c1 iter_args(%col = %row) -> (tensor<?x?xf32>) {
-      %bias = dependent_tensor.extract %col[%i, %j] : tensor<?x?xf32>
+      %bias = dependent_tensor.extract %col[%i, %j] : f32
       %sum = scf.for %kk = %c0 to %k step %c1 iter_args(%acc = %bias) -> (f32) {
-        %av = dependent_tensor.extract %A[%i, %kk] : tensor<?x?xf32>
-        %bv = dependent_tensor.extract %B[%kk, %j] : tensor<?x?xf32>
+        %av = dependent_tensor.extract %A[%i, %kk] : f32
+        %bv = dependent_tensor.extract %B[%kk, %j] : f32
         %prod = arith.mulf %av, %bv : f32
         %acc_next = arith.addf %acc, %prod : f32
         scf.yield %acc_next : f32
@@ -129,12 +129,12 @@ func.func @conv2d_nhwc_hwcf_kernel(
     %Y1 = scf.for %ohi = %c0 to %oh step %c1 iter_args(%yh = %yn) -> (tensor<?x?x?x?xf32>) {
       %Y2 = scf.for %owi = %c0 to %ow step %c1 iter_args(%yw = %yh) -> (tensor<?x?x?x?xf32>) {
         %Y3 = scf.for %fo = %c0 to %f step %c1 iter_args(%yf = %yw) -> (tensor<?x?x?x?xf32>) {
-          %sum0 = dependent_tensor.extract %yf[%ni, %ohi, %owi, %fo] : tensor<?x?x?x?xf32>
+          %sum0 = dependent_tensor.extract %yf[%ni, %ohi, %owi, %fo] : f32
           %sum_kh = scf.for %khi = %c0 to %kh step %c1 iter_args(%acc_kh = %sum0) -> (f32) {
             %sum_kw = scf.for %kwi = %c0 to %kw step %c1 iter_args(%acc_kw = %acc_kh) -> (f32) {
               %sum_c = scf.for %ci = %c0 to %c step %c1 iter_args(%acc_c = %acc_kw) -> (f32) {
-                %xv = dependent_tensor.extract %X[%ni, %ohi, %owi, %ci] : tensor<?x?x?x?xf32>
-                %kv = dependent_tensor.extract %K[%khi, %kwi, %ci, %fo] : tensor<?x?x?x?xf32>
+                %xv = dependent_tensor.extract %X[%ni, %ohi, %owi, %ci] : f32
+                %kv = dependent_tensor.extract %K[%khi, %kwi, %ci, %fo] : f32
                 %prod = arith.mulf %xv, %kv : f32
                 %acc_next = arith.addf %acc_c, %prod : f32
                 scf.yield %acc_next : f32

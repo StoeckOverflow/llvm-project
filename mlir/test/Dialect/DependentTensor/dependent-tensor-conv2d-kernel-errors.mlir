@@ -143,7 +143,7 @@ func.func @bad_conv_insert_semantics(
     %Yinit : tensor<?x?x?x?xf32>) -> tensor<?x?x?x?xf32>
     #types[%Yinit : #tensor<[%n, %cout, %oh, %ow], f32>] -> #tensor<[%n, %cout, %oh, %ow], f32> {
   %c0 = arith.constant 0 : index
-  %v = dependent_tensor.extract %Yinit[%c0, %c0, %c0, %c0] : tensor<?x?x?x?xf32>
+  %v = dependent_tensor.extract %Yinit[%c0, %c0, %c0, %c0] : f32
   // expected-error@+1 {{'dependent_tensor.insert' op stored result semantics must match destination semantics}}
   %bad = dependent_tensor.insert %v into %Yinit[%c0, %c0, %c0, %c0] #tensor<[%n, %cin, %kh, %kw], f32> : f32 into tensor<?x?x?x?xf32>
   return %bad : tensor<?x?x?x?xf32>
