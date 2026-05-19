@@ -32,7 +32,7 @@ func.func @matmul_kernel(
     }
 
 // CHECK-LABEL: func.func @matmul_kernel
-// CHECK-SAME: (%[[M:arg[0-9]+]]: index, %[[K:arg[0-9]+]]: index, %[[N:arg[0-9]+]]: index
-// CHECK-SAME: %[[A:arg[0-9]+]]: tensor<?x?xf32>, %[[B:arg[0-9]+]]: tensor<?x?xf32>, %[[C:arg[0-9]+]]: tensor<?x?xf32>)
-// CHECK-SAME: -> tensor<?x?xf32>
+// CHECK-SAME: (%[[M:arg[0-9]+]]: index, %[[K:arg[0-9]+]]: index, %[[N:arg[0-9]+]]: index,
+// CHECK-SAME:  %[[A:arg[0-9]+]]: tensor<?x?xf32>, %[[B:arg[0-9]+]]: tensor<?x?xf32>, %[[C:arg[0-9]+]]: tensor<?x?xf32>) -> tensor<?x?xf32>
 // CHECK-SAME: #types[%[[A]] : #tensor<[%[[M]], %[[K]]], f32>, %[[B]] : #tensor<[%[[K]], %[[N]]], f32>, %[[C]] : #tensor<[%[[M]], %[[N]]], f32>] -> #tensor<[%[[M]], %[[N]]], f32>
+// CHECK-NEXT: return %[[C]] : tensor<?x?xf32>

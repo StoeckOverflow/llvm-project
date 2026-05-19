@@ -139,10 +139,19 @@ func.func @clone_insert() {
 }
 
 // CLONE-LABEL: func.func @clone_insert
-// CLONE: %[[T0:.*]] = dependent_tensor.make
-// CLONE: %[[R0:.*]] = dependent_tensor.insert {{.*}} into %[[T0]]{{.*}}#tensor
-// CLONE: %[[T1:.*]] = dependent_tensor.make
-// CLONE: %[[R1:.*]] = dependent_tensor.insert {{.*}} into %[[T1]]{{.*}}#tensor
+// CLONE-NEXT: %[[M0:.*]] = arith.constant 1 : index
+// CLONE-NEXT: %[[N0:.*]] = arith.constant 2 : index
+// CLONE-NEXT: %[[I0:.*]] = arith.constant 0 : index
+// CLONE-NEXT: %[[V0:.*]] = arith.constant 0.000000e+00 : f32
+// CLONE-NEXT: %[[T0:.*]] = dependent_tensor.make () #tensor<[%[[M0]], %[[N0]]], f32> : tensor<?x?xf32>
+// CLONE-NEXT: %[[R0:.*]] = dependent_tensor.insert %[[V0]] into %[[T0]][%[[I0]], %[[I0]]] #tensor<[%[[M0]], %[[N0]]], f32> : f32 into tensor<?x?xf32>
+// CLONE-NEXT: %[[M1:.*]] = arith.constant 1 : index
+// CLONE-NEXT: %[[N1:.*]] = arith.constant 2 : index
+// CLONE-NEXT: %[[I1:.*]] = arith.constant 0 : index
+// CLONE-NEXT: %[[V1:.*]] = arith.constant 0.000000e+00 : f32
+// CLONE-NEXT: %[[T1:.*]] = dependent_tensor.make () #tensor<[%[[M1]], %[[N1]]], f32> : tensor<?x?xf32>
+// CLONE-NEXT: %[[R1:.*]] = dependent_tensor.insert %[[V1]] into %[[T1]][%[[I1]], %[[I1]]] #tensor<[%[[M1]], %[[N1]]], f32> : f32 into tensor<?x?xf32>
+// CLONE-NEXT: return
 
 // -----
 
@@ -322,12 +331,20 @@ func.func @generic_dce_keeps_property_only_dim(%a: index, %b: index) -> f32 {
 }
 
 // CANON-LABEL: func.func @generic_dce_keeps_property_only_dim
-// CANON: %[[DIM:.*]] = arith.muli
-// CANON: dependent_tensor.make () #tensor<[%[[DIM]]], f32>
+// CANON-SAME: (%[[A:arg[0-9]+]]: index, %[[B:arg[0-9]+]]: index) -> f32
+// CANON-NEXT: %[[C0:.*]] = arith.constant 0 : index
+// CANON-NEXT: %[[DIM:.*]] = arith.muli %[[A]], %[[B]] : index
+// CANON-NEXT: %[[T:.*]] = dependent_tensor.make () #tensor<[%[[DIM]]], f32> : tensor<?xf32>
+// CANON-NEXT: %[[V:.*]] = dependent_tensor.extract %[[T]][%[[C0]]] #tensor<[%[[DIM]]], f32> : f32
+// CANON-NEXT: return %[[V]] : f32
 
 // CSE-LABEL: func.func @generic_dce_keeps_property_only_dim
-// CSE: %[[DIM:.*]] = arith.muli
-// CSE: dependent_tensor.make () #tensor<[%[[DIM]]], f32>
+// CSE-SAME: (%[[A:arg[0-9]+]]: index, %[[B:arg[0-9]+]]: index) -> f32
+// CSE-NEXT: %[[C0:.*]] = arith.constant 0 : index
+// CSE-NEXT: %[[DIM:.*]] = arith.muli %[[A]], %[[B]] : index
+// CSE-NEXT: %[[T:.*]] = dependent_tensor.make () #tensor<[%[[DIM]]], f32> : tensor<?xf32>
+// CSE-NEXT: %[[V:.*]] = dependent_tensor.extract %[[T]][%[[C0]]] #tensor<[%[[DIM]]], f32> : f32
+// CSE-NEXT: return %[[V]] : f32
 
 // -----
 

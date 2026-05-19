@@ -12,9 +12,11 @@ func.func @clone_func_boundary_source(%dim: index, %t: tensor<?xf32>)
 }
 
 // CLONEBOUNDARY-LABEL: func.func @clone_func_boundary_source
-// CLONEBOUNDARY-SAME: (%[[DIM:.*]]: index, %[[T:.*]]: tensor<?xf32>) -> tensor<?xf32> #types[%[[T]] : #tensor<[%[[DIM]]], f32>] -> #tensor<[%[[DIM]]], f32>
+// CLONEBOUNDARY-SAME: (%[[DIM:arg[0-9]+]]: index, %[[T:arg[0-9]+]]: tensor<?xf32>) -> tensor<?xf32> #types[%[[T]] : #tensor<[%[[DIM]]], f32>] -> #tensor<[%[[DIM]]], f32>
+// CLONEBOUNDARY-NEXT: return %[[T]] : tensor<?xf32>
 // CLONEBOUNDARY-LABEL: func.func @clone_func_boundary_source_clone
-// CLONEBOUNDARY-SAME: (%[[CLONED_DIM:.*]]: index, %[[CLONED_T:.*]]: tensor<?xf32>) -> tensor<?xf32> #types[%[[CLONED_T]] : #tensor<[%[[CLONED_DIM]]], f32>] -> #tensor<[%[[CLONED_DIM]]], f32>
+// CLONEBOUNDARY-SAME: (%[[CLONED_DIM:arg[0-9]+]]: index, %[[CLONED_T:arg[0-9]+]]: tensor<?xf32>) -> tensor<?xf32> #types[%[[CLONED_T]] : #tensor<[%[[CLONED_DIM]]], f32>] -> #tensor<[%[[CLONED_DIM]]], f32>
+// CLONEBOUNDARY-NEXT: return %[[CLONED_T]] : tensor<?xf32>
 
 // -----
 
@@ -97,8 +99,12 @@ func.func @remove_dead_values_keeps_property_only_dim(%a: index, %b: index) -> f
 }
 
 // RDV-LABEL: func.func @remove_dead_values_keeps_property_only_dim
-// RDV: %[[DIM:.*]] = arith.muli
-// RDV: dependent_tensor.make () #tensor<[%[[DIM]]], f32>
+// RDV-SAME: (%[[A:arg[0-9]+]]: index, %[[B:arg[0-9]+]]: index) -> f32
+// RDV-NEXT: %[[C0:.*]] = arith.constant 0 : index
+// RDV-NEXT: %[[DIM:.*]] = arith.muli %[[A]], %[[B]] : index
+// RDV-NEXT: %[[T:.*]] = dependent_tensor.make () #tensor<[%[[DIM]]], f32> : tensor<?xf32>
+// RDV-NEXT: %[[V:.*]] = dependent_tensor.extract %[[T]][%[[C0]]] #tensor<[%[[DIM]]], f32> : f32
+// RDV-NEXT: return %[[V]] : f32
 
 // -----
 
