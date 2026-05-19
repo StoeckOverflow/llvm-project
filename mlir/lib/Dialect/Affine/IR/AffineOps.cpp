@@ -13,11 +13,13 @@
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/AffineExprVisitor.h"
+#include "mlir/IR/DependentTensorInterfaces.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/IntegerSet.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/PropertySSAUseSupport.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Interfaces/ShapedOpInterfaces.h"
 #include "mlir/Interfaces/ValueBoundsOpInterface.h"
@@ -38,6 +40,79 @@ using namespace mlir::affine;
 using llvm::divideCeilSigned;
 using llvm::divideFloorSigned;
 using llvm::mod;
+
+static FailureOr<DependentTensorValueSemantics>
+getAffineDependentTensorSemanticsFromValue(Value value);
+
+static const DependentTensorValueSemantics *findAffineDependentTensorSemantics(
+    ArrayRef<DependentTensorValueSemantics> semantics, unsigned valueIndex) {
+  for (const DependentTensorValueSemantics &candidate : semantics)
+    if (candidate.valueIndex == valueIndex)
+      return &candidate;
+  return nullptr;
+}
+
+static FailureOr<DependentTensorValueSemantics>
+getAffineDependentTensorSemanticsFromBlockArgument(BlockArgument arg) {
+  Operation *parentOp =
+      arg.getOwner() ? arg.getOwner()->getParentOp() : nullptr;
+  auto iface = dyn_cast_or_null<DependentTensorPropertyOpInterface>(parentOp);
+  if (!iface)
+    return failure();
+  Region *region = arg.getOwner()->getParent();
+  unsigned regionNumber = region ? region->getRegionNumber() : 0;
+  return iface.getDependentTensorBlockArgumentSemantics(
+      regionNumber, /*blockNumber=*/0, arg.getArgNumber());
+}
+
+static FailureOr<DependentTensorValueSemantics>
+getAffineDependentTensorSemanticsFromValue(Value value) {
+  if (auto result = dyn_cast<OpResult>(value)) {
+    auto iface =
+        dyn_cast<DependentTensorPropertyOpInterface>(result.getOwner());
+    if (!iface)
+      return failure();
+    return iface.getDependentTensorResultSemantics(result.getResultNumber());
+  }
+  return getAffineDependentTensorSemanticsFromBlockArgument(
+      cast<BlockArgument>(value));
+}
+
+static void populateDependentTensorLoopSemantics(AffineForOp forOp) {
+  auto &properties = forOp.getProperties();
+  properties.dependentTensorIterArgSemantics.clear();
+  properties.dependentTensorResultSemantics.clear();
+
+  if (forOp.getInits().size() != forOp.getNumResults()) {
+    reattachPropertyOperands(forOp);
+    return;
+  }
+  if (forOp.getBody()->getNumArguments() < 1 + forOp.getInits().size()) {
+    reattachPropertyOperands(forOp);
+    return;
+  }
+
+  for (auto [i, init] : llvm::enumerate(forOp.getInits())) {
+    auto rankedType = dyn_cast<RankedTensorType>(forOp.getResultTypes()[i]);
+    if (!rankedType)
+      continue;
+    FailureOr<DependentTensorValueSemantics> initSemantics =
+        getAffineDependentTensorSemanticsFromValue(init);
+    if (failed(initSemantics))
+      continue;
+
+    DependentTensorValueSemantics iterArgSemantics = *initSemantics;
+    iterArgSemantics.valueIndex = forOp.getRegionIterArgs()[i].getArgNumber();
+    iterArgSemantics.rank = rankedType.getRank();
+    properties.dependentTensorIterArgSemantics.push_back(iterArgSemantics);
+
+    DependentTensorValueSemantics resultSemantics = *initSemantics;
+    resultSemantics.valueIndex = i;
+    resultSemantics.rank = rankedType.getRank();
+    properties.dependentTensorResultSemantics.push_back(resultSemantics);
+  }
+  reattachPropertyOperands(forOp);
+}
 
 #define DEBUG_TYPE "affine-ops"
 
@@ -2201,6 +2276,47 @@ void AffineForOp::build(OpBuilder &builder, OperationState &result, int64_t lb,
   auto ubMap = AffineMap::getConstantMap(ub, builder.getContext());
   return build(builder, result, {}, lbMap, {}, ubMap, step, iterArgs,
                bodyBuilder);
+}
+
+FailureOr<DependentTensorValueSemantics>
+AffineForOp::getDependentTensorResultSemantics(unsigned resultNumber) {
+  populateDependentTensorLoopSemantics(*this);
+  if (const DependentTensorValueSemantics *semantics =
+          findAffineDependentTensorSemantics(
+              getProperties().dependentTensorResultSemantics, resultNumber))
+    return *semantics;
+  return failure();
+}
+
+FailureOr<DependentTensorValueSemantics>
+AffineForOp::getDependentTensorBlockArgumentSemantics(unsigned regionNumber,
+                                                      unsigned blockNumber,
+                                                      unsigned argumentNumber) {
+  if (regionNumber != 0 || blockNumber != 0)
+    return failure();
+  populateDependentTensorLoopSemantics(*this);
+  if (const DependentTensorValueSemantics *semantics =
+          findAffineDependentTensorSemantics(
+              getProperties().dependentTensorIterArgSemantics, argumentNumber))
+    return *semantics;
+  return failure();
+}
+
+void AffineForOp::walkPropertySSAUses(
+    function_ref<void(PropertyOperand &)> callback) {
+  for (DependentTensorValueSemantics &semantics :
+       getProperties().dependentTensorIterArgSemantics)
+    for (PropertyOperand &operand : semantics.dimValues)
+      callback(operand);
+  for (DependentTensorValueSemantics &semantics :
+       getProperties().dependentTensorResultSemantics)
+    for (PropertyOperand &operand : semantics.dimValues)
+      callback(operand);
+}
+
+void AffineForOp::walkDependentTensorPropertyUses(
+    function_ref<void(PropertyOperand &)> callback) {
+  walkPropertySSAUses(callback);
 }
 
 LogicalResult AffineForOp::verifyRegions() {

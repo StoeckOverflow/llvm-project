@@ -20,6 +20,7 @@ include "mlir/Interfaces/InferIntRangeInterface.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
 include "mlir/Interfaces/LoopLikeInterface.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
+include "mlir/IR/DependentTensorInterfaces.td"
 
 def Affine_Dialect : Dialect {
   let name = "affine";
@@ -128,7 +129,13 @@ def AffineForOp : Affine_Op<"for",
       "getLoopUpperBounds", "getYieldedValuesMutable",
       "replaceWithAdditionalYields"]>,
      DeclareOpInterfaceMethods<RegionBranchOpInterface,
-     ["getEntrySuccessorOperands", "getSuccessorInputs"]>]> {
+     ["getEntrySuccessorOperands", "getSuccessorInputs"]>,
+     DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
+      ["walkPropertySSAUses"]>,
+     DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
+      ["getDependentTensorResultSemantics",
+       "getDependentTensorBlockArgumentSemantics",
+       "walkDependentTensorPropertyUses"]>]> {
   let summary = "for operation";
   let description = [{
     Syntax:
@@ -240,7 +247,11 @@ def AffineForOp : Affine_Op<"for",
                        Variadic<AnyType>:$inits,
                        AffineMapAttr:$lowerBoundMap,
                        AffineMapAttr:$upperBoundMap,
-                       IndexAttr:$step);
+                       IndexAttr:$step,
+                       ArrayProp<DependentTensorValueSemanticsProp>:
+                         $dependentTensorIterArgSemantics,
+                       ArrayProp<DependentTensorValueSemanticsProp>:
+                         $dependentTensorResultSemantics);
   let results = (outs Variadic<AnyType>:$results);
   let regions = (region SizedRegion<1>:$region);
 
