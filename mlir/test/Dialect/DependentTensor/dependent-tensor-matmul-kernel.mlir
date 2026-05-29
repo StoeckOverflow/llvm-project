@@ -16,10 +16,10 @@ func.func @dependent_matmul_kernel(
   %c1 = arith.constant 1 : index
   %Cout = scf.for %i = %c0 to %n step %c1 iter_args(%row = %Cinit) -> (tensor<?x?xf32>) {
     %next = scf.for %j = %c0 to %m step %c1 iter_args(%col = %row) -> (tensor<?x?xf32>) {
-      %sum0 = arith.constant 0.000000e+00 : f32
+      %sum0 = dependent_tensor.extract %col[%i, %j] #tensor<[%n, %m], f32> : f32
       %sum = scf.for %p = %c0 to %k step %c1 iter_args(%acc = %sum0) -> (f32) {
-        %a = dependent_tensor.extract %A[%i, %p] : f32
-        %b = dependent_tensor.extract %B[%p, %j] : f32
+        %a = dependent_tensor.extract %A[%i, %p] #tensor<[%n, %k], f32> : f32
+        %b = dependent_tensor.extract %B[%p, %j] #tensor<[%k, %m], f32> : f32
         %mul = arith.mulf %a, %b : f32
         %next_acc = arith.addf %acc, %mul : f32
         scf.yield %next_acc : f32
@@ -40,8 +40,8 @@ func.func @dependent_matmul_kernel(
 // CHECK-DAG: %[[C1:.*]] = arith.constant 1 : index
 // CHECK: %[[COUT:.*]] = scf.for %[[I:.*]] = %[[C0]] to %[[N]] step %[[C1]] iter_args(%[[ROW:.*]] = %[[CINIT]]) -> (tensor<?x?xf32>) {
 // CHECK:   %[[NEXT:.*]] = scf.for %[[J:.*]] = %[[C0]] to %[[M]] step %[[C1]] iter_args(%[[COL:.*]] = %[[ROW]]) -> (tensor<?x?xf32>) {
-// CHECK:     %[[ZERO:.*]] = arith.constant 0.000000e+00 : f32
-// CHECK:     %[[SUM:.*]] = scf.for %[[P:.*]] = %[[C0]] to %[[K]] step %[[C1]] iter_args(%[[ACC:.*]] = %[[ZERO]]) -> (f32) {
+// CHECK:     %[[SUM0:.*]] = dependent_tensor.extract %[[COL]][%[[I]], %[[J]]] #tensor<[%[[N]], %[[M]]], f32> : f32
+// CHECK:     %[[SUM:.*]] = scf.for %[[P:.*]] = %[[C0]] to %[[K]] step %[[C1]] iter_args(%[[ACC:.*]] = %[[SUM0]]) -> (f32) {
 // CHECK:       %[[AV:.*]] = dependent_tensor.extract %[[A]][%[[I]], %[[P]]] #tensor<[%[[N]], %[[K]]], f32> : f32
 // CHECK:       %[[BV:.*]] = dependent_tensor.extract %[[B]][%[[P]], %[[J]]] #tensor<[%[[K]], %[[M]]], f32> : f32
 // CHECK:       %[[PROD:.*]] = arith.mulf %[[AV]], %[[BV]] : f32
@@ -75,8 +75,8 @@ func.func @affine_dependent_matmul_kernel(
     %next = affine.for %j = 0 to %m iter_args(%col = %row) -> (tensor<?x?xf32>) {
       %sum0 = arith.constant 0.000000e+00 : f32
       %sum = affine.for %p = 0 to %k iter_args(%acc = %sum0) -> (f32) {
-        %a = dependent_tensor.extract %A[%i, %p] : f32
-        %b = dependent_tensor.extract %B[%p, %j] : f32
+        %a = dependent_tensor.extract %A[%i, %p] #tensor<[%n, %k], f32> : f32
+        %b = dependent_tensor.extract %B[%p, %j] #tensor<[%k, %m], f32> : f32
         %mul = arith.mulf %a, %b : f32
         %next_acc = arith.addf %acc, %mul : f32
         affine.yield %next_acc : f32
