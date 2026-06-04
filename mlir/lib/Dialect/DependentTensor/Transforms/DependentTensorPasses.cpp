@@ -6,6 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/DependentTensor/IR/DependentTensor.h"
 #include "mlir/Dialect/DependentTensor/Transforms/Passes.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -277,6 +278,28 @@ static LogicalResult verifyScfForSemantics(scf::ForOp forOp) {
   return success();
 }
 
+static LogicalResult verifyAffineForSemantics(affine::AffineForOp forOp) {
+  auto yield = cast<affine::AffineYieldOp>(forOp.getBody()->getTerminator());
+  for (OpResult result : forOp.getResults()) {
+    auto resultInfo = getValueSemantics(result);
+    if (failed(resultInfo))
+      continue;
+    unsigned index = result.getResultNumber();
+    auto initInfo = getValueSemantics(forOp.getInits()[index]);
+    auto iterInfo = getValueSemantics(forOp.getRegionIterArgs()[index]);
+    auto yieldInfo = getValueSemantics(yield.getOperand(index));
+    if (failed(initInfo) || failed(iterInfo) || failed(yieldInfo))
+      return forOp.emitOpError()
+             << "failed to resolve loop-carried dependent_tensor semantics";
+    if (!haveEqualSemantics(*resultInfo, *initInfo) ||
+        !haveEqualSemantics(*resultInfo, *iterInfo) ||
+        !haveEqualSemantics(*resultInfo, *yieldInfo))
+      return forOp.emitOpError()
+             << "loop-carried dependent_tensor semantics do not match";
+  }
+  return success();
+}
+
 struct VerifyDependentTensorSemanticsPass
     : public dependent_tensor::impl::VerifyDependentTensorSemanticsPassBase<
           VerifyDependentTensorSemanticsPass> {
@@ -317,6 +340,14 @@ struct VerifyDependentTensorSemanticsPass
       return WalkResult::advance();
     });
     if (scfWalk.wasInterrupted())
+      return signalPassFailure();
+
+    WalkResult affineWalk = module.walk([&](affine::AffineForOp forOp) {
+      if (failed(verifyAffineForSemantics(forOp)))
+        return WalkResult::interrupt();
+      return WalkResult::advance();
+    });
+    if (affineWalk.wasInterrupted())
       return signalPassFailure();
   }
 };

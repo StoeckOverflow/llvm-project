@@ -8,6 +8,7 @@ add_mlir_dialect_library(MLIRDependentTensorTransforms
   MLIRDependentTensorTransformsIncGen
 
   LINK_LIBS PUBLIC
+  MLIRAffineDialect
   MLIRDependentTensorDialect
   MLIRFuncDialect
   MLIRFunctionInterfaces

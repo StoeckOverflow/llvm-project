@@ -55,6 +55,21 @@ func.func @semantic_bad_scf_for_body_dim() {
 
 // -----
 
+func.func @semantic_bad_affine_for_yield_dim() {
+  %n = arith.constant 4 : index
+  %m = arith.constant 8 : index
+  %k = arith.constant 16 : index
+  %init = dependent_tensor.make () #tensor<[%n, %m], f32> : tensor<?x?xf32>
+  // expected-error@below {{'affine.for' op loop-carried dependent_tensor semantics do not match}}
+  %result = affine.for %iv = 0 to 4 iter_args(%arg = %init) -> (tensor<?x?xf32>) {
+    %bad = dependent_tensor.make () #tensor<[%n, %k], f32> : tensor<?x?xf32>
+    affine.yield %bad : tensor<?x?xf32>
+  }
+  return
+}
+
+// -----
+
 func.func @semantic_boundary_dim_parser_rejects(
     %m : index,
     %t : tensor<?xf32>) -> tensor<?xf32>
