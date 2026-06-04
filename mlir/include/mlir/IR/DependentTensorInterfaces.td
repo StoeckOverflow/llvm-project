@@ -15,9 +15,9 @@ include "mlir/IR/PropertySSAUseInterfaces.td"
 def DependentTensorValueSemanticsProp
     : Property<"::mlir::DependentTensorValueSemantics",
                "dependent tensor value semantics"> {
-  // Value-bearing properties are contextual and intentionally not serializable
-  // through attributes/bytecode in this prototype. Custom assembly owns parsing
-  // and printing of the SSA references.
+  // SSA-valued properties are contextual IR state. They are not serialized
+  // through attributes or bytecode; custom assembly handles parsing and printing
+  // of the embedded SSA references.
   let convertToAttribute = [{
     (void)$_storage;
     return ::mlir::ArrayAttr::get($_ctxt, {});
@@ -38,9 +38,9 @@ def DependentTensorValueSemanticsProp
 def DependentTensorDimValueSemanticsProp
     : Property<"::mlir::DependentTensorDimValueSemantics",
                "dependent tensor dimension value assertion"> {
-  // Value-bearing properties are contextual and intentionally not serializable
-  // through attributes/bytecode in this prototype. Custom assembly owns parsing
-  // and printing of the SSA references.
+  // SSA-valued properties are contextual IR state. They are not serialized
+  // through attributes or bytecode; custom assembly handles parsing and printing
+  // of the embedded SSA references.
   let convertToAttribute = [{
     (void)$_storage;
     return ::mlir::ArrayAttr::get($_ctxt, {});

@@ -27,9 +27,8 @@ def MakeOp : DependentTensor_Op<"make", [
   let summary = "construct a property-native dependent tensor value";
   let description = [{
     `dependent_tensor.make` constructs a tensor value whose dependency semantics
-    are carried by the defining operation rather than the tensor type. In v1,
-    the number of dimension operands must match the tensor rank and every
-    result dimension is dependent.
+    are carried by the defining operation. The number of dimension operands must match 
+    the tensor rank, and each result dimension is represented by a dependent SSA value.
   }];
 
   let arguments = (ins
@@ -46,9 +45,9 @@ def DimOp : DependentTensor_Op<"dim", [
       ["walkPropertySSAUses"]>]> {
   let summary = "query a dependent tensor dimension";
   let description = [{
-    `dependent_tensor.dim` mirrors `tensor.dim` for the dependent tensor
-    prototype. The result is an index value, while the owning tensor value keeps
-    the dependent dimension SSA values in its creator/owner properties.
+    `dependent_tensor.dim` mirrors `tensor.dim` for tensors with dependent
+    dimension semantics. The result is an index value, while the owning tensor
+    value keeps its dependent dimension SSA values in operation properties.
   }];
 
   let arguments = (ins
