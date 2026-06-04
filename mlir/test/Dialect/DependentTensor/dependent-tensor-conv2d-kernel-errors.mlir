@@ -21,6 +21,50 @@ func.func @dependent_conv2d_im2col_kernel(
   return %Yinit : tensor<?x?x?x?xf32>
 }
 
+func.func @bad_conv_x_batch_dim(
+    %n : index,
+    %cin : index,
+    %p : index,
+    %h : index,
+    %w : index,
+    %cout : index,
+    %kh : index,
+    %kw : index,
+    %oh : index,
+    %ow : index) -> tensor<?x?x?x?xf32>
+    #types[] -> #tensor<[%n, %cout, %oh, %ow], f32> {
+  %X = dependent_tensor.make () #tensor<[%p, %cin, %oh, %ow, %kh, %kw], f32> : tensor<?x?x?x?x?x?xf32>
+  %K = dependent_tensor.make () #tensor<[%cout, %cin, %kh, %kw], f32> : tensor<?x?x?x?xf32>
+  %Y = dependent_tensor.make () #tensor<[%n, %cout, %oh, %ow], f32> : tensor<?x?x?x?xf32>
+  // expected-error@+1 {{operand #9 does not match callee dependency metadata}}
+  %R = func.call @dependent_conv2d_im2col_kernel(%n, %cin, %h, %w, %cout, %kh, %kw, %oh, %ow, %X, %K, %Y)
+      : (index, index, index, index, index, index, index, index, index, tensor<?x?x?x?x?x?xf32>, tensor<?x?x?x?xf32>, tensor<?x?x?x?xf32>) -> tensor<?x?x?x?xf32>
+  return %R : tensor<?x?x?x?xf32>
+}
+
+// -----
+
+func.func @dependent_conv2d_im2col_kernel(
+    %n : index,
+    %cin : index,
+    %h : index,
+    %w : index,
+    %cout : index,
+    %kh : index,
+    %kw : index,
+    %oh : index,
+    %ow : index,
+    %X : tensor<?x?x?x?x?x?xf32>,
+    %K : tensor<?x?x?x?xf32>,
+    %Yinit : tensor<?x?x?x?xf32>) -> tensor<?x?x?x?xf32>
+    #types[
+      %X : #tensor<[%n, %cin, %oh, %ow, %kh, %kw], f32>,
+      %K : #tensor<[%cout, %cin, %kh, %kw], f32>,
+      %Yinit : #tensor<[%n, %cout, %oh, %ow], f32>
+    ] -> #tensor<[%n, %cout, %oh, %ow], f32> {
+  return %Yinit : tensor<?x?x?x?xf32>
+}
+
 func.func @bad_conv_x_channel_dim(
     %n : index,
     %cin : index,
@@ -109,6 +153,50 @@ func.func @dependent_conv2d_im2col_kernel(
   return %Yinit : tensor<?x?x?x?xf32>
 }
 
+func.func @bad_conv_kernel_width_dim(
+    %n : index,
+    %cin : index,
+    %h : index,
+    %w : index,
+    %cout : index,
+    %kh : index,
+    %kw : index,
+    %p : index,
+    %oh : index,
+    %ow : index) -> tensor<?x?x?x?xf32>
+    #types[] -> #tensor<[%n, %cout, %oh, %ow], f32> {
+  %X = dependent_tensor.make () #tensor<[%n, %cin, %oh, %ow, %kh, %kw], f32> : tensor<?x?x?x?x?x?xf32>
+  %K = dependent_tensor.make () #tensor<[%cout, %cin, %kh, %p], f32> : tensor<?x?x?x?xf32>
+  %Y = dependent_tensor.make () #tensor<[%n, %cout, %oh, %ow], f32> : tensor<?x?x?x?xf32>
+  // expected-error@+1 {{operand #10 does not match callee dependency metadata}}
+  %R = func.call @dependent_conv2d_im2col_kernel(%n, %cin, %h, %w, %cout, %kh, %kw, %oh, %ow, %X, %K, %Y)
+      : (index, index, index, index, index, index, index, index, index, tensor<?x?x?x?x?x?xf32>, tensor<?x?x?x?xf32>, tensor<?x?x?x?xf32>) -> tensor<?x?x?x?xf32>
+  return %R : tensor<?x?x?x?xf32>
+}
+
+// -----
+
+func.func @dependent_conv2d_im2col_kernel(
+    %n : index,
+    %cin : index,
+    %h : index,
+    %w : index,
+    %cout : index,
+    %kh : index,
+    %kw : index,
+    %oh : index,
+    %ow : index,
+    %X : tensor<?x?x?x?x?x?xf32>,
+    %K : tensor<?x?x?x?xf32>,
+    %Yinit : tensor<?x?x?x?xf32>) -> tensor<?x?x?x?xf32>
+    #types[
+      %X : #tensor<[%n, %cin, %oh, %ow, %kh, %kw], f32>,
+      %K : #tensor<[%cout, %cin, %kh, %kw], f32>,
+      %Yinit : #tensor<[%n, %cout, %oh, %ow], f32>
+    ] -> #tensor<[%n, %cout, %oh, %ow], f32> {
+  return %Yinit : tensor<?x?x?x?xf32>
+}
+
 func.func @bad_conv_output_spatial_dim(
     %n : index,
     %cin : index,
@@ -124,6 +212,50 @@ func.func @bad_conv_output_spatial_dim(
   %X = dependent_tensor.make () #tensor<[%n, %cin, %oh, %ow, %kh, %kw], f32> : tensor<?x?x?x?x?x?xf32>
   %K = dependent_tensor.make () #tensor<[%cout, %cin, %kh, %kw], f32> : tensor<?x?x?x?xf32>
   %Y = dependent_tensor.make () #tensor<[%n, %cout, %p, %ow], f32> : tensor<?x?x?x?xf32>
+  // expected-error@+1 {{operand #11 does not match callee dependency metadata}}
+  %R = func.call @dependent_conv2d_im2col_kernel(%n, %cin, %h, %w, %cout, %kh, %kw, %oh, %ow, %X, %K, %Y)
+      : (index, index, index, index, index, index, index, index, index, tensor<?x?x?x?x?x?xf32>, tensor<?x?x?x?xf32>, tensor<?x?x?x?xf32>) -> tensor<?x?x?x?xf32>
+  return %R : tensor<?x?x?x?xf32>
+}
+
+// -----
+
+func.func @dependent_conv2d_im2col_kernel(
+    %n : index,
+    %cin : index,
+    %h : index,
+    %w : index,
+    %cout : index,
+    %kh : index,
+    %kw : index,
+    %oh : index,
+    %ow : index,
+    %X : tensor<?x?x?x?x?x?xf32>,
+    %K : tensor<?x?x?x?xf32>,
+    %Yinit : tensor<?x?x?x?xf32>) -> tensor<?x?x?x?xf32>
+    #types[
+      %X : #tensor<[%n, %cin, %oh, %ow, %kh, %kw], f32>,
+      %K : #tensor<[%cout, %cin, %kh, %kw], f32>,
+      %Yinit : #tensor<[%n, %cout, %oh, %ow], f32>
+    ] -> #tensor<[%n, %cout, %oh, %ow], f32> {
+  return %Yinit : tensor<?x?x?x?xf32>
+}
+
+func.func @bad_conv_output_channel_dim(
+    %n : index,
+    %cin : index,
+    %h : index,
+    %w : index,
+    %cout : index,
+    %p : index,
+    %kh : index,
+    %kw : index,
+    %oh : index,
+    %ow : index) -> tensor<?x?x?x?xf32>
+    #types[] -> #tensor<[%n, %cout, %oh, %ow], f32> {
+  %X = dependent_tensor.make () #tensor<[%n, %cin, %oh, %ow, %kh, %kw], f32> : tensor<?x?x?x?x?x?xf32>
+  %K = dependent_tensor.make () #tensor<[%cout, %cin, %kh, %kw], f32> : tensor<?x?x?x?xf32>
+  %Y = dependent_tensor.make () #tensor<[%n, %p, %oh, %ow], f32> : tensor<?x?x?x?xf32>
   // expected-error@+1 {{operand #11 does not match callee dependency metadata}}
   %R = func.call @dependent_conv2d_im2col_kernel(%n, %cin, %h, %w, %cout, %kh, %kw, %oh, %ow, %X, %K, %Y)
       : (index, index, index, index, index, index, index, index, index, tensor<?x?x?x?x?x?xf32>, tensor<?x?x?x?xf32>, tensor<?x?x?x?xf32>) -> tensor<?x?x?x?xf32>

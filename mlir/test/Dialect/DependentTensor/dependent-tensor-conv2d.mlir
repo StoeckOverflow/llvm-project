@@ -1,4 +1,5 @@
 // RUN: mlir-opt %s | FileCheck %s
+// RUN: mlir-opt %s -verify-dependent-tensor-semantics
 
 func.func @conv2d_nhwc_hwcf_written_with_primitives(
     %n : index, %h : index, %w : index, %c : index,

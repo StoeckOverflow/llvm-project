@@ -15,7 +15,71 @@ func.func @dependent_matmul_kernel(
   return %Cinit : tensor<?x?xf32>
 }
 
-func.func @bad_matmul_contracting_dim(
+func.func @bad_matmul_lhs_row_dim(
+    %n : index,
+    %k : index,
+    %m : index,
+    %p : index) -> tensor<?x?xf32>
+    #types[] -> #tensor<[%n, %m], f32> {
+  %A = dependent_tensor.make () #tensor<[%p, %k], f32> : tensor<?x?xf32>
+  %B = dependent_tensor.make () #tensor<[%k, %m], f32> : tensor<?x?xf32>
+  %C = dependent_tensor.make () #tensor<[%n, %m], f32> : tensor<?x?xf32>
+  // expected-error@+1 {{operand #3 does not match callee dependency metadata}}
+  %R = func.call @dependent_matmul_kernel(%n, %k, %m, %A, %B, %C)
+      : (index, index, index, tensor<?x?xf32>, tensor<?x?xf32>, tensor<?x?xf32>) -> tensor<?x?xf32>
+  return %R : tensor<?x?xf32>
+}
+
+// -----
+
+func.func @dependent_matmul_kernel(
+    %n : index,
+    %k : index,
+    %m : index,
+    %A : tensor<?x?xf32>,
+    %B : tensor<?x?xf32>,
+    %Cinit : tensor<?x?xf32>) -> tensor<?x?xf32>
+    #types[
+      %A : #tensor<[%n, %k], f32>,
+      %B : #tensor<[%k, %m], f32>,
+      %Cinit : #tensor<[%n, %m], f32>
+    ] -> #tensor<[%n, %m], f32> {
+  return %Cinit : tensor<?x?xf32>
+}
+
+func.func @bad_matmul_lhs_contracting_dim(
+    %n : index,
+    %k : index,
+    %m : index,
+    %p : index) -> tensor<?x?xf32>
+    #types[] -> #tensor<[%n, %m], f32> {
+  %A = dependent_tensor.make () #tensor<[%n, %p], f32> : tensor<?x?xf32>
+  %B = dependent_tensor.make () #tensor<[%k, %m], f32> : tensor<?x?xf32>
+  %C = dependent_tensor.make () #tensor<[%n, %m], f32> : tensor<?x?xf32>
+  // expected-error@+1 {{operand #3 does not match callee dependency metadata}}
+  %R = func.call @dependent_matmul_kernel(%n, %k, %m, %A, %B, %C)
+      : (index, index, index, tensor<?x?xf32>, tensor<?x?xf32>, tensor<?x?xf32>) -> tensor<?x?xf32>
+  return %R : tensor<?x?xf32>
+}
+
+// -----
+
+func.func @dependent_matmul_kernel(
+    %n : index,
+    %k : index,
+    %m : index,
+    %A : tensor<?x?xf32>,
+    %B : tensor<?x?xf32>,
+    %Cinit : tensor<?x?xf32>) -> tensor<?x?xf32>
+    #types[
+      %A : #tensor<[%n, %k], f32>,
+      %B : #tensor<[%k, %m], f32>,
+      %Cinit : #tensor<[%n, %m], f32>
+    ] -> #tensor<[%n, %m], f32> {
+  return %Cinit : tensor<?x?xf32>
+}
+
+func.func @bad_matmul_rhs_contracting_dim(
     %n : index,
     %k : index,
     %m : index,
@@ -47,7 +111,71 @@ func.func @dependent_matmul_kernel(
   return %Cinit : tensor<?x?xf32>
 }
 
-func.func @bad_matmul_result_dim(
+func.func @bad_matmul_rhs_result_dim(
+    %n : index,
+    %k : index,
+    %m : index,
+    %p : index) -> tensor<?x?xf32>
+    #types[] -> #tensor<[%n, %m], f32> {
+  %A = dependent_tensor.make () #tensor<[%n, %k], f32> : tensor<?x?xf32>
+  %B = dependent_tensor.make () #tensor<[%k, %p], f32> : tensor<?x?xf32>
+  %C = dependent_tensor.make () #tensor<[%n, %m], f32> : tensor<?x?xf32>
+  // expected-error@+1 {{operand #4 does not match callee dependency metadata}}
+  %R = func.call @dependent_matmul_kernel(%n, %k, %m, %A, %B, %C)
+      : (index, index, index, tensor<?x?xf32>, tensor<?x?xf32>, tensor<?x?xf32>) -> tensor<?x?xf32>
+  return %R : tensor<?x?xf32>
+}
+
+// -----
+
+func.func @dependent_matmul_kernel(
+    %n : index,
+    %k : index,
+    %m : index,
+    %A : tensor<?x?xf32>,
+    %B : tensor<?x?xf32>,
+    %Cinit : tensor<?x?xf32>) -> tensor<?x?xf32>
+    #types[
+      %A : #tensor<[%n, %k], f32>,
+      %B : #tensor<[%k, %m], f32>,
+      %Cinit : #tensor<[%n, %m], f32>
+    ] -> #tensor<[%n, %m], f32> {
+  return %Cinit : tensor<?x?xf32>
+}
+
+func.func @bad_matmul_result_row_dim(
+    %n : index,
+    %k : index,
+    %m : index,
+    %p : index) -> tensor<?x?xf32>
+    #types[] -> #tensor<[%n, %m], f32> {
+  %A = dependent_tensor.make () #tensor<[%n, %k], f32> : tensor<?x?xf32>
+  %B = dependent_tensor.make () #tensor<[%k, %m], f32> : tensor<?x?xf32>
+  %C = dependent_tensor.make () #tensor<[%p, %m], f32> : tensor<?x?xf32>
+  // expected-error@+1 {{operand #5 does not match callee dependency metadata}}
+  %R = func.call @dependent_matmul_kernel(%n, %k, %m, %A, %B, %C)
+      : (index, index, index, tensor<?x?xf32>, tensor<?x?xf32>, tensor<?x?xf32>) -> tensor<?x?xf32>
+  return %R : tensor<?x?xf32>
+}
+
+// -----
+
+func.func @dependent_matmul_kernel(
+    %n : index,
+    %k : index,
+    %m : index,
+    %A : tensor<?x?xf32>,
+    %B : tensor<?x?xf32>,
+    %Cinit : tensor<?x?xf32>) -> tensor<?x?xf32>
+    #types[
+      %A : #tensor<[%n, %k], f32>,
+      %B : #tensor<[%k, %m], f32>,
+      %Cinit : #tensor<[%n, %m], f32>
+    ] -> #tensor<[%n, %m], f32> {
+  return %Cinit : tensor<?x?xf32>
+}
+
+func.func @bad_matmul_result_col_dim(
     %n : index,
     %k : index,
     %m : index,

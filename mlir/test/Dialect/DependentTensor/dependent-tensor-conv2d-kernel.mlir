@@ -89,6 +89,8 @@ func.func @dependent_conv2d_im2col_kernel(
 
 // -----
 
+// This call verifies dependent-dimension refinement across the function
+// boundary. Loop index range checking is intentionally outside this test.
 func.func @call_dependent_conv2d_im2col_kernel(
     %n : index,
     %cin : index,
