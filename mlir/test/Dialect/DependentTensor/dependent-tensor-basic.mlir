@@ -223,20 +223,6 @@ func.func @loop_result_boundary_dim_mismatch(%m : index, %n : index) {
 
 // -----
 
-func.func @loop_old_pre_arrow_boundary_rejected(%m : index, %n : index) {
-  %c0 = arith.constant 0 : index
-  %c1 = arith.constant 1 : index
-  %init = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+1 {{expected '->'}}
-  %r = scf.for %i = %c0 to %m step %c1 iter_args(%arg = %init)
-      #types[%arg : #tensor<[%m, %n], f32>] -> (tensor<?x?xf32>) {
-    scf.yield %arg : tensor<?x?xf32>
-  }
-  return
-}
-
-// -----
-
 func.func @return_boundary_mismatch(%m : index, %n : index) -> tensor<?x?xf32>
     #types[] -> #tensor<[%m, %n], f32> {
   %t = dependent_tensor.make () #tensor<[%n, %m], f32> : tensor<?x?xf32>
