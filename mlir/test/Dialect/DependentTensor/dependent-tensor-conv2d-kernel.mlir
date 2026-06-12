@@ -20,10 +20,14 @@ func.func @dependent_conv2d_im2col_kernel(
     ] -> #tensor<[%n, %cout, %oh, %ow], f32> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
-  %Y0 = scf.for %n_idx = %c0 to %n step %c1 iter_args(%yn = %Yinit) -> (tensor<?x?x?x?xf32>) {
-    %Y1 = scf.for %co = %c0 to %cout step %c1 iter_args(%yc = %yn) -> (tensor<?x?x?x?xf32>) {
-      %Y2 = scf.for %oh_idx = %c0 to %oh step %c1 iter_args(%yh = %yc) -> (tensor<?x?x?x?xf32>) {
-        %Y3 = scf.for %ow_idx = %c0 to %ow step %c1 iter_args(%yw = %yh) -> (tensor<?x?x?x?xf32>) {
+  %Y0 = scf.for %n_idx = %c0 to %n step %c1 iter_args(%yn = %Yinit)
+      #types[%yn : #tensor<[%n, %cout, %oh, %ow], f32>] -> (tensor<?x?x?x?xf32>) {
+    %Y1 = scf.for %co = %c0 to %cout step %c1 iter_args(%yc = %yn)
+        #types[%yc : #tensor<[%n, %cout, %oh, %ow], f32>] -> (tensor<?x?x?x?xf32>) {
+      %Y2 = scf.for %oh_idx = %c0 to %oh step %c1 iter_args(%yh = %yc)
+          #types[%yh : #tensor<[%n, %cout, %oh, %ow], f32>] -> (tensor<?x?x?x?xf32>) {
+        %Y3 = scf.for %ow_idx = %c0 to %ow step %c1 iter_args(%yw = %yh)
+            #types[%yw : #tensor<[%n, %cout, %oh, %ow], f32>] -> (tensor<?x?x?x?xf32>) {
           %sum0 = dependent_tensor.extract %yw[%n_idx, %co, %oh_idx, %ow_idx] : f32
           %sum_ci = scf.for %ci = %c0 to %cin step %c1 iter_args(%acc_ci = %sum0) -> (f32) {
             %sum_kh = scf.for %kh_idx = %c0 to %kh step %c1 iter_args(%acc_kh = %acc_ci) -> (f32) {
@@ -73,7 +77,7 @@ func.func @call_dependent_conv2d_im2col_kernel(
 // CHECK-SAME: (%[[N:arg[0-9]+]]: index, %[[CIN:arg[0-9]+]]: index, %{{.*}}: index, %{{.*}}: index, %[[COUT:arg[0-9]+]]: index, %[[KH:arg[0-9]+]]: index, %[[KW:arg[0-9]+]]: index, %[[OH:arg[0-9]+]]: index, %[[OW:arg[0-9]+]]: index,
 // CHECK-SAME:  %[[X:arg[0-9]+]]: tensor<?x?x?x?x?x?xf32>, %[[K:arg[0-9]+]]: tensor<?x?x?x?xf32>, %[[YINIT:arg[0-9]+]]: tensor<?x?x?x?xf32>) -> tensor<?x?x?x?xf32>
 // CHECK-SAME: #types[%[[X]] : #tensor<[%[[N]], %[[CIN]], %[[OH]], %[[OW]], %[[KH]], %[[KW]]], f32>, %[[K]] : #tensor<[%[[COUT]], %[[CIN]], %[[KH]], %[[KW]]], f32>, %[[YINIT]] : #tensor<[%[[N]], %[[COUT]], %[[OH]], %[[OW]]], f32>] -> #tensor<[%[[N]], %[[COUT]], %[[OH]], %[[OW]]], f32>
-// CHECK: scf.for
+// CHECK: scf.for %{{.*}} iter_args(%[[YN:.*]] = %[[YINIT]]) #types[%[[YN]] : #tensor<[%[[N]], %[[COUT]], %[[OH]], %[[OW]]], f32>] -> (tensor<?x?x?x?xf32>)
 // CHECK: dependent_tensor.extract %{{.*}}[%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}] : f32
 // CHECK: dependent_tensor.extract %[[X]][%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}] : f32
 // CHECK: dependent_tensor.extract %[[K]][%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}] : f32

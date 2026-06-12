@@ -14,6 +14,7 @@
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/AffineExprVisitor.h"
 #include "mlir/IR/DependentTensorInterfaces.h"
+#include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/IntegerSet.h"
 #include "mlir/IR/Matchers.h"
@@ -78,18 +79,197 @@ getAffineDependentTensorSemanticsFromValue(Value value) {
       cast<BlockArgument>(value));
 }
 
-static void populateDependentTensorLoopSemantics(AffineForOp forOp) {
+static StringRef normalizeDependentTensorSSAName(StringRef name) {
+  name.consume_front("%");
+  return name;
+}
+
+struct PendingLoopDependentTensorSemantics {
+  unsigned iterArgIndex = 0;
+  SMLoc loc;
+  SmallVector<OpAsmParser::UnresolvedOperand> dims;
+  Type elementType;
+};
+
+static std::optional<unsigned>
+findLoopIterArgIndex(ArrayRef<OpAsmParser::Argument> regionArgs,
+                     StringRef name) {
+  name = normalizeDependentTensorSSAName(name);
+  for (auto [index, arg] : llvm::enumerate(regionArgs.drop_front()))
+    if (normalizeDependentTensorSSAName(arg.ssaName.name) == name)
+      return index;
+  return std::nullopt;
+}
+
+static ParseResult parseOptionalDependentTensorLoopTypes(
+    OpAsmParser &parser, ArrayRef<OpAsmParser::Argument> regionArgs,
+    SmallVectorImpl<PendingLoopDependentTensorSemantics> &pending) {
+  if (failed(parser.parseOptionalHashKeyword("types")))
+    return success();
+
+  SmallVector<bool> seen(regionArgs.size() > 0 ? regionArgs.size() - 1 : 0,
+                         false);
+  if (parser.parseLSquare())
+    return failure();
+  while (failed(parser.parseOptionalRSquare())) {
+    OpAsmParser::UnresolvedOperand arg;
+    if (parser.parseOperand(arg))
+      return failure();
+    std::optional<unsigned> iterArgIndex =
+        findLoopIterArgIndex(regionArgs, arg.name);
+    if (!iterArgIndex)
+      return parser.emitError(
+          arg.location,
+          "dependent tensor loop boundary values must be loop iter args");
+    if (seen[*iterArgIndex])
+      return parser.emitError(arg.location,
+                              "duplicate dependent tensor loop boundary value");
+    seen[*iterArgIndex] = true;
+
+    PendingLoopDependentTensorSemantics info;
+    info.iterArgIndex = *iterArgIndex;
+    info.loc = arg.location;
+    if (parser.parseColon() ||
+        dependent_tensor::parseTensorSpec(parser, info.dims, info.elementType))
+      return failure();
+    pending.push_back(std::move(info));
+    (void)parser.parseOptionalComma();
+  }
+  return success();
+}
+
+static const PendingLoopDependentTensorSemantics *
+findPendingLoopSemantics(ArrayRef<PendingLoopDependentTensorSemantics> pending,
+                         unsigned index) {
+  for (const PendingLoopDependentTensorSemantics &candidate : pending)
+    if (candidate.iterArgIndex == index)
+      return &candidate;
+  return nullptr;
+}
+
+static ParseResult populateDependentTensorLoopSemanticsFromInits(
+    OpAsmParser &parser, TypeRange resultTypes, ValueRange initOperands,
+    ArrayRef<PendingLoopDependentTensorSemantics> pending,
+    SmallVectorImpl<DependentTensorValueSemantics> &iterArgSemantics,
+    SmallVectorImpl<DependentTensorValueSemantics> &resultSemantics) {
+  iterArgSemantics.clear();
+  resultSemantics.clear();
+  iterArgSemantics.reserve(initOperands.size());
+  resultSemantics.reserve(initOperands.size());
+
+  for (const PendingLoopDependentTensorSemantics &info : pending)
+    if (info.iterArgIndex >= resultTypes.size())
+      return parser.emitError(
+          info.loc, "dependent tensor loop boundary index out of range");
+
+  for (auto [i, init] : llvm::enumerate(initOperands)) {
+    auto rankedType = dyn_cast<RankedTensorType>(resultTypes[i]);
+    const PendingLoopDependentTensorSemantics *explicitInfo =
+        findPendingLoopSemantics(pending, i);
+    if (!rankedType) {
+      if (explicitInfo)
+        return parser.emitError(
+            explicitInfo->loc,
+            "dependent tensor loop boundary requires ranked tensor");
+      continue;
+    }
+
+    FailureOr<DependentTensorValueSemantics> initSemantics =
+        getAffineDependentTensorSemanticsFromValue(init);
+    if (failed(initSemantics) && !explicitInfo)
+      continue;
+
+    SmallVector<Value> dimValues;
+    if (succeeded(initSemantics))
+      dimValues = initSemantics->getDimValues();
+    if (explicitInfo) {
+      if (explicitInfo->dims.size() !=
+          static_cast<size_t>(rankedType.getRank()))
+        return parser.emitError(explicitInfo->loc,
+                                "dependent tensor loop boundary rank mismatch");
+      if (explicitInfo->elementType != rankedType.getElementType())
+        return parser.emitError(explicitInfo->loc,
+                                "dependent tensor loop boundary element type "
+                                "must match result type");
+
+      SmallVector<Value> resolvedDims;
+      SmallVector<Type> dimTypes(explicitInfo->dims.size(),
+                                 parser.getBuilder().getIndexType());
+      if (parser.resolveOperands(explicitInfo->dims, dimTypes,
+                                 parser.getCurrentLocation(), resolvedDims))
+        return failure();
+      if (succeeded(initSemantics) &&
+          !llvm::equal(resolvedDims, initSemantics->getDimValues()))
+        return parser.emitError(
+            explicitInfo->loc,
+            "dependent tensor loop boundary must match init semantics");
+      dimValues = std::move(resolvedDims);
+    }
+
+    DependentTensorValueSemantics &iterSemantics =
+        iterArgSemantics.emplace_back();
+    iterSemantics.valueIndex = i + 1;
+    iterSemantics.rank = rankedType.getRank();
+    iterSemantics.assignDimValues(dimValues);
+
+    DependentTensorValueSemantics &resSemantics =
+        resultSemantics.emplace_back();
+    resSemantics.valueIndex = i;
+    resSemantics.rank = rankedType.getRank();
+    resSemantics.assignDimValues(dimValues);
+  }
+  return success();
+}
+
+static void printDependentTensorLoopTypes(
+    OpAsmPrinter &p, Block::BlockArgListType regionIterArgs,
+    ArrayRef<DependentTensorValueSemantics> semantics) {
+  if (semantics.empty())
+    return;
+  p << " #types[";
+  llvm::interleaveComma(semantics, p, [&](const auto &semantics) {
+    unsigned iterArgIndex = semantics.valueIndex - 1;
+    BlockArgument arg = regionIterArgs[iterArgIndex];
+    p.printOperand(arg);
+    p << " : ";
+    auto type = cast<RankedTensorType>(arg.getType());
+    dependent_tensor::printTensorSpec(p, semantics.getDimValues(),
+                                      type.getElementType());
+  });
+  p << "]";
+}
+
+static LogicalResult
+populateDependentTensorLoopSemantics(AffineForOp forOp,
+                                     bool verifyExplicit = false) {
   auto &properties = forOp.getProperties();
+  struct ExistingLoopSemantics {
+    unsigned valueIndex;
+    int64_t rank;
+    SmallVector<Value> dims;
+  };
+  SmallVector<ExistingLoopSemantics> existingIterArgSemantics;
+  if (verifyExplicit) {
+    existingIterArgSemantics.reserve(
+        properties.dependentTensorIterArgSemantics.size());
+    for (const DependentTensorValueSemantics &semantics :
+         properties.dependentTensorIterArgSemantics)
+      existingIterArgSemantics.push_back(
+          {semantics.valueIndex, semantics.rank, semantics.getDimValues()});
+  }
+
   properties.dependentTensorIterArgSemantics.clear();
   properties.dependentTensorResultSemantics.clear();
+  properties.dependentTensorIterArgSemantics.reserve(forOp.getInits().size());
+  properties.dependentTensorResultSemantics.reserve(forOp.getInits().size());
 
   if (forOp.getInits().size() != forOp.getNumResults()) {
     reattachPropertyOperands(forOp);
-    return;
+    return success();
   }
   if (forOp.getBody()->getNumArguments() < 1 + forOp.getInits().size()) {
     reattachPropertyOperands(forOp);
-    return;
+    return success();
   }
 
   for (auto [i, init] : llvm::enumerate(forOp.getInits())) {
@@ -101,17 +281,31 @@ static void populateDependentTensorLoopSemantics(AffineForOp forOp) {
     if (failed(initSemantics))
       continue;
 
-    DependentTensorValueSemantics iterArgSemantics = *initSemantics;
-    iterArgSemantics.valueIndex = forOp.getRegionIterArgs()[i].getArgNumber();
-    iterArgSemantics.rank = rankedType.getRank();
-    properties.dependentTensorIterArgSemantics.push_back(iterArgSemantics);
+    SmallVector<Value> dimValues = initSemantics->getDimValues();
+    unsigned iterArgIndex = forOp.getRegionIterArgs()[i].getArgNumber();
+    if (verifyExplicit)
+      for (const ExistingLoopSemantics &explicitSemantics :
+           existingIterArgSemantics)
+        if (explicitSemantics.valueIndex == iterArgIndex &&
+            (explicitSemantics.rank != rankedType.getRank() ||
+             explicitSemantics.dims != dimValues))
+          return forOp.emitOpError(
+              "dependent tensor loop boundary must match init semantics");
 
-    DependentTensorValueSemantics resultSemantics = *initSemantics;
+    DependentTensorValueSemantics &iterArgSemantics =
+        properties.dependentTensorIterArgSemantics.emplace_back();
+    iterArgSemantics.valueIndex = iterArgIndex;
+    iterArgSemantics.rank = rankedType.getRank();
+    iterArgSemantics.assignDimValues(dimValues);
+
+    DependentTensorValueSemantics &resultSemantics =
+        properties.dependentTensorResultSemantics.emplace_back();
     resultSemantics.valueIndex = i;
     resultSemantics.rank = rankedType.getRank();
-    properties.dependentTensorResultSemantics.push_back(resultSemantics);
+    resultSemantics.assignDimValues(dimValues);
   }
   reattachPropertyOperands(forOp);
+  return success();
 }
 
 #define DEBUG_TYPE "affine-ops"
@@ -2280,7 +2474,7 @@ void AffineForOp::build(OpBuilder &builder, OperationState &result, int64_t lb,
 
 FailureOr<DependentTensorValueSemantics>
 AffineForOp::getDependentTensorResultSemantics(unsigned resultNumber) {
-  populateDependentTensorLoopSemantics(*this);
+  (void)populateDependentTensorLoopSemantics(*this);
   if (const DependentTensorValueSemantics *semantics =
           findAffineDependentTensorSemantics(
               getProperties().dependentTensorResultSemantics, resultNumber))
@@ -2294,7 +2488,7 @@ AffineForOp::getDependentTensorBlockArgumentSemantics(unsigned regionNumber,
                                                       unsigned argumentNumber) {
   if (regionNumber != 0 || blockNumber != 0)
     return failure();
-  populateDependentTensorLoopSemantics(*this);
+  (void)populateDependentTensorLoopSemantics(*this);
   if (const DependentTensorValueSemantics *semantics =
           findAffineDependentTensorSemantics(
               getProperties().dependentTensorIterArgSemantics, argumentNumber))
@@ -2361,6 +2555,10 @@ LogicalResult AffineForOp::verifyRegions() {
   if (getNumRegionIterArgs() != opNumResults)
     return emitOpError(
         "mismatch between the number of basic block args and results");
+
+  if (failed(populateDependentTensorLoopSemantics(*this,
+                                                  /*verifyExplicit=*/true)))
+    return failure();
 
   return success();
 }
@@ -2504,9 +2702,13 @@ ParseResult AffineForOp::parse(OpAsmParser &parser, OperationState &result) {
   // Induction variable.
   regionArgs.push_back(inductionVariable);
 
+  SmallVector<PendingLoopDependentTensorSemantics> pendingLoopSemantics;
   if (succeeded(parser.parseOptionalKeyword("iter_args"))) {
-    // Parse assignment list and results type list.
+    // Parse assignment list, optional dependent tensor boundary annotations,
+    // and results type list.
     if (parser.parseAssignmentList(regionArgs, operands) ||
+        parseOptionalDependentTensorLoopTypes(parser, regionArgs,
+                                              pendingLoopSemantics) ||
         parser.parseArrowTypeList(result.types))
       return failure();
     // Resolve input operands.
@@ -2538,7 +2740,18 @@ ParseResult AffineForOp::parse(OpAsmParser &parser, OperationState &result) {
   AffineForOp::ensureTerminator(*body, builder, result.location);
 
   // Parse the optional attribute list.
-  return parser.parseOptionalAttrDict(result.attributes);
+  if (parser.parseOptionalAttrDict(result.attributes))
+    return failure();
+
+  auto &properties = result.getOrAddProperties<AffineForOp::Properties>();
+  if (populateDependentTensorLoopSemanticsFromInits(
+          parser, result.types,
+          ArrayRef<Value>(result.operands).take_back(operands.size()),
+          pendingLoopSemantics, properties.dependentTensorIterArgSemantics,
+          properties.dependentTensorResultSemantics))
+    return failure();
+
+  return success();
 }
 
 static void printBound(AffineMapAttr boundMap,
@@ -2615,7 +2828,12 @@ void AffineForOp::print(OpAsmPrinter &p) {
     llvm::interleaveComma(llvm::zip(regionArgs, operands), p, [&](auto it) {
       p << std::get<0>(it) << " = " << std::get<1>(it);
     });
-    p << ") -> (" << getResultTypes() << ")";
+    p << ")";
+    (void)populateDependentTensorLoopSemantics(*this);
+    printDependentTensorLoopTypes(
+        p, getRegionIterArgs(),
+        getProperties().dependentTensorIterArgSemantics);
+    p << " -> (" << getResultTypes() << ")";
     printBlockTerminators = true;
   }
 
