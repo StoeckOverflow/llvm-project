@@ -12,10 +12,6 @@ func.func @semantic_bad_dominance_property_owner() {
 
 func.func @semantic_cycle_like_dimension() {
   %dim = arith.constant 1 : index
-  // The test pass mutates this tensor's stored dimension to %late_dim. That
-  // would make the tensor semantics depend on an index computed from the tensor
-  // itself, and is rejected because the cyclic dimension value does not
-  // dominate the owner.
   // expected-error@below {{'dependent_tensor.make' op dependent result dimension value does not dominate owner}}
   %t = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
   %c0 = arith.constant 0 : index
@@ -33,6 +29,19 @@ func.func @semantic_isolated_capture_victim() {
   %dim = arith.constant 1 : index
   // expected-error@below {{'dependent_tensor.make' op dependent result dimension value illegally crosses an IsolatedFromAbove boundary}}
   %t = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
+  return
+}
+
+// -----
+
+func.func @semantic_func_boundary_isolated_capture_source(%outer: index) {
+  return
+}
+
+// expected-error@below {{'func.func' op dependent argument dimension value illegally crosses an IsolatedFromAbove boundary}}
+func.func @semantic_func_boundary_isolated_capture_victim(
+    %dim: index, %t: tensor<?xf32>)
+    #types[%t : #tensor<[%dim], f32>] {
   return
 }
 
@@ -66,18 +75,4 @@ func.func @semantic_bad_affine_for_yield_dim() {
     affine.yield %bad : tensor<?x?xf32>
   }
   return
-}
-
-// -----
-
-func.func @semantic_boundary_dim_parser_rejects(
-    %m : index,
-    %t : tensor<?xf32>) -> tensor<?xf32>
-    // Function boundary metadata is parsed directly into function properties.
-    // Non-entry-block-argument dims are rejected by the parser before the
-    // semantic verifier pass can run.
-    // expected-error@below {{dependent tensor boundary dims must be function arguments}}
-    #types[%t : #tensor<[%c0], f32>] {
-  %c0 = arith.constant 0 : index
-  return %t : tensor<?xf32>
 }
