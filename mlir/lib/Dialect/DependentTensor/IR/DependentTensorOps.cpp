@@ -54,12 +54,6 @@ static unsigned getValueIndex(Value value) {
   return 0;
 }
 
-static DependentTensorValueSemantics
-buildStoredForValue(Value value, RankedTensorType type,
-                    ArrayRef<Value> dimValues) {
-  return buildStored(getValueIndex(value), type, dimValues);
-}
-
 static std::optional<uint64_t> getConstantDim(Value value) {
   IntegerAttr attr;
   if (!matchPattern(value, m_Constant(&attr)))
@@ -441,34 +435,14 @@ OpFoldResult DimOp::fold(FoldAdaptor adaptor) {
 ParseResult ExtractOp::parse(OpAsmParser &parser, OperationState &result) {
   OpAsmParser::UnresolvedOperand source;
   SmallVector<OpAsmParser::UnresolvedOperand> indices;
-  SmallVector<OpAsmParser::UnresolvedOperand> sourceDims;
-  Type sourceElementType;
   Type resultType;
-  bool hasSourceSpec = false;
-  SMLoc specLoc;
   if (parser.parseOperand(source) ||
-      parser.parseOperandList(indices, OpAsmParser::Delimiter::Square))
-    return failure();
-  specLoc = parser.getCurrentLocation();
-  if (succeeded(parser.parseOptionalHashKeyword("tensor"))) {
-    hasSourceSpec = true;
-    if (dependent_tensor::parseTensorSpecBody(parser, sourceDims,
-                                              sourceElementType))
-      return failure();
-  }
-  if (parser.parseColonType(resultType))
+      parser.parseOperandList(indices, OpAsmParser::Delimiter::Square) ||
+      parser.parseColonType(resultType))
     return failure();
 
   auto tensorType = RankedTensorType::get(
       SmallVector<int64_t>(indices.size(), ShapedType::kDynamic), resultType);
-
-  if (hasSourceSpec) {
-    if (static_cast<int64_t>(sourceDims.size()) != tensorType.getRank())
-      return parser.emitError(specLoc, "dependent tensor rank mismatch");
-    if (sourceElementType != resultType)
-      return parser.emitError(
-          specLoc, "dependent tensor element type must match result type");
-  }
 
   if (parser.resolveOperand(source, tensorType, result.operands))
     return failure();
@@ -478,18 +452,6 @@ ParseResult ExtractOp::parse(OpAsmParser &parser, OperationState &result) {
                              result.operands))
     return failure();
 
-  auto &props = result.getOrAddProperties<ExtractOp::Properties>();
-  if (hasSourceSpec) {
-    SmallVector<Value> resolvedDims;
-    SmallVector<Type> dimTypes(sourceDims.size(),
-                               parser.getBuilder().getIndexType());
-    if (parser.resolveOperands(sourceDims, dimTypes,
-                               parser.getCurrentLocation(), resolvedDims))
-      return failure();
-    props.source_semantics = buildStoredForValue(
-        result.operands.front(), tensorType, ArrayRef<Value>(resolvedDims));
-  }
-
   result.addTypes(resultType);
   return success();
 }
@@ -498,23 +460,6 @@ void ExtractOp::print(OpAsmPrinter &p) {
   p << ' ';
   p.printOperand(getSource());
   printValueList(p, getIndices());
-
-  auto sourceType = cast<RankedTensorType>(getSource().getType());
-  SmallVector<Value, 4> storedDims =
-      getProperties().source_semantics.getDimValues();
-  if (!storedDims.empty()) {
-    p << ' ';
-    dependent_tensor::printTensorSpec(p, storedDims,
-                                      sourceType.getElementType());
-  } else {
-    FailureOr<TensorValueSemantics> sourceInfo = getValueSemantics(getSource());
-    if (succeeded(sourceInfo)) {
-      p << ' ';
-      dependent_tensor::printTensorSpec(p, sourceInfo->dimValues,
-                                        sourceType.getElementType());
-    }
-  }
-
   p << " : ";
   p.printType(getResult().getType());
 }
@@ -530,22 +475,7 @@ LogicalResult ExtractOp::verify() {
   FailureOr<TensorValueSemantics> sourceInfo = getValueSemantics(getSource());
   if (failed(sourceInfo))
     return emitOpError("requires source with dependent_tensor semantics");
-
-  if (!getProperties().source_semantics.dimValues.empty()) {
-    FailureOr<TensorValueSemantics> storedInfo =
-        decodeStoredSemantics(getSource(), getProperties().source_semantics);
-    if (failed(storedInfo))
-      return emitOpError("requires valid source tensor assertion semantics");
-    if (!haveEqualSemantics(*sourceInfo, *storedInfo))
-      return emitOpError("source tensor assertion must match source semantics");
-  }
   return success();
-}
-
-void ExtractOp::walkPropertySSAUses(
-    function_ref<void(PropertyOperand &)> callback) {
-  for (PropertyOperand &operand : getProperties().source_semantics.dimValues)
-    callback(operand);
 }
 
 ParseResult InsertOp::parse(OpAsmParser &parser, OperationState &result) {

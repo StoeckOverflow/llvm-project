@@ -61,9 +61,7 @@ def DimOp : DependentTensor_Op<"dim", [
   let hasFolder = 1;
 }
 
-def ExtractOp : DependentTensor_Op<"extract", [
-    Pure, DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
-      ["walkPropertySSAUses"]>]> {
+def ExtractOp : DependentTensor_Op<"extract", [Pure]> {
   let summary = "extract an element from a dependent tensor";
   let description = [{
     `dependent_tensor.extract` is the scalar read primitive used by tests to
@@ -73,8 +71,7 @@ def ExtractOp : DependentTensor_Op<"extract", [
 
   let arguments = (ins
     AnyRankedTensor:$source,
-    Variadic<Index>:$indices,
-    DependentTensorValueSemanticsProp:$source_semantics
+    Variadic<Index>:$indices
   );
   let results = (outs AnyType:$result);
   let hasCustomAssemblyFormat = 1;

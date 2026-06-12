@@ -60,12 +60,12 @@ func.func @dependent_conv2d_im2col_kernel(
 // CHECK:   %[[Y1:.*]] = scf.for %[[CO:.*]] = %[[C0]] to %[[COUT]] step %[[C1]] iter_args(%[[YC:.*]] = %[[YN]]) -> (tensor<?x?x?x?xf32>) {
 // CHECK:     %[[Y2:.*]] = scf.for %[[OHI:.*]] = %[[C0]] to %[[OH]] step %[[C1]] iter_args(%[[YH:.*]] = %[[YC]]) -> (tensor<?x?x?x?xf32>) {
 // CHECK:       %[[Y3:.*]] = scf.for %[[OWI:.*]] = %[[C0]] to %[[OW]] step %[[C1]] iter_args(%[[YW:.*]] = %[[YH]]) -> (tensor<?x?x?x?xf32>) {
-// CHECK:         %[[SUM0:.*]] = dependent_tensor.extract %[[YW]][%[[NI]], %[[CO]], %[[OHI]], %[[OWI]]] #tensor<[%[[N]], %[[COUT]], %[[OH]], %[[OW]]], f32> : f32
+// CHECK:         %[[SUM0:.*]] = dependent_tensor.extract %[[YW]][%[[NI]], %[[CO]], %[[OHI]], %[[OWI]]] : f32
 // CHECK:         %[[SUM_CI:.*]] = scf.for %[[CI:.*]] = %[[C0]] to %[[CIN]] step %[[C1]] iter_args(%[[ACC_CI:.*]] = %[[SUM0]]) -> (f32) {
 // CHECK:           %[[SUM_KH:.*]] = scf.for %[[KHI:.*]] = %[[C0]] to %[[KH]] step %[[C1]] iter_args(%[[ACC_KH:.*]] = %[[ACC_CI]]) -> (f32) {
 // CHECK:             %[[SUM_KW:.*]] = scf.for %[[KWI:.*]] = %[[C0]] to %[[KW]] step %[[C1]] iter_args(%[[ACC_KW:.*]] = %[[ACC_KH]]) -> (f32) {
-// CHECK:               %[[XV:.*]] = dependent_tensor.extract %[[X]][%[[NI]], %[[CI]], %[[OHI]], %[[OWI]], %[[KHI]], %[[KWI]]] #tensor<[%[[N]], %[[CIN]], %[[OH]], %[[OW]], %[[KH]], %[[KW]]], f32> : f32
-// CHECK:               %[[KV:.*]] = dependent_tensor.extract %[[K]][%[[CO]], %[[CI]], %[[KHI]], %[[KWI]]] #tensor<[%[[COUT]], %[[CIN]], %[[KH]], %[[KW]]], f32> : f32
+// CHECK:               %[[XV:.*]] = dependent_tensor.extract %[[X]][%[[NI]], %[[CI]], %[[OHI]], %[[OWI]], %[[KHI]], %[[KWI]]] : f32
+// CHECK:               %[[KV:.*]] = dependent_tensor.extract %[[K]][%[[CO]], %[[CI]], %[[KHI]], %[[KWI]]] : f32
 // CHECK:               %[[PROD:.*]] = arith.mulf %[[XV]], %[[KV]] : f32
 // CHECK:               %[[NEXT:.*]] = arith.addf %[[ACC_KW]], %[[PROD]] : f32
 // CHECK:               scf.yield %[[NEXT]] : f32

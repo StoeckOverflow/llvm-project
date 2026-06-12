@@ -335,7 +335,7 @@ func.func @generic_dce_keeps_property_only_dim(%a: index, %b: index) -> f32 {
 // CANON-NEXT: %[[C0:.*]] = arith.constant 0 : index
 // CANON-NEXT: %[[DIM:.*]] = arith.muli %[[A]], %[[B]] : index
 // CANON-NEXT: %[[T:.*]] = dependent_tensor.make () #tensor<[%[[DIM]]], f32> : tensor<?xf32>
-// CANON-NEXT: %[[V:.*]] = dependent_tensor.extract %[[T]][%[[C0]]] #tensor<[%[[DIM]]], f32> : f32
+// CANON-NEXT: %[[V:.*]] = dependent_tensor.extract %[[T]][%[[C0]]] : f32
 // CANON-NEXT: return %[[V]] : f32
 
 // CSE-LABEL: func.func @generic_dce_keeps_property_only_dim
@@ -343,7 +343,7 @@ func.func @generic_dce_keeps_property_only_dim(%a: index, %b: index) -> f32 {
 // CSE-NEXT: %[[C0:.*]] = arith.constant 0 : index
 // CSE-NEXT: %[[DIM:.*]] = arith.muli %[[A]], %[[B]] : index
 // CSE-NEXT: %[[T:.*]] = dependent_tensor.make () #tensor<[%[[DIM]]], f32> : tensor<?xf32>
-// CSE-NEXT: %[[V:.*]] = dependent_tensor.extract %[[T]][%[[C0]]] #tensor<[%[[DIM]]], f32> : f32
+// CSE-NEXT: %[[V:.*]] = dependent_tensor.extract %[[T]][%[[C0]]] : f32
 // CSE-NEXT: return %[[V]] : f32
 
 // -----

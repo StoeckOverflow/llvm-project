@@ -18,8 +18,8 @@ func.func @matmul_kernel(
     %next = scf.for %j = %c0 to %n step %c1 iter_args(%col = %row) -> (tensor<?x?xf32>) {
       %sum0 = arith.constant 0.000000e+00 : f32
       %sum = scf.for %kk = %c0 to %k step %c1 iter_args(%acc = %sum0) -> (f32) {
-        %av = dependent_tensor.extract %A[%i, %kk] #tensor<[%m, %k], f32> : f32
-        %bv = dependent_tensor.extract %B[%kk, %j] #tensor<[%k, %n], f32> : f32
+        %av = dependent_tensor.extract %A[%i, %kk] : f32
+        %bv = dependent_tensor.extract %B[%kk, %j] : f32
         %prod = arith.mulf %av, %bv : f32
         %acc_next = arith.addf %acc, %prod : f32
         scf.yield %acc_next : f32
@@ -42,8 +42,8 @@ func.func @matmul_kernel(
 // CHECK:   %[[NEXT:.*]] = scf.for %[[J:.*]] = %[[C0]] to %[[N]] step %[[C1]] iter_args(%[[COL:.*]] = %[[ROW]]) -> (tensor<?x?xf32>) {
 // CHECK:     %[[ZERO:.*]] = arith.constant 0.000000e+00 : f32
 // CHECK:     %[[SUM:.*]] = scf.for %[[KK:.*]] = %[[C0]] to %[[K]] step %[[C1]] iter_args(%[[ACC:.*]] = %[[ZERO]]) -> (f32) {
-// CHECK:       %[[AV:.*]] = dependent_tensor.extract %[[A]][%[[I]], %[[KK]]] #tensor<[%[[M]], %[[K]]], f32> : f32
-// CHECK:       %[[BV:.*]] = dependent_tensor.extract %[[B]][%[[KK]], %[[J]]] #tensor<[%[[K]], %[[N]]], f32> : f32
+// CHECK:       %[[AV:.*]] = dependent_tensor.extract %[[A]][%[[I]], %[[KK]]] : f32
+// CHECK:       %[[BV:.*]] = dependent_tensor.extract %[[B]][%[[KK]], %[[J]]] : f32
 // CHECK:       %[[PROD:.*]] = arith.mulf %[[AV]], %[[BV]] : f32
 // CHECK:       %[[ACC_NEXT:.*]] = arith.addf %[[ACC]], %[[PROD]] : f32
 // CHECK:       scf.yield %[[ACC_NEXT]] : f32
@@ -75,10 +75,10 @@ func.func @gemm_kernel(
   %c1 = arith.constant 1 : index
   %Cout = scf.for %i = %c0 to %m step %c1 iter_args(%row = %Cinit) -> (tensor<?x?xf32>) {
     %next = scf.for %j = %c0 to %n step %c1 iter_args(%col = %row) -> (tensor<?x?xf32>) {
-      %bias = dependent_tensor.extract %col[%i, %j] #tensor<[%m, %n], f32> : f32
+      %bias = dependent_tensor.extract %col[%i, %j] : f32
       %sum = scf.for %kk = %c0 to %k step %c1 iter_args(%acc = %bias) -> (f32) {
-        %av = dependent_tensor.extract %A[%i, %kk] #tensor<[%m, %k], f32> : f32
-        %bv = dependent_tensor.extract %B[%kk, %j] #tensor<[%k, %n], f32> : f32
+        %av = dependent_tensor.extract %A[%i, %kk] : f32
+        %bv = dependent_tensor.extract %B[%kk, %j] : f32
         %prod = arith.mulf %av, %bv : f32
         %acc_next = arith.addf %acc, %prod : f32
         scf.yield %acc_next : f32
@@ -99,10 +99,10 @@ func.func @gemm_kernel(
 // CHECK-DAG: %[[GC1:.*]] = arith.constant 1 : index
 // CHECK: %[[GCOUT:.*]] = scf.for %[[GI:.*]] = %[[GC0]] to %[[GM]] step %[[GC1]] iter_args(%[[GROW:.*]] = %[[GCINIT]]) -> (tensor<?x?xf32>) {
 // CHECK:   %[[GNEXT:.*]] = scf.for %[[GJ:.*]] = %[[GC0]] to %[[GN]] step %[[GC1]] iter_args(%[[GCOL:.*]] = %[[GROW]]) -> (tensor<?x?xf32>) {
-// CHECK:     %[[BIAS:.*]] = dependent_tensor.extract %[[GCOL]][%[[GI]], %[[GJ]]] #tensor<[%[[GM]], %[[GN]]], f32> : f32
+// CHECK:     %[[BIAS:.*]] = dependent_tensor.extract %[[GCOL]][%[[GI]], %[[GJ]]] : f32
 // CHECK:     %[[GSUM:.*]] = scf.for %[[GKK:.*]] = %[[GC0]] to %[[GK]] step %[[GC1]] iter_args(%[[GACC:.*]] = %[[BIAS]]) -> (f32) {
-// CHECK:       %[[GAV:.*]] = dependent_tensor.extract %[[GA]][%[[GI]], %[[GKK]]] #tensor<[%[[GM]], %[[GK]]], f32> : f32
-// CHECK:       %[[GBV:.*]] = dependent_tensor.extract %[[GB]][%[[GKK]], %[[GJ]]] #tensor<[%[[GK]], %[[GN]]], f32> : f32
+// CHECK:       %[[GAV:.*]] = dependent_tensor.extract %[[GA]][%[[GI]], %[[GKK]]] : f32
+// CHECK:       %[[GBV:.*]] = dependent_tensor.extract %[[GB]][%[[GKK]], %[[GJ]]] : f32
 // CHECK:       %[[GPROD:.*]] = arith.mulf %[[GAV]], %[[GBV]] : f32
 // CHECK:       %[[GACC_NEXT:.*]] = arith.addf %[[GACC]], %[[GPROD]] : f32
 // CHECK:       scf.yield %[[GACC_NEXT]] : f32
@@ -166,12 +166,12 @@ func.func @conv2d_nhwc_hwcf_kernel(
     %Y1 = scf.for %ohi = %c0 to %oh step %c1 iter_args(%yh = %yn) -> (tensor<?x?x?x?xf32>) {
       %Y2 = scf.for %owi = %c0 to %ow step %c1 iter_args(%yw = %yh) -> (tensor<?x?x?x?xf32>) {
         %Y3 = scf.for %fo = %c0 to %f step %c1 iter_args(%yf = %yw) -> (tensor<?x?x?x?xf32>) {
-          %sum0 = dependent_tensor.extract %yf[%ni, %ohi, %owi, %fo] #tensor<[%n, %oh, %ow, %f], f32> : f32
+          %sum0 = dependent_tensor.extract %yf[%ni, %ohi, %owi, %fo] : f32
           %sum_kh = scf.for %khi = %c0 to %kh step %c1 iter_args(%acc_kh = %sum0) -> (f32) {
             %sum_kw = scf.for %kwi = %c0 to %kw step %c1 iter_args(%acc_kw = %acc_kh) -> (f32) {
               %sum_c = scf.for %ci = %c0 to %c step %c1 iter_args(%acc_c = %acc_kw) -> (f32) {
-                %xv = dependent_tensor.extract %X[%ni, %ohi, %owi, %ci] #tensor<[%n, %h, %w, %c], f32> : f32
-                %kv = dependent_tensor.extract %K[%khi, %kwi, %ci, %fo] #tensor<[%kh, %kw, %c, %f], f32> : f32
+                %xv = dependent_tensor.extract %X[%ni, %ohi, %owi, %ci] : f32
+                %kv = dependent_tensor.extract %K[%khi, %kwi, %ci, %fo] : f32
                 %prod = arith.mulf %xv, %kv : f32
                 %acc_next = arith.addf %acc_c, %prod : f32
                 scf.yield %acc_next : f32
@@ -202,12 +202,12 @@ func.func @conv2d_nhwc_hwcf_kernel(
 // CHECK:   %[[DY1:.*]] = scf.for %[[DOHI:.*]] = %[[DC0]] to %[[DOH]] step %[[DC1]] iter_args(%[[DYH:.*]] = %[[DYN]]) -> (tensor<?x?x?x?xf32>) {
 // CHECK:     %[[DY2:.*]] = scf.for %[[DOWI:.*]] = %[[DC0]] to %[[DOW]] step %[[DC1]] iter_args(%[[DYW:.*]] = %[[DYH]]) -> (tensor<?x?x?x?xf32>) {
 // CHECK:       %[[DY3:.*]] = scf.for %[[DFO:.*]] = %[[DC0]] to %[[DF]] step %[[DC1]] iter_args(%[[DYF:.*]] = %[[DYW]]) -> (tensor<?x?x?x?xf32>) {
-// CHECK:         %[[DSUM0:.*]] = dependent_tensor.extract %[[DYF]][%[[DNI]], %[[DOHI]], %[[DOWI]], %[[DFO]]] #tensor<[%[[DN]], %[[DOH]], %[[DOW]], %[[DF]]], f32> : f32
+// CHECK:         %[[DSUM0:.*]] = dependent_tensor.extract %[[DYF]][%[[DNI]], %[[DOHI]], %[[DOWI]], %[[DFO]]] : f32
 // CHECK:         %[[DSUM_KH:.*]] = scf.for %[[DKHI:.*]] = %[[DC0]] to %[[DKH]] step %[[DC1]] iter_args(%[[DACC_KH:.*]] = %[[DSUM0]]) -> (f32) {
 // CHECK:           %[[DSUM_KW:.*]] = scf.for %[[DKWI:.*]] = %[[DC0]] to %[[DKW]] step %[[DC1]] iter_args(%[[DACC_KW:.*]] = %[[DACC_KH]]) -> (f32) {
 // CHECK:             %[[DSUM_C:.*]] = scf.for %[[DCI:.*]] = %[[DC0]] to %[[DC]] step %[[DC1]] iter_args(%[[DACC_C:.*]] = %[[DACC_KW]]) -> (f32) {
-// CHECK:               %[[DXV:.*]] = dependent_tensor.extract %[[DX]][%[[DNI]], %[[DOHI]], %[[DOWI]], %[[DCI]]] #tensor<[%[[DN]], %[[DH]], %[[DW]], %[[DC]]], f32> : f32
-// CHECK:               %[[DKV:.*]] = dependent_tensor.extract %[[DK]][%[[DKHI]], %[[DKWI]], %[[DCI]], %[[DFO]]] #tensor<[%[[DKH]], %[[DKW]], %[[DC]], %[[DF]]], f32> : f32
+// CHECK:               %[[DXV:.*]] = dependent_tensor.extract %[[DX]][%[[DNI]], %[[DOHI]], %[[DOWI]], %[[DCI]]] : f32
+// CHECK:               %[[DKV:.*]] = dependent_tensor.extract %[[DK]][%[[DKHI]], %[[DKWI]], %[[DCI]], %[[DFO]]] : f32
 // CHECK:               %[[DPROD:.*]] = arith.mulf %[[DXV]], %[[DKV]] : f32
 // CHECK:               %[[DACC_NEXT:.*]] = arith.addf %[[DACC_C]], %[[DPROD]] : f32
 // CHECK:               scf.yield %[[DACC_NEXT]] : f32

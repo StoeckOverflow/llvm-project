@@ -103,7 +103,7 @@ func.func @remove_dead_values_keeps_property_only_dim(%a: index, %b: index) -> f
 // RDV-NEXT: %[[C0:.*]] = arith.constant 0 : index
 // RDV-NEXT: %[[DIM:.*]] = arith.muli %[[A]], %[[B]] : index
 // RDV-NEXT: %[[T:.*]] = dependent_tensor.make () #tensor<[%[[DIM]]], f32> : tensor<?xf32>
-// RDV-NEXT: %[[V:.*]] = dependent_tensor.extract %[[T]][%[[C0]]] #tensor<[%[[DIM]]], f32> : f32
+// RDV-NEXT: %[[V:.*]] = dependent_tensor.extract %[[T]][%[[C0]]] : f32
 // RDV-NEXT: return %[[V]] : f32
 
 // -----

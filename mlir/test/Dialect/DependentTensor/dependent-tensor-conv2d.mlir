@@ -50,12 +50,12 @@ func.func @conv2d_nhwc_hwcf_written_with_primitives(
 // CHECK:   %[[OUT_OH:.*]] = scf.for %[[OHI:.*]] = %[[C0]] to %[[OH]] step %[[C1]] iter_args(%[[OUT1:.*]] = %[[OUT0]]) -> (tensor<?x?x?x?xf32>) {
 // CHECK:     %[[OUT_OW:.*]] = scf.for %[[OWI:.*]] = %[[C0]] to %[[OW]] step %[[C1]] iter_args(%[[OUT2:.*]] = %[[OUT1]]) -> (tensor<?x?x?x?xf32>) {
 // CHECK:       %[[OUT_F:.*]] = scf.for %[[FI:.*]] = %[[C0]] to %[[F]] step %[[C1]] iter_args(%[[OUT3:.*]] = %[[OUT2]]) -> (tensor<?x?x?x?xf32>) {
-// CHECK:         %[[SUM0:.*]] = dependent_tensor.extract %[[OUT3]][%[[NI]], %[[OHI]], %[[OWI]], %[[FI]]] #tensor<[%[[N]], %[[OH]], %[[OW]], %[[F]]], f32> : f32
+// CHECK:         %[[SUM0:.*]] = dependent_tensor.extract %[[OUT3]][%[[NI]], %[[OHI]], %[[OWI]], %[[FI]]] : f32
 // CHECK:         %[[SUM_KH:.*]] = scf.for %[[KHI:.*]] = %[[C0]] to %[[KH]] step %[[C1]] iter_args(%[[ACC0:.*]] = %[[SUM0]]) -> (f32) {
 // CHECK:           %[[SUM_KW:.*]] = scf.for %[[KWI:.*]] = %[[C0]] to %[[KW]] step %[[C1]] iter_args(%[[ACC1:.*]] = %[[ACC0]]) -> (f32) {
 // CHECK:             %[[SUM_C:.*]] = scf.for %[[CI:.*]] = %[[C0]] to %[[C]] step %[[C1]] iter_args(%[[ACC2:.*]] = %[[ACC1]]) -> (f32) {
-// CHECK:               %[[IV:.*]] = dependent_tensor.extract %[[INPUT]][%[[NI]], %[[OHI]], %[[OWI]], %[[CI]]] #tensor<[%[[N]], %[[H]], %[[W]], %[[C]]], f32> : f32
-// CHECK:               %[[FV:.*]] = dependent_tensor.extract %[[FILTER]][%[[KHI]], %[[KWI]], %[[CI]], %[[FI]]] #tensor<[%[[KH]], %[[KW]], %[[C]], %[[F]]], f32> : f32
+// CHECK:               %[[IV:.*]] = dependent_tensor.extract %[[INPUT]][%[[NI]], %[[OHI]], %[[OWI]], %[[CI]]] : f32
+// CHECK:               %[[FV:.*]] = dependent_tensor.extract %[[FILTER]][%[[KHI]], %[[KWI]], %[[CI]], %[[FI]]] : f32
 // CHECK:               %[[PROD:.*]] = arith.mulf %[[IV]], %[[FV]] : f32
 // CHECK:               %[[NEXT:.*]] = arith.addf %[[ACC2]], %[[PROD]] : f32
 // CHECK:               scf.yield %[[NEXT]] : f32
