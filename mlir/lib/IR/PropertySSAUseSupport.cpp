@@ -260,16 +260,88 @@ bool mlir::crossesPropertySSAUseIsolatedFromAboveBoundary(Operation *owner,
          !isolated->isAncestor(valueOwner);
 }
 
+static void appendPropertySSADefinitionRelation(Diagnostic &note,
+                                                Operation *owner,
+                                                Block *definitionBlock) {
+  Block *ownerBlock = owner ? owner->getBlock() : nullptr;
+  if (!ownerBlock || !definitionBlock)
+    return;
+  Region *ownerRegion = ownerBlock->getParent();
+  Region *definitionRegion = definitionBlock->getParent();
+  if (ownerBlock == definitionBlock)
+    note << " (op in the same block)";
+  else if (ownerRegion == definitionRegion)
+    note << " (op in the same region)";
+  else if (definitionRegion && ownerRegion &&
+           definitionRegion->isProperAncestor(ownerRegion))
+    note << " (op in a parent region)";
+  else if (definitionRegion && ownerRegion &&
+           ownerRegion->isProperAncestor(definitionRegion))
+    note << " (op in a child region)";
+  else
+    note << " (op is neither in a parent nor in a child region)";
+}
+
+static void attachPropertySSAValueDefinitionNote(InFlightDiagnostic &diag,
+                                                 Operation *owner,
+                                                 Value value) {
+  if (Operation *defOp = value.getDefiningOp()) {
+    Diagnostic &note = diag.attachNote(defOp->getLoc());
+    note << "property SSA value defined here";
+    appendPropertySSADefinitionRelation(note, owner, defOp->getBlock());
+    return;
+  }
+
+  auto blockArg = cast<BlockArgument>(value);
+  Block *definitionBlock = blockArg.getOwner();
+  Diagnostic &note = diag.attachNote(blockArg.getLoc());
+  if (!definitionBlock) {
+    note << "property SSA value defined as a block argument (block without "
+            "parent)";
+    return;
+  }
+  note << "property SSA value defined as a block argument (block #"
+       << definitionBlock->computeBlockNumber();
+  Region *ownerRegion =
+      owner && owner->getBlock() ? owner->getBlock()->getParent() : nullptr;
+  Region *definitionRegion = definitionBlock->getParent();
+  if (!definitionRegion)
+    note << " without parent)";
+  else if (owner && owner->getBlock() == definitionBlock)
+    note << " in the same block)";
+  else if (ownerRegion == definitionRegion)
+    note << " in the same region)";
+  else if (definitionRegion && ownerRegion &&
+           definitionRegion->isProperAncestor(ownerRegion))
+    note << " in a parent region)";
+  else if (definitionRegion && ownerRegion &&
+           ownerRegion->isProperAncestor(definitionRegion))
+    note << " in a child region)";
+  else
+    note << " neither in a parent nor in a child region)";
+}
+
+static LogicalResult emitPropertySSAUseDominanceError(Operation *owner,
+                                                      Value value,
+                                                      StringRef message) {
+  InFlightDiagnostic diag = owner->emitOpError() << message;
+  diag.attachNote(owner->getLoc())
+      << "property SSA use is owned by this operation";
+  attachPropertySSAValueDefinitionNote(diag, owner, value);
+  return failure();
+}
+
 LogicalResult mlir::verifyPropertySSAUseDominance(Operation *owner, Value value,
                                                   DominanceInfo &dominance) {
   if (!owner || !value || !isOwnerSitePropertySSAUse(owner, value))
     return success();
   if (crossesPropertySSAUseIsolatedFromAboveBoundary(owner, value))
-    return owner->emitOpError() << "property SSA value illegally crosses an "
-                                   "IsolatedFromAbove boundary";
+    return emitPropertySSAUseDominanceError(
+        owner, value,
+        "property SSA value illegally crosses an IsolatedFromAbove boundary");
   if (!dominance.properlyDominates(value, owner))
-    return owner->emitOpError()
-           << "property SSA value does not dominate this operation";
+    return emitPropertySSAUseDominanceError(
+        owner, value, "property SSA value does not dominate this operation");
   return success();
 }
 

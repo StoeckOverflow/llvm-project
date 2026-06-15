@@ -118,6 +118,24 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface", [
     /*methodBody=*/[{}], /*defaultImplementation=*/[{
       return success();
     }]>,
+    InterfaceMethod<[{
+      Update op properties that describe function arguments before erasing
+      arguments from the function signature and entry block.
+    }],
+    "::llvm::LogicalResult", "updateFunctionPropertiesForArgumentErasure",
+    (ins "const ::llvm::BitVector &":$argIndices),
+    /*methodBody=*/[{}], /*defaultImplementation=*/[{
+      return success();
+    }]>,
+    InterfaceMethod<[{
+      Update op properties that describe function results before erasing
+      results from the function signature.
+    }],
+    "::llvm::LogicalResult", "updateFunctionPropertiesForResultErasure",
+    (ins "const ::llvm::BitVector &":$resultIndices),
+    /*methodBody=*/[{}], /*defaultImplementation=*/[{
+      return success();
+    }]>,
   ];
 
   let extraTraitClassDeclaration = [{
@@ -325,9 +343,8 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface", [
       ::mlir::Type newType = $_op.getTypeWithoutArgs(argIndices);
       if (!newType)
         return ::llvm::failure();
-      ::mlir::function_interface_impl::eraseFunctionArguments(
+      return ::mlir::function_interface_impl::eraseFunctionArguments(
         $_op, argIndices, newType);
-      return ::llvm::success();
     }
 
     /// Erase a single result at `resultIndex`. Returns failure if the function
@@ -344,9 +361,8 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface", [
       ::mlir::Type newType = $_op.getTypeWithoutResults(resultIndices);
       if (!newType)
         return ::llvm::failure();
-      ::mlir::function_interface_impl::eraseFunctionResults(
+      return ::mlir::function_interface_impl::eraseFunctionResults(
           $_op, resultIndices, newType);
-      return ::llvm::success();
     }
 
     /// Return the type of this function with the specified arguments and

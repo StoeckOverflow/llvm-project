@@ -25,6 +25,13 @@ class Operation;
 ///
 /// Operations that store such references expose their embedded operands with
 /// `PropertySSAUseOpInterface::walkPropertySSAUses`.
+///
+/// `DominanceInfo` remains a pure dominance query object and does not enumerate
+/// uses. Infrastructure that verifies or rewrites semantic SSA dependencies
+/// must walk `SSAUse` through APIs such as `Operation::walkSSAUses()` so that
+/// both ordinary operands and property SSA uses participate. Dialects may still
+/// impose stricter rules for boundary-like metadata whose logical use site is
+/// not simply the property owner operation.
 void walkPropertyOperands(Operation *op,
                           function_ref<void(PropertyOperand &)> callback);
 void attachPropertyOperands(Operation *op);

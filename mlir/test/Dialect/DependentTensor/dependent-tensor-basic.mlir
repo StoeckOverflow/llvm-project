@@ -122,8 +122,17 @@ func.func @insert_inherits_destination_semantics(%m : index, %n : index,
 func.func @insert_refinement_dim_mismatch(%m : index, %n : index,
                                            %i : index, %j : index, %v : f32) {
   %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+1 {{#tensor assertion must match destination semantics}}
+  // expected-error@+1 {{stored result semantics must match destination semantics}}
   %r = dependent_tensor.insert %v into %t[%i, %j] #tensor<[%n, %m], f32> : f32 into tensor<?x?xf32>
+  return
+}
+
+// -----
+
+func.func @insert_requires_refinement(%m : index, %i : index, %v : f32) {
+  %t = dependent_tensor.make () #tensor<[%m], f32> : tensor<?xf32>
+  // expected-error@+1 {{expected '#tensor'}}
+  %r = dependent_tensor.insert %v into %t[%i] : f32 into tensor<?xf32>
   return
 }
 

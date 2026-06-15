@@ -46,7 +46,8 @@ def MakeOp : DependentTensor_Op<"make", [
 }
 
 def DimOp : DependentTensor_Op<"dim", [
-    Pure]> {
+    Pure, DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
+      ["walkPropertySSAUses"]>]> {
   let summary = "query a dependent tensor dimension";
   let description = [{
     `dependent_tensor.dim` mirrors `tensor.dim` for tensors with dependent
@@ -56,7 +57,8 @@ def DimOp : DependentTensor_Op<"dim", [
 
   let arguments = (ins
     AnyRankedTensor:$source,
-    Index:$dimension
+    Index:$dimension,
+    DependentTensorDimValueSemanticsProp:$dim_value_semantics
   );
   let results = (outs Index:$result);
   let hasCustomAssemblyFormat = 1;
@@ -91,16 +93,20 @@ def InsertOp : DependentTensor_Op<"insert", [
   let summary = "insert an element into a dependent tensor";
   let description = [{
     `dependent_tensor.insert` mirrors `tensor.insert`. Its result semantics are
-    inherited from the destination tensor semantics.
+    stored as dependent tensor property SSA uses and verified to match the
+    destination tensor semantics.
   }];
 
   let arguments = (ins
     AnyType:$scalar,
     AnyRankedTensor:$dest,
-    Variadic<Index>:$indices
+    Variadic<Index>:$indices,
+    DependentTensorValueSemanticsProp:$result_semantics
   );
   let results = (outs AnyRankedTensor:$result);
   let builders = [
+    OpBuilder<(ins "Value":$scalar, "Value":$dest, "ValueRange":$indices,
+                   "ValueRange":$resultDimValues)>,
     OpBuilder<(ins "Value":$scalar, "Value":$dest, "ValueRange":$indices)>
   ];
   let hasCustomAssemblyFormat = 1;

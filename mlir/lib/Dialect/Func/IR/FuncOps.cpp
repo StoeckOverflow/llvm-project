@@ -589,6 +589,108 @@ void FuncOp::walkDependentTensorPropertyUses(
   walkPropertySSAUses(callback);
 }
 
+static unsigned countErasedBefore(const BitVector &indices, unsigned index) {
+  unsigned count = 0;
+  for (unsigned i = 0; i < index; ++i)
+    count += indices[i];
+  return count;
+}
+
+static DependentTensorValueSemantics cloneDependentTensorSemanticsWithIndex(
+    const DependentTensorValueSemantics &semantics, unsigned valueIndex) {
+  DependentTensorValueSemantics cloned;
+  cloned.valueIndex = valueIndex;
+  cloned.rank = semantics.rank;
+  cloned.assignDimValues(semantics.getDimValues());
+  return cloned;
+}
+
+static std::optional<unsigned>
+getErasedFunctionArgumentRef(FuncOp func, Value value,
+                             const BitVector &argIndices) {
+  auto arg = dyn_cast<BlockArgument>(value);
+  if (!arg || func.isExternal() || arg.getOwner() != &func.getBody().front())
+    return std::nullopt;
+  unsigned argNumber = arg.getArgNumber();
+  if (argNumber >= argIndices.size() || !argIndices[argNumber])
+    return std::nullopt;
+  return argNumber;
+}
+
+static LogicalResult verifyNoErasedFunctionArgumentRefs(
+    FuncOp func, const DependentTensorValueSemantics &semantics,
+    const BitVector &argIndices, StringRef boundaryKind) {
+  for (Value dimValue : semantics.getDimValues()) {
+    if (std::optional<unsigned> argNumber =
+            getErasedFunctionArgumentRef(func, dimValue, argIndices)) {
+      return func.emitOpError()
+             << "cannot erase function argument #" << *argNumber
+             << " because it is used by surviving dependent tensor "
+             << boundaryKind << " boundary semantics";
+    }
+  }
+  return success();
+}
+
+LogicalResult FuncOp::updateFunctionPropertiesForArgumentErasure(
+    const BitVector &argIndices) {
+  auto &properties = getProperties();
+  SmallVector<DependentTensorValueSemantics> newArgSemantics;
+  SmallVector<DependentTensorValueSemantics> newResultSemantics;
+
+  for (const DependentTensorValueSemantics &semantics :
+       properties.dependentTensorArgSemantics) {
+    if (semantics.valueIndex >= argIndices.size())
+      return emitOpError("dependent tensor argument boundary index is out of "
+                         "range during argument erasure");
+    if (argIndices[semantics.valueIndex])
+      continue;
+    if (failed(verifyNoErasedFunctionArgumentRefs(*this, semantics, argIndices,
+                                                  "argument")))
+      return failure();
+    unsigned newIndex = semantics.valueIndex -
+                        countErasedBefore(argIndices, semantics.valueIndex);
+    newArgSemantics.push_back(
+        cloneDependentTensorSemanticsWithIndex(semantics, newIndex));
+  }
+
+  for (const DependentTensorValueSemantics &semantics :
+       properties.dependentTensorResultSemantics) {
+    if (failed(verifyNoErasedFunctionArgumentRefs(*this, semantics, argIndices,
+                                                  "result")))
+      return failure();
+    newResultSemantics.push_back(cloneDependentTensorSemanticsWithIndex(
+        semantics, semantics.valueIndex));
+  }
+
+  properties.dependentTensorArgSemantics = std::move(newArgSemantics);
+  properties.dependentTensorResultSemantics = std::move(newResultSemantics);
+  reattachPropertyOperands(*this);
+  return success();
+}
+
+LogicalResult FuncOp::updateFunctionPropertiesForResultErasure(
+    const BitVector &resultIndices) {
+  auto &properties = getProperties();
+  SmallVector<DependentTensorValueSemantics> newResultSemantics;
+  for (const DependentTensorValueSemantics &semantics :
+       properties.dependentTensorResultSemantics) {
+    if (semantics.valueIndex >= resultIndices.size())
+      return emitOpError("dependent tensor result boundary index is out of "
+                         "range during result erasure");
+    if (resultIndices[semantics.valueIndex])
+      continue;
+    unsigned newIndex = semantics.valueIndex -
+                        countErasedBefore(resultIndices, semantics.valueIndex);
+    newResultSemantics.push_back(
+        cloneDependentTensorSemanticsWithIndex(semantics, newIndex));
+  }
+
+  properties.dependentTensorResultSemantics = std::move(newResultSemantics);
+  reattachPropertyOperands(*this);
+  return success();
+}
+
 FailureOr<DependentTensorValueSemantics>
 FuncOp::getDependentTensorBlockArgumentSemantics(unsigned regionNumber,
                                                  unsigned blockNumber,

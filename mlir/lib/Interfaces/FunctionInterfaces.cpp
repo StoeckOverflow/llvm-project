@@ -278,8 +278,11 @@ void function_interface_impl::insertFunctionResults(
   op.setFunctionTypeAttr(TypeAttr::get(newType));
 }
 
-void function_interface_impl::eraseFunctionArguments(
+LogicalResult function_interface_impl::eraseFunctionArguments(
     FunctionOpInterface op, const BitVector &argIndices, Type newType) {
+  if (failed(op.updateFunctionPropertiesForArgumentErasure(argIndices)))
+    return failure();
+
   // There are 3 things that need to be updated:
   // - Function type.
   // - Arg attrs.
@@ -303,10 +306,15 @@ void function_interface_impl::eraseFunctionArguments(
     Block &entry = op->getRegion(0).front();
     entry.eraseArguments(argIndices);
   }
+
+  return success();
 }
 
-void function_interface_impl::eraseFunctionResults(
+LogicalResult function_interface_impl::eraseFunctionResults(
     FunctionOpInterface op, const BitVector &resultIndices, Type newType) {
+  if (failed(op.updateFunctionPropertiesForResultErasure(resultIndices)))
+    return failure();
+
   // There are 2 things that need to be updated:
   // - Function type.
   // - Result attrs.
@@ -323,6 +331,8 @@ void function_interface_impl::eraseFunctionResults(
 
   // Update the function type.
   op.setFunctionTypeAttr(TypeAttr::get(newType));
+
+  return success();
 }
 
 //===----------------------------------------------------------------------===//

@@ -192,18 +192,6 @@ struct TestDependentTensorReplaceDimValuePass
   }
 
   void runOnOperation() override {
-    if (getOperation().getName() == "replace_insert_destination_refinement") {
-      SmallVector<dependent_tensor::MakeOp> makeOps;
-      getOperation().walk(
-          [&](dependent_tensor::MakeOp makeOp) { makeOps.push_back(makeOp); });
-      if (makeOps.size() < 2)
-        return signalPassFailure();
-      for (Operation &op : getOperation().getBody().front())
-        replaceUsesOfWithIncludingDependentTensorProperties(
-            &op, makeOps.front().getResult(), makeOps[1].getResult());
-      return;
-    }
-
     SmallVector<Value> indexResults;
     for (Operation &op : getOperation().getBody().front())
       for (Value result : op.getResults())
@@ -526,6 +514,27 @@ struct TestDependentTensorReplaceOpUsesPass
   }
 
   void runOnOperation() override {
+    if (getOperation().getName() == "replace_insert_destination_refinement") {
+      SmallVector<dependent_tensor::MakeOp> makeOps;
+      SmallVector<dependent_tensor::InsertOp> insertOps;
+      getOperation().walk([&](Operation *op) {
+        if (auto makeOp = dyn_cast<dependent_tensor::MakeOp>(op))
+          makeOps.push_back(makeOp);
+        if (auto insertOp = dyn_cast<dependent_tensor::InsertOp>(op))
+          insertOps.push_back(insertOp);
+      });
+      if (makeOps.size() < 2 || insertOps.empty())
+        return signalPassFailure();
+      for (Operation &op : getOperation().getBody().front())
+        replaceUsesOfWithIncludingDependentTensorProperties(
+            &op, makeOps.front().getResult(), makeOps[1].getResult());
+      for (dependent_tensor::InsertOp insertOp : insertOps)
+        if (failed(dependent_tensor::refreshDependentTensorForwardingSemantics(
+                insertOp)))
+          return signalPassFailure();
+      return;
+    }
+
     SmallVector<Value> indexResults;
     for (Operation &op : getOperation().getBody().front())
       for (Value result : op.getResults())
@@ -536,6 +545,126 @@ struct TestDependentTensorReplaceOpUsesPass
     for (Operation &op : getOperation().getBody().front())
       replaceUsesOfWithIncludingDependentTensorProperties(
           &op, indexResults.front(), indexResults[1]);
+  }
+};
+
+struct TestDependentTensorEraseScfForResultPass
+    : public PassWrapper<TestDependentTensorEraseScfForResultPass,
+                         OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(
+      TestDependentTensorEraseScfForResultPass)
+
+  StringRef getArgument() const final {
+    return "test-dependent-tensor-erase-scf-for-result";
+  }
+  StringRef getDescription() const final {
+    return "Exercise RewriterBase::eraseOpResults for loop property metadata";
+  }
+
+  void runOnOperation() override {
+    if (getOperation().getName() != "erase_scf_for_result_refinement")
+      return;
+
+    scf::ForOp forOp;
+    getOperation().walk([&](scf::ForOp op) {
+      if (!forOp)
+        forOp = op;
+    });
+    if (!forOp || forOp.getNumResults() < 2 || forOp.getInitArgs().size() < 2)
+      return signalPassFailure();
+
+    auto yieldOp = dyn_cast<scf::YieldOp>(forOp.getBody()->getTerminator());
+    if (!yieldOp || yieldOp->getNumOperands() < 2)
+      return signalPassFailure();
+
+    IRRewriter rewriter(getOperation().getContext());
+    rewriter.modifyOpInPlace(forOp, [&]() {
+      yieldOp->eraseOperand(0);
+      forOp.getBody()->eraseArgument(forOp.getNumInductionVars());
+      forOp->eraseOperand(3);
+    });
+
+    BitVector erasedResults(forOp.getNumResults());
+    erasedResults.set(0);
+    rewriter.eraseOpResults(forOp, erasedResults);
+  }
+};
+
+struct TestDependentTensorEraseFunctionSignaturePass
+    : public PassWrapper<TestDependentTensorEraseFunctionSignaturePass,
+                         OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(
+      TestDependentTensorEraseFunctionSignaturePass)
+
+  StringRef getArgument() const final {
+    return "test-dependent-tensor-erase-function-signature";
+  }
+  StringRef getDescription() const final {
+    return "Exercise function signature erasure for dependent tensor metadata";
+  }
+
+  void runOnOperation() override {
+    func::FuncOp func = getOperation();
+    if (func.getName() == "erase_func_boundary_arg_metadata") {
+      BitVector erasedArgs(func.getNumArguments());
+      erasedArgs.set(0);
+      erasedArgs.set(3);
+      if (failed(func.eraseArguments(erasedArgs)))
+        return signalPassFailure();
+      return;
+    }
+
+    if (func.getName() == "erase_func_boundary_result_metadata") {
+      auto returnOp =
+          dyn_cast<func::ReturnOp>(func.getBody().front().getTerminator());
+      if (!returnOp || returnOp.getNumOperands() < 2)
+        return signalPassFailure();
+      returnOp->eraseOperand(0);
+      BitVector erasedResults(func.getNumResults());
+      erasedResults.set(0);
+      if (failed(func.eraseResults(erasedResults)))
+        return signalPassFailure();
+      return;
+    }
+
+    if (func.getName() == "erase_func_boundary_live_dim_arg") {
+      BitVector erasedArgs(func.getNumArguments());
+      erasedArgs.set(0);
+      if (failed(func.eraseArguments(erasedArgs)))
+        return signalPassFailure();
+      func.emitOpError(
+          "expected erasing live dependent tensor dim arg to fail");
+      return signalPassFailure();
+    }
+  }
+};
+
+struct TestDependentTensorReplaceOpUsesNoRefreshPass
+    : public PassWrapper<TestDependentTensorReplaceOpUsesNoRefreshPass,
+                         OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(
+      TestDependentTensorReplaceOpUsesNoRefreshPass)
+
+  StringRef getArgument() const final {
+    return "test-dependent-tensor-replace-op-uses-no-refresh";
+  }
+  StringRef getDescription() const final {
+    return "Rewrite insert destination without refreshing cached refinement";
+  }
+
+  void runOnOperation() override {
+    if (getOperation().getName() != "stale_insert_destination_refinement")
+      return;
+
+    SmallVector<dependent_tensor::MakeOp> makeOps;
+    getOperation().walk(
+        [&](dependent_tensor::MakeOp op) { makeOps.push_back(op); });
+    if (makeOps.size() < 2)
+      return signalPassFailure();
+
+    for (Operation &op : getOperation().getBody().front())
+      replaceUsesOfWithIncludingDependentTensorProperties(
+          &op, makeOps.front().getResult(), makeOps[1].getResult());
   }
 };
 
@@ -730,6 +859,40 @@ struct TestDependentTensorCheckPropertyUsesPass
       if (value.use_empty() || value.getUsers().empty()) {
         root->emitOpError(
             "expected native use-list to remain operand-only but non-empty");
+        return signalPassFailure();
+      }
+      return;
+    }
+
+    if (getOperation().getName() ==
+        "check_refinements_are_direct_property_uses") {
+      Value value = getOperation().getArgument(0);
+      unsigned makeUserCount = 0;
+      unsigned dimUserCount = 0;
+      unsigned insertUserCount = 0;
+      for (Operation *user : value.getPropertyUsers()) {
+        makeUserCount += isa<dependent_tensor::MakeOp>(user);
+        dimUserCount += isa<dependent_tensor::DimOp>(user);
+        insertUserCount += isa<dependent_tensor::InsertOp>(user);
+      }
+      if (!value.use_empty() || !value.getUsers().empty()) {
+        root->emitOpError(
+            "expected refinement dimension to have no native uses");
+        return signalPassFailure();
+      }
+      if (makeUserCount != 1 || dimUserCount != 1 || insertUserCount != 1) {
+        root->emitOpError(
+            "expected make, dim, and insert to own direct property uses");
+        return signalPassFailure();
+      }
+      dependent_tensor::InsertOp insertOp;
+      getOperation().walk([&](dependent_tensor::InsertOp op) {
+        if (!insertOp)
+          insertOp = op;
+      });
+      if (!insertOp || insertOp->getNumOperands() != 3) {
+        root->emitOpError(
+            "expected insert refinement dimensions not to be native operands");
         return signalPassFailure();
       }
       return;
@@ -1077,6 +1240,61 @@ struct TestDependentTensorCorruptSemanticsPass
   }
 };
 
+struct TestDependentTensorCorruptGenericPropertyUsePass
+    : public PassWrapper<TestDependentTensorCorruptGenericPropertyUsePass,
+                         OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(
+      TestDependentTensorCorruptGenericPropertyUsePass)
+
+  StringRef getArgument() const final {
+    return "test-dependent-tensor-corrupt-generic-property-uses";
+  }
+  StringRef getDescription() const final {
+    return "Corrupt property SSA uses so the generic verifier checks them";
+  }
+
+  void runOnOperation() override {
+    ModuleOp module = getOperation();
+    corruptDominance(module);
+    corruptIsolatedCapture(module);
+  }
+
+  static void corruptDominance(ModuleOp module) {
+    auto func = module.lookupSymbol<func::FuncOp>(
+        "generic_property_dominance_verifier");
+    if (!func)
+      return;
+    dependent_tensor::MakeOp makeOp =
+        TestDependentTensorCorruptSemanticsPass::findFirstMake(func);
+    if (!makeOp)
+      return;
+
+    Value lateIndex;
+    for (Operation &op : func.getBody().front())
+      for (Value result : op.getResults())
+        if (result.getType().isIndex())
+          lateIndex = result;
+    if (lateIndex)
+      TestDependentTensorCorruptSemanticsPass::setFirstPropertyValue(makeOp,
+                                                                     lateIndex);
+  }
+
+  static void corruptIsolatedCapture(ModuleOp module) {
+    auto source = module.lookupSymbol<func::FuncOp>(
+        "generic_property_isolated_capture_verifier_source");
+    auto victim = module.lookupSymbol<func::FuncOp>(
+        "generic_property_isolated_capture_verifier_victim");
+    if (!source || !victim || source.getNumArguments() == 0)
+      return;
+    dependent_tensor::MakeOp makeOp =
+        TestDependentTensorCorruptSemanticsPass::findFirstMake(victim);
+    if (!makeOp)
+      return;
+    TestDependentTensorCorruptSemanticsPass::setFirstPropertyValue(
+        makeOp, source.getArgument(0));
+  }
+};
+
 struct TestDependentTensorCorruptPropertyOperandAttachmentPass
     : public PassWrapper<
           TestDependentTensorCorruptPropertyOperandAttachmentPass,
@@ -1134,12 +1352,16 @@ void registerDependentTensorTestPasses() {
   PassRegistration<TestDependentTensorReplaceDimValueIfPass>();
   PassRegistration<TestDependentTensorReplaceDimValueSSAIfPass>();
   PassRegistration<TestDependentTensorReplaceOpUsesPass>();
+  PassRegistration<TestDependentTensorEraseScfForResultPass>();
+  PassRegistration<TestDependentTensorEraseFunctionSignaturePass>();
+  PassRegistration<TestDependentTensorReplaceOpUsesNoRefreshPass>();
   PassRegistration<TestDependentTensorRefreshPropertyUsesPass>();
   PassRegistration<TestDependentTensorReplaceFirstBlockArgPass>();
   PassRegistration<TestDependentTensorCheckPropertyUsesPass>();
   PassRegistration<TestDependentTensorDceLocalDimsPass>();
   PassRegistration<TestDependentTensorEraseLiveEntryBlockPass>();
   PassRegistration<TestDependentTensorCorruptSemanticsPass>();
+  PassRegistration<TestDependentTensorCorruptGenericPropertyUsePass>();
   PassRegistration<TestDependentTensorCorruptPropertyOperandAttachmentPass>();
 }
 } // namespace test

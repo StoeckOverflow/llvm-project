@@ -1062,6 +1062,14 @@ void ForOp::walkDependentTensorPropertyUses(
   walkPropertySSAUses(callback);
 }
 
+LogicalResult
+ForOp::updatePropertiesForResultErasure(Operation *oldOp,
+                                        const BitVector &eraseIndices) {
+  (void)oldOp;
+  (void)eraseIndices;
+  return populateDependentTensorLoopSemantics(*this);
+}
+
 MutableArrayRef<OpOperand> ForOp::getInitsMutable() {
   return getInitArgsMutable();
 }

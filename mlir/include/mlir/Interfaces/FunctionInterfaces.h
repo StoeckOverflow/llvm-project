@@ -68,12 +68,14 @@ void insertFunctionResults(FunctionOpInterface op,
                            unsigned originalNumResults, Type newType);
 
 /// Erase the specified arguments and update the function type attribute.
-void eraseFunctionArguments(FunctionOpInterface op, const BitVector &argIndices,
-                            Type newType);
+LogicalResult eraseFunctionArguments(FunctionOpInterface op,
+                                     const BitVector &argIndices,
+                                     Type newType);
 
 /// Erase the specified results and update the function type attribute.
-void eraseFunctionResults(FunctionOpInterface op,
-                          const BitVector &resultIndices, Type newType);
+LogicalResult eraseFunctionResults(FunctionOpInterface op,
+                                   const BitVector &resultIndices,
+                                   Type newType);
 
 /// Set a FunctionOpInterface operation's type signature.
 void setFunctionType(FunctionOpInterface op, Type newType);

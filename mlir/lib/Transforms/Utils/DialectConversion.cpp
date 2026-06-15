@@ -1251,13 +1251,20 @@ performReplaceValue(RewriterBase &rewriter, Value from, Value repl,
   // `ConversionPatternRewriter` API with the normal `RewriterBase` API.
   Operation *replOp = repl.getDefiningOp();
   Block *replBlock = replOp->getBlock();
-  rewriter.replaceUsesWithIf(from, repl, [&](OpOperand &operand) {
-    Operation *user = operand.getOwner();
-    bool result =
-        user->getBlock() != replBlock || replOp->isBeforeInBlock(user);
-    if (result && functor)
-      result &= functor(operand);
-    return result;
+  auto replacementDominatesUse = [&](Operation *user) {
+    return user->getBlock() != replBlock || replOp->isBeforeInBlock(user);
+  };
+
+  if (functor) {
+    rewriter.replaceUsesWithIf(from, repl, [&](OpOperand &operand) {
+      Operation *user = operand.getOwner();
+      return replacementDominatesUse(user) && functor(operand);
+    });
+    return;
+  }
+
+  rewriter.replaceSSAUsesWithIf(from, repl, [&](SSAUse use) {
+    return replacementDominatesUse(use.getOwner());
   });
 }
 

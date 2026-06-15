@@ -133,6 +133,11 @@ static bool hasLive(ValueRange values, const DenseSet<Value> &nonLiveSet,
       LDBG() << "Value " << value << " is already marked non-live (dead)";
       continue;
     }
+    if (!value.property_use_empty()) {
+      LDBG() << "Value " << value
+             << " has property SSA uses and is considered live";
+      return true;
+    }
 
     const Liveness *liveness = la.getLiveness(value);
     if (!liveness) {
@@ -161,6 +166,12 @@ static BitVector markLives(ValueRange values, const DenseSet<Value> &nonLiveSet,
       lives.reset(index);
       LDBG() << "Value " << value
              << " is already marked non-live (dead) at index " << index;
+      continue;
+    }
+    if (!value.property_use_empty()) {
+      lives.set(index);
+      LDBG() << "Value " << value
+             << " has property SSA uses and is live at index " << index;
       continue;
     }
 
@@ -631,9 +642,14 @@ static void cleanUpDeadVals(MLIRContext *ctx, RDVFinalCleanupList &list) {
       llvm::interleaveComma(f.nonLiveRets.set_bits(), os);
       os << "]";
     });
-    // Drop all uses of the dead arguments.
-    for (auto deadIdx : f.nonLiveArgs.set_bits())
-      f.funcOp.getArgument(deadIdx).dropAllUses();
+    // Drop only native operand uses of dead arguments. Function boundary
+    // properties must stay attached until eraseArguments filters/reindexes
+    // them together with the signature.
+    for (auto deadIdx : f.nonLiveArgs.set_bits()) {
+      BlockArgument arg = f.funcOp.getArgument(deadIdx);
+      for (OpOperand &use : llvm::make_early_inc_range(arg.getUses()))
+        use.drop();
+    }
     // Some functions may not allow erasing arguments or results. These calls
     // return failure in such cases without modifying the function, so it's okay
     // to proceed.

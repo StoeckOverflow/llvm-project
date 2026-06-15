@@ -250,7 +250,10 @@ def ConstantOp : Func_Op<"constant",
 
 def FuncOp : Func_Op<"func", [
   AffineScope, AutomaticAllocationScope,
-  FunctionOpInterface, IsolatedFromAbove, OpAsmOpInterface,
+  DeclareOpInterfaceMethods<FunctionOpInterface,
+    ["updateFunctionPropertiesForArgumentErasure",
+     "updateFunctionPropertiesForResultErasure"]>,
+  IsolatedFromAbove, OpAsmOpInterface,
   DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
     ["walkPropertySSAUses"]>,
   DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,

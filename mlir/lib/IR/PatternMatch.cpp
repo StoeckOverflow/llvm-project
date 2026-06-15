@@ -8,9 +8,11 @@
 
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Iterators.h"
+#include "mlir/IR/PropertySSAUseInterfaces.h"
 #include "mlir/IR/RegionKindInterface.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using namespace mlir;
 
@@ -274,6 +276,14 @@ Operation *RewriterBase::eraseOpResults(Operation *op,
     // Move all blocks of `region` into `newRegion`.
     Region &newRegion = newOp->getRegion(index);
     inlineRegionBefore(region, newRegion, newRegion.begin());
+  }
+
+  if (auto propertyIface = dyn_cast<PropertySSAUseOpInterface>(newOp)) {
+    if (failed(
+            propertyIface.updatePropertiesForResultErasure(op, eraseIndices))) {
+      llvm::report_fatal_error(
+          "failed to update property SSA uses while erasing op results");
+    }
   }
 
   // Replace the original operation with the new operation.

@@ -37,6 +37,7 @@ buildStoredSemantics(unsigned valueIndex, RankedTensorType type,
 FailureOr<TensorValueSemantics>
 decodeStoredSemantics(Value value,
                       const DependentTensorValueSemantics &stored);
+LogicalResult refreshDependentTensorForwardingSemantics(Operation *op);
 
 } // namespace dependent_tensor
 } // namespace mlir

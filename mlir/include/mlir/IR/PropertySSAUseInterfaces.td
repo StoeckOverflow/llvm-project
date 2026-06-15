@@ -18,12 +18,30 @@ def PropertySSAUseOpInterface : OpInterface<"PropertySSAUseOpInterface"> {
 
     These references are second-class SSA edges: they are not OpOperands, but
     embedded PropertyOperands participate directly in the same physical use-list
-    as native operands.
+    as native operands. Generic SSA infrastructure that needs semantic uses,
+    including dominance verification, must walk `SSAUse`; native operand APIs
+    intentionally remain operand-only views.
   }];
   let methods = [
     InterfaceMethod<"Walk embedded SSA operands stored in op properties.",
       "void", "walkPropertySSAUses",
-      (ins "::llvm::function_ref<void(::mlir::PropertyOperand &)>":$callback), [{}]>
+      (ins "::llvm::function_ref<void(::mlir::PropertyOperand &)>":$callback), [{}]>,
+    InterfaceMethod<"Update op properties after generic result erasure.",
+      "::mlir::LogicalResult", "updatePropertiesForResultErasure",
+      (ins "::mlir::Operation *":$oldOp,
+           "const ::llvm::BitVector &":$eraseIndices), [{}],
+      /*defaultImplementation=*/[{
+        bool hasPropertyOperands = false;
+        auto oldIface = ::llvm::cast<::mlir::PropertySSAUseOpInterface>(oldOp);
+        oldIface.walkPropertySSAUses([&](::mlir::PropertyOperand &) {
+          hasPropertyOperands = true;
+        });
+        if (hasPropertyOperands)
+          return oldOp->emitError()
+                 << "cannot erase operation results without op-specific "
+                    "property SSA update support";
+        return ::mlir::success();
+      }]>
   ];
 }
 
