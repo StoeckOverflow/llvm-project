@@ -27,22 +27,26 @@ def MakeOp : DependentTensor_Op<"make", [
   let summary = "construct a property-native dependent tensor value";
   let description = [{
     `dependent_tensor.make` constructs a tensor value whose dependency semantics
-    are carried by the defining operation. The number of dimension operands must match 
-    the tensor rank, and each result dimension is represented by a dependent SSA value.
+    are carried by the defining operation. Each result dimension is represented
+    by a dependent SSA value stored in operation properties.
   }];
 
   let arguments = (ins
-    Variadic<Index>:$dim_values,
     DependentTensorValueSemanticsProp:$result_semantics
   );
   let results = (outs AnyRankedTensor:$result);
+  let builders = [
+    OpBuilder<(ins "RankedTensorType":$resultType, "ValueRange":$dimValues)>
+  ];
+  let extraClassDeclaration = [{
+    SmallVector<Value, 4> getDimValues();
+  }];
   let hasCustomAssemblyFormat = 1;
   let hasVerifier = 1;
 }
 
 def DimOp : DependentTensor_Op<"dim", [
-    Pure, DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
-      ["walkPropertySSAUses"]>]> {
+    Pure]> {
   let summary = "query a dependent tensor dimension";
   let description = [{
     `dependent_tensor.dim` mirrors `tensor.dim` for tensors with dependent
@@ -52,8 +56,7 @@ def DimOp : DependentTensor_Op<"dim", [
 
   let arguments = (ins
     AnyRankedTensor:$source,
-    Index:$dimension,
-    DependentTensorDimValueSemanticsProp:$dim_value_semantics
+    Index:$dimension
   );
   let results = (outs Index:$result);
   let hasCustomAssemblyFormat = 1;
@@ -79,7 +82,7 @@ def ExtractOp : DependentTensor_Op<"extract", [Pure]> {
 }
 
 def InsertOp : DependentTensor_Op<"insert", [
-    Pure, AttrSizedOperandSegments,
+    Pure,
     DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
       ["walkPropertySSAUses"]>,
     DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
@@ -88,18 +91,18 @@ def InsertOp : DependentTensor_Op<"insert", [
   let summary = "insert an element into a dependent tensor";
   let description = [{
     `dependent_tensor.insert` mirrors `tensor.insert`. Its result semantics are
-    explicit value-bearing properties copied from the destination tensor
-    semantics during parsing/building.
+    inherited from the destination tensor semantics.
   }];
 
   let arguments = (ins
     AnyType:$scalar,
     AnyRankedTensor:$dest,
-    Variadic<Index>:$indices,
-    Variadic<Index>:$result_dim_values,
-    DependentTensorValueSemanticsProp:$result_semantics
+    Variadic<Index>:$indices
   );
   let results = (outs AnyRankedTensor:$result);
+  let builders = [
+    OpBuilder<(ins "Value":$scalar, "Value":$dest, "ValueRange":$indices)>
+  ];
   let hasCustomAssemblyFormat = 1;
   let hasVerifier = 1;
 }

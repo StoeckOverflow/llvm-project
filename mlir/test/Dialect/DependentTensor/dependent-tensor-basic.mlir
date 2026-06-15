@@ -109,11 +109,61 @@ func.func @extract_refinement_rejected(%m : index, %i : index) {
 
 // -----
 
-func.func @insert_semantics_mismatch(%m : index, %n : index, %i : index,
-                                     %j : index, %v : f32) {
+func.func @insert_inherits_destination_semantics(%m : index, %n : index,
+                                                %i : index, %j : index,
+                                                %v : f32) -> tensor<?x?xf32>
+    #types[] -> #tensor<[%m, %n], f32> {
   %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+1 {{'dependent_tensor.insert' op stored result semantics must match destination semantics}}
+  %r = dependent_tensor.insert %v into %t[%i, %j] #tensor<[%m, %n], f32> : f32 into tensor<?x?xf32>
+  return %r : tensor<?x?xf32>
+}
+
+// -----
+func.func @insert_refinement_dim_mismatch(%m : index, %n : index,
+                                           %i : index, %j : index, %v : f32) {
+  %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
+  // expected-error@+1 {{#tensor assertion must match destination semantics}}
   %r = dependent_tensor.insert %v into %t[%i, %j] #tensor<[%n, %m], f32> : f32 into tensor<?x?xf32>
+  return
+}
+
+// -----
+
+func.func @insert_refinement_rank_mismatch(%m : index, %n : index,
+                                            %i : index, %j : index, %v : f32) {
+  %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
+  // expected-error@+1 {{dependent tensor rank mismatch}}
+  %r = dependent_tensor.insert %v into %t[%i, %j] #tensor<[%m], f32> : f32 into tensor<?x?xf32>
+  return
+}
+
+// -----
+
+func.func @insert_refinement_element_type_mismatch(%m : index, %n : index,
+                                                   %i : index, %j : index,
+                                                   %v : f32) {
+  %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
+  // expected-error@+1 {{dependent tensor element type must match value type}}
+  %r = dependent_tensor.insert %v into %t[%i, %j] #tensor<[%m, %n], i32> : f32 into tensor<?x?xf32>
+  return
+}
+
+// -----
+
+func.func @dim_assertion_mismatch(%m : index, %n : index) {
+  %c0 = arith.constant 0 : index
+  %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
+  // expected-error@+1 {{#dim assertion must match source semantics}}
+  %d = dependent_tensor.dim %t, %c0, #dim %n : tensor<?x?xf32>
+  return
+}
+
+// -----
+
+func.func @dim_assertion_non_constant(%m : index, %n : index, %dim : index) {
+  %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
+  // expected-error@+1 {{requires constant dimension operand for #dim assertion}}
+  %d = dependent_tensor.dim %t, %dim, #dim %m : tensor<?x?xf32>
   return
 }
 

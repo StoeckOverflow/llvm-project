@@ -192,6 +192,18 @@ struct TestDependentTensorReplaceDimValuePass
   }
 
   void runOnOperation() override {
+    if (getOperation().getName() == "replace_insert_destination_refinement") {
+      SmallVector<dependent_tensor::MakeOp> makeOps;
+      getOperation().walk(
+          [&](dependent_tensor::MakeOp makeOp) { makeOps.push_back(makeOp); });
+      if (makeOps.size() < 2)
+        return signalPassFailure();
+      for (Operation &op : getOperation().getBody().front())
+        replaceUsesOfWithIncludingDependentTensorProperties(
+            &op, makeOps.front().getResult(), makeOps[1].getResult());
+      return;
+    }
+
     SmallVector<Value> indexResults;
     for (Operation &op : getOperation().getBody().front())
       for (Value result : op.getResults())
@@ -718,6 +730,24 @@ struct TestDependentTensorCheckPropertyUsesPass
       if (value.use_empty() || value.getUsers().empty()) {
         root->emitOpError(
             "expected native use-list to remain operand-only but non-empty");
+        return signalPassFailure();
+      }
+      return;
+    }
+
+    if (getOperation().getName() == "check_make_dims_property_only") {
+      Value value = getOperation().getArgument(0);
+      unsigned propertyUseCount = llvm::range_size(value.getPropertyUses());
+      unsigned allUseCount = llvm::range_size(value.getAllUses());
+      if (!value.use_empty() || !value.getUsers().empty()) {
+        root->emitOpError("expected make dimension to have no native uses");
+        return signalPassFailure();
+      }
+      if (value.property_use_empty() || value.all_use_empty() ||
+          value.getPropertyUsers().empty() || propertyUseCount == 0 ||
+          allUseCount != propertyUseCount) {
+        root->emitOpError(
+            "expected make dimension to be used only by properties");
         return signalPassFailure();
       }
       return;
