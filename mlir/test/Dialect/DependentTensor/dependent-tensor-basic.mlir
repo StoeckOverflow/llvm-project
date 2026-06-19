@@ -46,6 +46,7 @@ func.func @call_refinement(%m : index, %n : index) -> tensor<?x?xf32>
 
 // -----
 
+// Explicit loop-boundary typing remains covered here; kernel tests use DPS-style loops.
 func.func @loop_boundaries(%m : index, %n : index, %v : f32) -> tensor<?x?xf32>
     #types[] -> #tensor<[%m, %n], f32> {
   %c0 = arith.constant 0 : index
