@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -split-input-file -verify-dependent-tensor-semantics | FileCheck %s
+// RUN: mlir-opt %s -split-input-file -verify-dependent-tensor-refinements | FileCheck %s
 
 func.func @erase_owner_rejected(%seed : index) {
   %d = arith.constant 7 : index

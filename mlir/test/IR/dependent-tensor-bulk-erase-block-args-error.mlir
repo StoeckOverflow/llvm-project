@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -verify-dependent-tensor-semantics | FileCheck %s
+// RUN: mlir-opt %s -verify-dependent-tensor-refinements | FileCheck %s
 
 func.func @bulk_erase_block_arg_rejected(%seed : index) -> tensor<?xf32>
     #types[] -> #tensor<[%seed], f32> {

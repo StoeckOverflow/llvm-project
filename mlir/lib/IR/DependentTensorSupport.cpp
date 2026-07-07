@@ -5,16 +5,16 @@
 using namespace mlir;
 
 llvm::hash_code
-mlir::hash_value(const DependentTensorValueSemantics &semantics) {
-  SmallVector<Value, 4> dimValues = semantics.getDimValues();
+mlir::hash_value(const DependentTensorValueRefinement &refinement) {
+  SmallVector<Value, 4> dimValues = refinement.getDimValues();
   return llvm::hash_combine(
-      semantics.valueIndex, semantics.rank,
+      refinement.valueIndex, refinement.rank,
       llvm::hash_combine_range(dimValues.begin(), dimValues.end()));
 }
 
 llvm::hash_code
-mlir::hash_value(const DependentTensorDimValueSemantics &semantics) {
-  SmallVector<Value, 1> dimValues = semantics.getDimValues();
+mlir::hash_value(const DependentTensorDimValueRefinement &refinement) {
+  SmallVector<Value, 1> dimValues = refinement.getDimValues();
   return llvm::hash_combine_range(dimValues.begin(), dimValues.end());
 }
 

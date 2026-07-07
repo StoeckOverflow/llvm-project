@@ -18,7 +18,7 @@
 #include <cstdint>
 
 namespace mlir {
-struct DependentTensorValueSemantics {
+struct DependentTensorValueRefinement {
   uint32_t valueIndex = 0;
   int64_t rank = 0;
   SmallVector<PropertyOperand, 4> dimValues;
@@ -40,13 +40,13 @@ struct DependentTensorValueSemantics {
       dimValues.emplace_back(value);
   }
 
-  bool operator==(const DependentTensorValueSemantics &other) const {
+  bool operator==(const DependentTensorValueRefinement &other) const {
     return valueIndex == other.valueIndex && rank == other.rank &&
            getDimValues() == other.getDimValues();
   }
 };
 
-struct DependentTensorDimValueSemantics {
+struct DependentTensorDimValueRefinement {
   SmallVector<PropertyOperand, 1> dimValues;
 
   void appendDimValuesTo(SmallVectorImpl<Value> &values) const {
@@ -66,13 +66,13 @@ struct DependentTensorDimValueSemantics {
       dimValues.emplace_back(value);
   }
 
-  bool operator==(const DependentTensorDimValueSemantics &other) const {
+  bool operator==(const DependentTensorDimValueRefinement &other) const {
     return getDimValues() == other.getDimValues();
   }
 };
 
-llvm::hash_code hash_value(const DependentTensorValueSemantics &semantics);
-llvm::hash_code hash_value(const DependentTensorDimValueSemantics &semantics);
+llvm::hash_code hash_value(const DependentTensorValueRefinement &refinement);
+llvm::hash_code hash_value(const DependentTensorDimValueRefinement &refinement);
 } // namespace mlir
 
 #include "mlir/IR/DependentTensorInterfaces.h.inc"

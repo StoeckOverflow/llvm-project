@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -verify-dependent-tensor-semantics | FileCheck %s
+// RUN: mlir-opt %s -verify-dependent-tensor-refinements | FileCheck %s
 
 func.func @dependent_matmul_boundary(
     %m : index,

@@ -14,12 +14,12 @@ using namespace mlir;
 using namespace mlir::dependent_tensor;
 
 namespace {
-static FailureOr<TensorValueSemantics>
-buildValueSemantics(RankedTensorType type, ArrayRef<Value> dimValues) {
+static FailureOr<TensorValueRefinement>
+buildValueRefinement(RankedTensorType type, ArrayRef<Value> dimValues) {
   if (type.getRank() != static_cast<int64_t>(dimValues.size()))
     return failure();
 
-  TensorValueSemantics info{type, {}};
+  TensorValueRefinement info{type, {}};
   info.dimValues.reserve(dimValues.size());
   for (Value dimValue : dimValues) {
     if (!dimValue || !dimValue.getType().isIndex())
@@ -29,10 +29,10 @@ buildValueSemantics(RankedTensorType type, ArrayRef<Value> dimValues) {
   return info;
 }
 
-static DependentTensorValueSemantics buildStored(unsigned valueIndex,
-                                                 RankedTensorType type,
-                                                 ArrayRef<Value> dimValues) {
-  DependentTensorValueSemantics stored;
+static DependentTensorValueRefinement buildStored(unsigned valueIndex,
+                                                  RankedTensorType type,
+                                                  ArrayRef<Value> dimValues) {
+  DependentTensorValueRefinement stored;
   stored.valueIndex = valueIndex;
   stored.rank = type.getRank();
   stored.assignDimValues(dimValues);
@@ -55,28 +55,29 @@ static std::optional<uint64_t> getConstantDim(Value value) {
 }
 
 template <typename Range>
-static const DependentTensorValueSemantics *
-findStoredSemantics(Range &&range, unsigned valueIndex) {
-  for (const DependentTensorValueSemantics &semantics : range)
-    if (semantics.valueIndex == valueIndex)
-      return &semantics;
+static const DependentTensorValueRefinement *
+findStoredRefinement(Range &&range, unsigned valueIndex) {
+  for (const DependentTensorValueRefinement &refinement : range)
+    if (refinement.valueIndex == valueIndex)
+      return &refinement;
   return nullptr;
 }
 
-static FailureOr<TensorValueSemantics>
-getFuncArgSemantics(BlockArgument arg, func::FuncOp func,
-                    RankedTensorType rankedType) {
-  if (const DependentTensorValueSemantics *stored = findStoredSemantics(
-          func.getProperties().dependentTensorArgSemantics, arg.getArgNumber()))
-    return decodeStoredSemantics(arg, *stored);
+static FailureOr<TensorValueRefinement>
+getFuncArgRefinement(BlockArgument arg, func::FuncOp func,
+                     RankedTensorType rankedType) {
+  if (const DependentTensorValueRefinement *stored = findStoredRefinement(
+          func.getProperties().dependentTensorArgRefinements,
+          arg.getArgNumber()))
+    return decodeStoredRefinement(arg, *stored);
   return failure();
 }
 
-static FailureOr<TensorValueSemantics>
-getCallResultSemantics(OpResult result, func::CallOp call, func::FuncOp callee,
-                       RankedTensorType rankedType) {
-  if (const DependentTensorValueSemantics *stored = findStoredSemantics(
-          callee.getProperties().dependentTensorResultSemantics,
+static FailureOr<TensorValueRefinement>
+getCallResultRefinement(OpResult result, func::CallOp call, func::FuncOp callee,
+                        RankedTensorType rankedType) {
+  if (const DependentTensorValueRefinement *stored = findStoredRefinement(
+          callee.getProperties().dependentTensorResultRefinements,
           result.getResultNumber())) {
     SmallVector<Value> mappedDims;
     mappedDims.reserve(stored->dimValues.size());
@@ -87,30 +88,30 @@ getCallResultSemantics(OpResult result, func::CallOp call, func::FuncOp callee,
         return failure();
       mappedDims.push_back(call.getOperand(arg.getArgNumber()));
     }
-    return buildValueSemantics(rankedType, mappedDims);
+    return buildValueRefinement(rankedType, mappedDims);
   }
   return failure();
 }
 } // namespace
 
-DependentTensorValueSemantics dependent_tensor::buildStoredSemantics(
+DependentTensorValueRefinement dependent_tensor::buildStoredRefinement(
     unsigned valueIndex, RankedTensorType type, ArrayRef<Value> dimValues) {
   return buildStored(valueIndex, type, dimValues);
 }
 
-FailureOr<TensorValueSemantics> dependent_tensor::decodeStoredSemantics(
-    Value value, const DependentTensorValueSemantics &stored) {
+FailureOr<TensorValueRefinement> dependent_tensor::decodeStoredRefinement(
+    Value value, const DependentTensorValueRefinement &stored) {
   auto rankedType = dyn_cast<RankedTensorType>(value.getType());
   if (!rankedType)
     return failure();
   unsigned valueIndex = getValueIndex(value);
   if (stored.valueIndex != valueIndex || stored.rank != rankedType.getRank())
     return failure();
-  return buildValueSemantics(rankedType, stored.getDimValues());
+  return buildValueRefinement(rankedType, stored.getDimValues());
 }
 
-FailureOr<TensorValueSemantics>
-dependent_tensor::getValueSemantics(Value value) {
+FailureOr<TensorValueRefinement>
+dependent_tensor::getValueRefinement(Value value) {
   auto rankedType = dyn_cast<RankedTensorType>(value.getType());
   if (!rankedType)
     return failure();
@@ -120,7 +121,7 @@ dependent_tensor::getValueSemantics(Value value) {
     auto func =
         dyn_cast_or_null<func::FuncOp>(block ? block->getParentOp() : nullptr);
     if (func && block == &func.getBody().front())
-      return getFuncArgSemantics(arg, func, rankedType);
+      return getFuncArgRefinement(arg, func, rankedType);
 
     Operation *parentOp = block ? block->getParentOp() : nullptr;
     auto iface = dyn_cast_or_null<DependentTensorPropertyOpInterface>(parentOp);
@@ -146,21 +147,21 @@ dependent_tensor::getValueSemantics(Value value) {
     }
     if (!foundRegion || !foundBlock)
       return failure();
-    FailureOr<DependentTensorValueSemantics> stored =
-        iface.getDependentTensorBlockArgumentSemantics(
+    FailureOr<DependentTensorValueRefinement> stored =
+        iface.getDependentTensorBlockArgumentRefinement(
             regionNumber, blockNumber, arg.getArgNumber());
     if (failed(stored))
       return failure();
-    return decodeStoredSemantics(value, *stored);
+    return decodeStoredRefinement(value, *stored);
   }
 
   auto result = cast<OpResult>(value);
   Operation *def = result.getOwner();
   if (auto iface = dyn_cast<DependentTensorPropertyOpInterface>(def)) {
-    FailureOr<DependentTensorValueSemantics> stored =
-        iface.getDependentTensorResultSemantics(result.getResultNumber());
+    FailureOr<DependentTensorValueRefinement> stored =
+        iface.getDependentTensorResultRefinement(result.getResultNumber());
     if (succeeded(stored))
-      return decodeStoredSemantics(value, *stored);
+      return decodeStoredRefinement(value, *stored);
   }
 
   if (auto call = dyn_cast<func::CallOp>(def)) {
@@ -168,31 +169,31 @@ dependent_tensor::getValueSemantics(Value value) {
         call, call.getCalleeAttr());
     if (!callee)
       return failure();
-    return getCallResultSemantics(result, call, callee, rankedType);
+    return getCallResultRefinement(result, call, callee, rankedType);
   }
 
   return failure();
 }
 
-bool dependent_tensor::haveEqualSemantics(const TensorValueSemantics &lhs,
-                                          const TensorValueSemantics &rhs) {
+bool dependent_tensor::haveEqualRefinements(const TensorValueRefinement &lhs,
+                                            const TensorValueRefinement &rhs) {
   return lhs.type == rhs.type && lhs.dimValues == rhs.dimValues;
 }
 
-FailureOr<bool> dependent_tensor::haveEqualSemantics(Value lhs, Value rhs) {
-  auto lhsInfo = getValueSemantics(lhs);
-  auto rhsInfo = getValueSemantics(rhs);
+FailureOr<bool> dependent_tensor::haveEqualRefinements(Value lhs, Value rhs) {
+  auto lhsInfo = getValueRefinement(lhs);
+  auto rhsInfo = getValueRefinement(rhs);
   if (failed(lhsInfo) || failed(rhsInfo))
     return failure();
-  return haveEqualSemantics(*lhsInfo, *rhsInfo);
+  return haveEqualRefinements(*lhsInfo, *rhsInfo);
 }
 
-FailureOr<bool> dependent_tensor::haveEqualDimSemantics(Value lhs,
-                                                        unsigned lhsDim,
-                                                        Value rhs,
-                                                        unsigned rhsDim) {
-  auto lhsInfo = getValueSemantics(lhs);
-  auto rhsInfo = getValueSemantics(rhs);
+FailureOr<bool> dependent_tensor::haveEqualDimRefinements(Value lhs,
+                                                          unsigned lhsDim,
+                                                          Value rhs,
+                                                          unsigned rhsDim) {
+  auto lhsInfo = getValueRefinement(lhs);
+  auto rhsInfo = getValueRefinement(rhs);
   if (failed(lhsInfo) || failed(rhsInfo))
     return failure();
   if (lhsDim >= lhsInfo->dimValues.size() ||
@@ -227,13 +228,13 @@ static ParseResult resolveTensorRefinement(
 }
 
 static LogicalResult
-verifyStoredSemantics(Operation *op, Value value,
-                      const DependentTensorValueSemantics &stored) {
+verifyStoredRefinement(Operation *op, Value value,
+                       const DependentTensorValueRefinement &stored) {
   auto rankedType = dyn_cast<RankedTensorType>(value.getType());
   if (!rankedType)
-    return op->emitOpError("requires ranked tensor value semantics");
+    return op->emitOpError("requires ranked tensor value refinements");
   if (stored.valueIndex != cast<OpResult>(value).getResultNumber())
-    return op->emitOpError("has dependent tensor semantics for wrong result");
+    return op->emitOpError("has dependent tensor refinements for wrong result");
   if (stored.rank != rankedType.getRank())
     return op->emitOpError(
         "requires dependent tensor rank to match result rank");
@@ -256,7 +257,7 @@ void MakeOp::build(OpBuilder &builder, OperationState &result,
   result.addTypes(resultType);
   auto &props = result.getOrAddProperties<MakeOp::Properties>();
   SmallVector<Value> dims(dimValues.begin(), dimValues.end());
-  props.result_semantics =
+  props.result_refinement =
       buildStored(/*valueIndex=*/0, resultType, ArrayRef<Value>(dims));
 }
 
@@ -291,13 +292,13 @@ ParseResult MakeOp::parse(OpAsmParser &parser, OperationState &result) {
 
   result.addTypes(resultType);
   auto &props = result.getOrAddProperties<MakeOp::Properties>();
-  props.result_semantics = buildStored(
+  props.result_refinement = buildStored(
       /*valueIndex=*/0, rankedType, ArrayRef<Value>(resolvedDims));
   return success();
 }
 
 SmallVector<Value, 4> MakeOp::getDimValues() {
-  return getProperties().result_semantics.getDimValues();
+  return getProperties().result_refinement.getDimValues();
 }
 
 void MakeOp::print(OpAsmPrinter &p) {
@@ -314,15 +315,15 @@ LogicalResult MakeOp::verify() {
   if (!rankedType)
     return emitOpError("requires ranked tensor result type");
 
-  if (failed(verifyStoredSemantics(*this, getResult(),
-                                   getProperties().result_semantics)))
+  if (failed(verifyStoredRefinement(*this, getResult(),
+                                    getProperties().result_refinement)))
     return failure();
   return success();
 }
 
 void MakeOp::walkPropertySSAUses(
     function_ref<void(PropertyOperand &)> callback) {
-  for (PropertyOperand &operand : getProperties().result_semantics.dimValues)
+  for (PropertyOperand &operand : getProperties().result_refinement.dimValues)
     callback(operand);
 }
 
@@ -331,11 +332,11 @@ void MakeOp::walkDependentTensorPropertyUses(
   walkPropertySSAUses(callback);
 }
 
-FailureOr<DependentTensorValueSemantics>
-MakeOp::getDependentTensorResultSemantics(unsigned resultNumber) {
+FailureOr<DependentTensorValueRefinement>
+MakeOp::getDependentTensorResultRefinement(unsigned resultNumber) {
   if (resultNumber != 0)
     return failure();
-  return getProperties().result_semantics;
+  return getProperties().result_refinement;
 }
 
 ParseResult DimOp::parse(OpAsmParser &parser, OperationState &result) {
@@ -376,7 +377,7 @@ ParseResult DimOp::parse(OpAsmParser &parser, OperationState &result) {
           "requires constant dimension operand for #dim assertion");
 
     auto &props = result.getOrAddProperties<DimOp::Properties>();
-    props.dim_value_semantics.assignDimValues(resolvedDims);
+    props.dim_value_refinement.assignDimValues(resolvedDims);
   }
 
   result.addTypes(parser.getBuilder().getIndexType());
@@ -389,7 +390,7 @@ void DimOp::print(OpAsmPrinter &p) {
   p << ", ";
   p.printOperand(getDimension());
   SmallVector<Value, 1> assertedDims =
-      getProperties().dim_value_semantics.getDimValues();
+      getProperties().dim_value_refinement.getDimValues();
   if (!assertedDims.empty()) {
     p << ", #dim ";
     p.printOperand(assertedDims.front());
@@ -402,12 +403,12 @@ LogicalResult DimOp::verify() {
   auto sourceType = dyn_cast<RankedTensorType>(getSource().getType());
   if (!sourceType)
     return emitOpError("requires ranked tensor source");
-  FailureOr<TensorValueSemantics> sourceInfo = getValueSemantics(getSource());
+  FailureOr<TensorValueRefinement> sourceInfo = getValueRefinement(getSource());
   if (failed(sourceInfo))
-    return emitOpError("requires source with dependent_tensor semantics");
+    return emitOpError("requires source with dependent_tensor refinements");
 
   SmallVector<Value, 1> assertedDims =
-      getProperties().dim_value_semantics.getDimValues();
+      getProperties().dim_value_refinement.getDimValues();
   if (assertedDims.empty())
     return success();
   if (assertedDims.size() != 1)
@@ -422,13 +423,14 @@ LogicalResult DimOp::verify() {
   if (*dim >= sourceInfo->dimValues.size())
     return emitOpError("requires #dim assertion within source rank");
   if (assertedDims.front() != sourceInfo->dimValues[*dim])
-    return emitOpError("#dim assertion must match source semantics");
+    return emitOpError("#dim assertion must match source refinements");
   return success();
 }
 
 void DimOp::walkPropertySSAUses(
     function_ref<void(PropertyOperand &)> callback) {
-  for (PropertyOperand &operand : getProperties().dim_value_semantics.dimValues)
+  for (PropertyOperand &operand :
+       getProperties().dim_value_refinement.dimValues)
     callback(operand);
 }
 
@@ -437,7 +439,7 @@ OpFoldResult DimOp::fold(FoldAdaptor adaptor) {
   if (!dimAttr)
     return {};
   uint64_t dim = dimAttr.getValue().getZExtValue();
-  FailureOr<TensorValueSemantics> sourceInfo = getValueSemantics(getSource());
+  FailureOr<TensorValueRefinement> sourceInfo = getValueRefinement(getSource());
   if (failed(sourceInfo) || dim >= sourceInfo->dimValues.size())
     return {};
   return sourceInfo->dimValues[dim];
@@ -483,9 +485,9 @@ LogicalResult ExtractOp::verify() {
     return emitOpError("requires one index operand per tensor dimension");
   if (getResult().getType() != sourceType.getElementType())
     return emitOpError("requires result type to match tensor element type");
-  FailureOr<TensorValueSemantics> sourceInfo = getValueSemantics(getSource());
+  FailureOr<TensorValueRefinement> sourceInfo = getValueRefinement(getSource());
   if (failed(sourceInfo))
-    return emitOpError("requires source with dependent_tensor semantics");
+    return emitOpError("requires source with dependent_tensor refinements");
   return success();
 }
 
@@ -500,15 +502,15 @@ void InsertOp::build(OpBuilder &builder, OperationState &result, Value scalar,
   auto resultType = cast<RankedTensorType>(dest.getType());
   auto &props = result.getOrAddProperties<InsertOp::Properties>();
   SmallVector<Value> dims(resultDimValues.begin(), resultDimValues.end());
-  props.result_semantics =
+  props.result_refinement =
       buildStored(/*valueIndex=*/0, resultType, ArrayRef<Value>(dims));
 }
 
 void InsertOp::build(OpBuilder &builder, OperationState &result, Value scalar,
                      Value dest, ValueRange indices) {
-  FailureOr<TensorValueSemantics> destInfo = getValueSemantics(dest);
+  FailureOr<TensorValueRefinement> destInfo = getValueRefinement(dest);
   assert(succeeded(destInfo) &&
-         "insert convenience builder requires destination semantics");
+         "insert convenience builder requires destination refinements");
   build(builder, result, scalar, dest, indices, destInfo->dimValues);
 }
 
@@ -553,7 +555,7 @@ ParseResult InsertOp::parse(OpAsmParser &parser, OperationState &result) {
 
   result.addTypes(destType);
   auto &props = result.getOrAddProperties<InsertOp::Properties>();
-  props.result_semantics = buildStored(
+  props.result_refinement = buildStored(
       /*valueIndex=*/0, tensorType, ArrayRef<Value>(resolvedDims));
   return success();
 }
@@ -567,7 +569,7 @@ void InsertOp::print(OpAsmPrinter &p) {
   auto rankedType = cast<RankedTensorType>(getResult().getType());
   p << ' ';
   dependent_tensor::printTensorSpec(
-      p, getProperties().result_semantics.getDimValues(),
+      p, getProperties().result_refinement.getDimValues(),
       rankedType.getElementType());
   p << " : ";
   p.printType(getScalar().getType());
@@ -587,24 +589,25 @@ LogicalResult InsertOp::verify() {
   if (static_cast<int64_t>(getIndices().size()) != destType.getRank())
     return emitOpError("requires one index operand per tensor dimension");
 
-  if (failed(verifyStoredSemantics(*this, getResult(),
-                                   getProperties().result_semantics)))
+  if (failed(verifyStoredRefinement(*this, getResult(),
+                                    getProperties().result_refinement)))
     return failure();
 
-  auto destInfo = getValueSemantics(getDest());
+  auto destInfo = getValueRefinement(getDest());
   if (failed(destInfo))
-    return emitOpError("requires destination with dependent_tensor semantics");
-  FailureOr<TensorValueSemantics> resultInfo =
-      decodeStoredSemantics(getResult(), getProperties().result_semantics);
-  if (failed(resultInfo) || !haveEqualSemantics(*resultInfo, *destInfo))
     return emitOpError(
-        "stored result semantics must match destination semantics");
+        "requires destination with dependent_tensor refinements");
+  FailureOr<TensorValueRefinement> resultInfo =
+      decodeStoredRefinement(getResult(), getProperties().result_refinement);
+  if (failed(resultInfo) || !haveEqualRefinements(*resultInfo, *destInfo))
+    return emitOpError(
+        "stored result refinements must match destination refinements");
   return success();
 }
 
 void InsertOp::walkPropertySSAUses(
     function_ref<void(PropertyOperand &)> callback) {
-  for (PropertyOperand &operand : getProperties().result_semantics.dimValues)
+  for (PropertyOperand &operand : getProperties().result_refinement.dimValues)
     callback(operand);
 }
 
@@ -613,15 +616,15 @@ void InsertOp::walkDependentTensorPropertyUses(
   walkPropertySSAUses(callback);
 }
 
-FailureOr<DependentTensorValueSemantics>
-InsertOp::getDependentTensorResultSemantics(unsigned resultNumber) {
+FailureOr<DependentTensorValueRefinement>
+InsertOp::getDependentTensorResultRefinement(unsigned resultNumber) {
   if (resultNumber != 0)
     return failure();
-  return getProperties().result_semantics;
+  return getProperties().result_refinement;
 }
 
 LogicalResult
-dependent_tensor::refreshDependentTensorForwardingSemantics(Operation *op) {
+dependent_tensor::refreshDependentTensorForwardingRefinement(Operation *op) {
   if (!op)
     return failure();
   auto insertOp = dyn_cast<InsertOp>(op);
@@ -631,12 +634,12 @@ dependent_tensor::refreshDependentTensorForwardingSemantics(Operation *op) {
   auto resultType = dyn_cast<RankedTensorType>(insertOp.getResult().getType());
   if (!resultType)
     return failure();
-  FailureOr<TensorValueSemantics> destInfo =
-      getValueSemantics(insertOp.getDest());
+  FailureOr<TensorValueRefinement> destInfo =
+      getValueRefinement(insertOp.getDest());
   if (failed(destInfo))
     return failure();
 
-  insertOp.getProperties().result_semantics =
+  insertOp.getProperties().result_refinement =
       buildStored(/*valueIndex=*/0, resultType, destInfo->dimValues);
   reattachPropertyOperands(insertOp);
   return success();

@@ -133,8 +133,8 @@ def AffineForOp : Affine_Op<"for",
      DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
       ["walkPropertySSAUses"]>,
      DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
-      ["getDependentTensorResultSemantics",
-       "getDependentTensorBlockArgumentSemantics",
+      ["getDependentTensorResultRefinement",
+       "getDependentTensorBlockArgumentRefinement",
        "walkDependentTensorPropertyUses"]>]> {
   let summary = "for operation";
   let description = [{
@@ -248,10 +248,10 @@ def AffineForOp : Affine_Op<"for",
                        AffineMapAttr:$lowerBoundMap,
                        AffineMapAttr:$upperBoundMap,
                        IndexAttr:$step,
-                       ArrayProp<DependentTensorValueSemanticsProp>:
-                         $dependentTensorIterArgSemantics,
-                       ArrayProp<DependentTensorValueSemanticsProp>:
-                         $dependentTensorResultSemantics);
+                       ArrayProp<DependentTensorValueRefinementProp>:
+                         $dependentTensorIterArgRefinements,
+                       ArrayProp<DependentTensorValueRefinementProp>:
+                         $dependentTensorResultRefinements);
   let results = (outs Variadic<AnyType>:$results);
   let regions = (region SizedRegion<1>:$region);
 

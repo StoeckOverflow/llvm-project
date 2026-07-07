@@ -93,7 +93,7 @@ static bool hasDependentTensorSeedArgsAttr(DictionaryAttr attrs) {
   return attrs && attrs.get("dependent_tensor.seed_args");
 }
 
-struct PendingDependentTensorValueSemantics {
+struct PendingDependentTensorValueRefinement {
   uint32_t valueIndex = 0;
   RankedTensorType type;
   SmallVector<OpAsmParser::UnresolvedOperand> dims;
@@ -102,8 +102,8 @@ struct PendingDependentTensorValueSemantics {
 static ParseResult parseDependentTensorTypesBoundary(
     OpAsmParser &parser, ArrayRef<OpAsmParser::Argument> entryArgs,
     ArrayRef<Type> argTypes, ArrayRef<Type> resultTypes,
-    SmallVectorImpl<PendingDependentTensorValueSemantics> &argSemantics,
-    SmallVectorImpl<PendingDependentTensorValueSemantics> &resultSemantics) {
+    SmallVectorImpl<PendingDependentTensorValueRefinement> &argRefinements,
+    SmallVectorImpl<PendingDependentTensorValueRefinement> &resultRefinements) {
   if (failed(parser.parseOptionalHashKeyword("types")))
     return success();
 
@@ -131,38 +131,38 @@ static ParseResult parseDependentTensorTypesBoundary(
     if (!rankedType)
       return parser.emitError(
           arg.location, "dependent tensor boundary requires ranked tensor");
-    PendingDependentTensorValueSemantics info;
+    PendingDependentTensorValueRefinement info;
     info.valueIndex = argIndex;
     info.type = rankedType;
     if (parser.parseColon() ||
         dependent_tensor::parseTensorSpec(parser, rankedType, info.dims))
       return failure();
-    argSemantics.push_back(std::move(info));
+    argRefinements.push_back(std::move(info));
     (void)parser.parseOptionalComma();
   }
 
   if (failed(parser.parseOptionalArrow()))
     return success();
-  auto parseResultSemantics =
+  auto parseResultRefinement =
       [&](unsigned resultIndex,
-          SmallVectorImpl<PendingDependentTensorValueSemantics> &semantics)
+          SmallVectorImpl<PendingDependentTensorValueRefinement> &refinements)
       -> ParseResult {
     auto resultType = dyn_cast<RankedTensorType>(resultTypes[resultIndex]);
     if (!resultType)
       return parser.emitError(
           parser.getCurrentLocation(),
           "dependent tensor boundary requires ranked tensor");
-    PendingDependentTensorValueSemantics resultInfo;
+    PendingDependentTensorValueRefinement resultInfo;
     resultInfo.valueIndex = resultIndex;
     resultInfo.type = resultType;
     if (dependent_tensor::parseTensorSpec(parser, resultType, resultInfo.dims))
       return failure();
-    semantics.push_back(std::move(resultInfo));
+    refinements.push_back(std::move(resultInfo));
     return success();
   };
 
   if (resultTypes.size() == 1)
-    return parseResultSemantics(/*resultIndex=*/0, resultSemantics);
+    return parseResultRefinement(/*resultIndex=*/0, resultRefinements);
 
   unsigned resultIndex = 0;
   if (parser.parseCommaSeparatedList(
@@ -171,7 +171,7 @@ static ParseResult parseDependentTensorTypesBoundary(
               return parser.emitError(
                   parser.getCurrentLocation(),
                   "too many dependent tensor result boundary entries");
-            return parseResultSemantics(resultIndex++, resultSemantics);
+            return parseResultRefinement(resultIndex++, resultRefinements);
           }))
     return failure();
   if (resultIndex != resultTypes.size())
@@ -184,11 +184,11 @@ static ParseResult parseDependentTensorTypesBoundary(
 static ParseResult resolveDependentTensorTypesBoundary(
     OpAsmParser &parser, ArrayRef<OpAsmParser::Argument> entryArgs,
     Region &body,
-    ArrayRef<PendingDependentTensorValueSemantics> pendingArgSemantics,
-    ArrayRef<PendingDependentTensorValueSemantics> pendingResultSemantics,
-    SmallVectorImpl<DependentTensorValueSemantics> &argSemantics,
-    SmallVectorImpl<DependentTensorValueSemantics> &resultSemantics) {
-  if (pendingArgSemantics.empty() && pendingResultSemantics.empty())
+    ArrayRef<PendingDependentTensorValueRefinement> pendingArgRefinements,
+    ArrayRef<PendingDependentTensorValueRefinement> pendingResultRefinements,
+    SmallVectorImpl<DependentTensorValueRefinement> &argRefinements,
+    SmallVectorImpl<DependentTensorValueRefinement> &resultRefinements) {
+  if (pendingArgRefinements.empty() && pendingResultRefinements.empty())
     return success();
   if (body.empty())
     return parser.emitError(
@@ -205,9 +205,9 @@ static ParseResult resolveDependentTensorTypesBoundary(
   }
 
   auto resolveOne =
-      [&](const PendingDependentTensorValueSemantics &pending,
-          SmallVectorImpl<DependentTensorValueSemantics> &out) -> ParseResult {
-    DependentTensorValueSemantics info;
+      [&](const PendingDependentTensorValueRefinement &pending,
+          SmallVectorImpl<DependentTensorValueRefinement> &out) -> ParseResult {
+    DependentTensorValueRefinement info;
     info.valueIndex = pending.valueIndex;
     info.rank = pending.type.getRank();
     for (const OpAsmParser::UnresolvedOperand &dim : pending.dims) {
@@ -226,21 +226,21 @@ static ParseResult resolveDependentTensorTypesBoundary(
     return success();
   };
 
-  for (const PendingDependentTensorValueSemantics &pending :
-       pendingArgSemantics)
-    if (resolveOne(pending, argSemantics))
+  for (const PendingDependentTensorValueRefinement &pending :
+       pendingArgRefinements)
+    if (resolveOne(pending, argRefinements))
       return failure();
-  for (const PendingDependentTensorValueSemantics &pending :
-       pendingResultSemantics)
-    if (resolveOne(pending, resultSemantics))
+  for (const PendingDependentTensorValueRefinement &pending :
+       pendingResultRefinements)
+    if (resolveOne(pending, resultRefinements))
       return failure();
   return success();
 }
 
-static const DependentTensorValueSemantics *
-findBoundarySemantics(ArrayRef<DependentTensorValueSemantics> semantics,
-                      unsigned valueIndex) {
-  for (const DependentTensorValueSemantics &candidate : semantics)
+static const DependentTensorValueRefinement *
+findBoundaryRefinement(ArrayRef<DependentTensorValueRefinement> refinements,
+                       unsigned valueIndex) {
+  for (const DependentTensorValueRefinement &candidate : refinements)
     if (candidate.valueIndex == valueIndex)
       return &candidate;
   return nullptr;
@@ -487,11 +487,11 @@ ParseResult FuncOp::parse(OpAsmParser &parser, OperationState &result) {
       builder, result, entryArgs, resultAttrs, getArgAttrsAttrName(result.name),
       getResAttrsAttrName(result.name));
 
-  SmallVector<PendingDependentTensorValueSemantics> pendingArgSemantics;
-  SmallVector<PendingDependentTensorValueSemantics> pendingResultSemantics;
+  SmallVector<PendingDependentTensorValueRefinement> pendingArgRefinements;
+  SmallVector<PendingDependentTensorValueRefinement> pendingResultRefinements;
   if (parseDependentTensorTypesBoundary(parser, entryArgs, argTypes,
-                                        resultTypes, pendingArgSemantics,
-                                        pendingResultSemantics))
+                                        resultTypes, pendingArgRefinements,
+                                        pendingResultRefinements))
     return failure();
 
   SMLoc loc = parser.getCurrentLocation();
@@ -506,12 +506,12 @@ ParseResult FuncOp::parse(OpAsmParser &parser, OperationState &result) {
   }
 
   auto &properties = result.getOrAddProperties<FuncOp::Properties>();
-  properties.dependentTensorArgSemantics.clear();
-  properties.dependentTensorResultSemantics.clear();
+  properties.dependentTensorArgRefinements.clear();
+  properties.dependentTensorResultRefinements.clear();
   if (resolveDependentTensorTypesBoundary(
-          parser, entryArgs, *body, pendingArgSemantics, pendingResultSemantics,
-          properties.dependentTensorArgSemantics,
-          properties.dependentTensorResultSemantics))
+          parser, entryArgs, *body, pendingArgRefinements,
+          pendingResultRefinements, properties.dependentTensorArgRefinements,
+          properties.dependentTensorResultRefinements))
     return failure();
   return success();
 }
@@ -532,32 +532,33 @@ void FuncOp::print(OpAsmPrinter &p) {
       {visibilityAttrName, getFunctionTypeAttrName().getValue(),
        getArgAttrsAttrName().getValue(), getResAttrsAttrName().getValue()});
 
-  const auto &argSemantics = getProperties().dependentTensorArgSemantics;
-  const auto &resultSemantics = getProperties().dependentTensorResultSemantics;
-  if (!argSemantics.empty() || !resultSemantics.empty()) {
+  const auto &argRefinements = getProperties().dependentTensorArgRefinements;
+  const auto &resultRefinements =
+      getProperties().dependentTensorResultRefinements;
+  if (!argRefinements.empty() || !resultRefinements.empty()) {
     p << " #types[";
-    llvm::interleaveComma(argSemantics, p, [&](const auto &semantics) {
-      p.printOperand(getArgument(semantics.valueIndex));
+    llvm::interleaveComma(argRefinements, p, [&](const auto &refinement) {
+      p.printOperand(getArgument(refinement.valueIndex));
       p << " : ";
       auto type =
-          cast<RankedTensorType>(getArgument(semantics.valueIndex).getType());
-      dependent_tensor::printTensorSpec(p, semantics.getDimValues(),
+          cast<RankedTensorType>(getArgument(refinement.valueIndex).getType());
+      dependent_tensor::printTensorSpec(p, refinement.getDimValues(),
                                         type.getElementType());
     });
     p << "]";
-    if (!resultSemantics.empty()) {
+    if (!resultRefinements.empty()) {
       p << " -> ";
-      auto printResultSemantics = [&](const auto &semantics) {
+      auto printResultRefinement = [&](const auto &refinement) {
         auto type = cast<RankedTensorType>(
-            getFunctionType().getResult(semantics.valueIndex));
-        dependent_tensor::printTensorSpec(p, semantics.getDimValues(),
+            getFunctionType().getResult(refinement.valueIndex));
+        dependent_tensor::printTensorSpec(p, refinement.getDimValues(),
                                           type.getElementType());
       };
-      if (resultSemantics.size() == 1) {
-        printResultSemantics(resultSemantics.front());
+      if (resultRefinements.size() == 1) {
+        printResultRefinement(resultRefinements.front());
       } else {
         p << "[";
-        llvm::interleaveComma(resultSemantics, p, printResultSemantics);
+        llvm::interleaveComma(resultRefinements, p, printResultRefinement);
         p << "]";
       }
     }
@@ -574,13 +575,13 @@ void FuncOp::print(OpAsmPrinter &p) {
 
 void FuncOp::walkPropertySSAUses(
     function_ref<void(PropertyOperand &)> callback) {
-  for (DependentTensorValueSemantics &semantics :
-       getProperties().dependentTensorArgSemantics)
-    for (PropertyOperand &operand : semantics.dimValues)
+  for (DependentTensorValueRefinement &refinement :
+       getProperties().dependentTensorArgRefinements)
+    for (PropertyOperand &operand : refinement.dimValues)
       callback(operand);
-  for (DependentTensorValueSemantics &semantics :
-       getProperties().dependentTensorResultSemantics)
-    for (PropertyOperand &operand : semantics.dimValues)
+  for (DependentTensorValueRefinement &refinement :
+       getProperties().dependentTensorResultRefinements)
+    for (PropertyOperand &operand : refinement.dimValues)
       callback(operand);
 }
 
@@ -596,12 +597,12 @@ static unsigned countErasedBefore(const BitVector &indices, unsigned index) {
   return count;
 }
 
-static DependentTensorValueSemantics cloneDependentTensorSemanticsWithIndex(
-    const DependentTensorValueSemantics &semantics, unsigned valueIndex) {
-  DependentTensorValueSemantics cloned;
+static DependentTensorValueRefinement cloneDependentTensorRefinementWithIndex(
+    const DependentTensorValueRefinement &refinement, unsigned valueIndex) {
+  DependentTensorValueRefinement cloned;
   cloned.valueIndex = valueIndex;
-  cloned.rank = semantics.rank;
-  cloned.assignDimValues(semantics.getDimValues());
+  cloned.rank = refinement.rank;
+  cloned.assignDimValues(refinement.getDimValues());
   return cloned;
 }
 
@@ -618,15 +619,15 @@ getErasedFunctionArgumentRef(FuncOp func, Value value,
 }
 
 static LogicalResult verifyNoErasedFunctionArgumentRefs(
-    FuncOp func, const DependentTensorValueSemantics &semantics,
+    FuncOp func, const DependentTensorValueRefinement &refinement,
     const BitVector &argIndices, StringRef boundaryKind) {
-  for (Value dimValue : semantics.getDimValues()) {
+  for (Value dimValue : refinement.getDimValues()) {
     if (std::optional<unsigned> argNumber =
             getErasedFunctionArgumentRef(func, dimValue, argIndices)) {
       return func.emitOpError()
              << "cannot erase function argument #" << *argNumber
              << " because it is used by surviving dependent tensor "
-             << boundaryKind << " boundary semantics";
+             << boundaryKind << " boundary refinements";
     }
   }
   return success();
@@ -635,36 +636,36 @@ static LogicalResult verifyNoErasedFunctionArgumentRefs(
 LogicalResult FuncOp::updateFunctionPropertiesForArgumentErasure(
     const BitVector &argIndices) {
   auto &properties = getProperties();
-  SmallVector<DependentTensorValueSemantics> newArgSemantics;
-  SmallVector<DependentTensorValueSemantics> newResultSemantics;
+  SmallVector<DependentTensorValueRefinement> newArgRefinements;
+  SmallVector<DependentTensorValueRefinement> newResultRefinements;
 
-  for (const DependentTensorValueSemantics &semantics :
-       properties.dependentTensorArgSemantics) {
-    if (semantics.valueIndex >= argIndices.size())
+  for (const DependentTensorValueRefinement &refinement :
+       properties.dependentTensorArgRefinements) {
+    if (refinement.valueIndex >= argIndices.size())
       return emitOpError("dependent tensor argument boundary index is out of "
                          "range during argument erasure");
-    if (argIndices[semantics.valueIndex])
+    if (argIndices[refinement.valueIndex])
       continue;
-    if (failed(verifyNoErasedFunctionArgumentRefs(*this, semantics, argIndices,
+    if (failed(verifyNoErasedFunctionArgumentRefs(*this, refinement, argIndices,
                                                   "argument")))
       return failure();
-    unsigned newIndex = semantics.valueIndex -
-                        countErasedBefore(argIndices, semantics.valueIndex);
-    newArgSemantics.push_back(
-        cloneDependentTensorSemanticsWithIndex(semantics, newIndex));
+    unsigned newIndex = refinement.valueIndex -
+                        countErasedBefore(argIndices, refinement.valueIndex);
+    newArgRefinements.push_back(
+        cloneDependentTensorRefinementWithIndex(refinement, newIndex));
   }
 
-  for (const DependentTensorValueSemantics &semantics :
-       properties.dependentTensorResultSemantics) {
-    if (failed(verifyNoErasedFunctionArgumentRefs(*this, semantics, argIndices,
+  for (const DependentTensorValueRefinement &refinement :
+       properties.dependentTensorResultRefinements) {
+    if (failed(verifyNoErasedFunctionArgumentRefs(*this, refinement, argIndices,
                                                   "result")))
       return failure();
-    newResultSemantics.push_back(cloneDependentTensorSemanticsWithIndex(
-        semantics, semantics.valueIndex));
+    newResultRefinements.push_back(cloneDependentTensorRefinementWithIndex(
+        refinement, refinement.valueIndex));
   }
 
-  properties.dependentTensorArgSemantics = std::move(newArgSemantics);
-  properties.dependentTensorResultSemantics = std::move(newResultSemantics);
+  properties.dependentTensorArgRefinements = std::move(newArgRefinements);
+  properties.dependentTensorResultRefinements = std::move(newResultRefinements);
   reattachPropertyOperands(*this);
   return success();
 }
@@ -672,34 +673,34 @@ LogicalResult FuncOp::updateFunctionPropertiesForArgumentErasure(
 LogicalResult FuncOp::updateFunctionPropertiesForResultErasure(
     const BitVector &resultIndices) {
   auto &properties = getProperties();
-  SmallVector<DependentTensorValueSemantics> newResultSemantics;
-  for (const DependentTensorValueSemantics &semantics :
-       properties.dependentTensorResultSemantics) {
-    if (semantics.valueIndex >= resultIndices.size())
+  SmallVector<DependentTensorValueRefinement> newResultRefinements;
+  for (const DependentTensorValueRefinement &refinement :
+       properties.dependentTensorResultRefinements) {
+    if (refinement.valueIndex >= resultIndices.size())
       return emitOpError("dependent tensor result boundary index is out of "
                          "range during result erasure");
-    if (resultIndices[semantics.valueIndex])
+    if (resultIndices[refinement.valueIndex])
       continue;
-    unsigned newIndex = semantics.valueIndex -
-                        countErasedBefore(resultIndices, semantics.valueIndex);
-    newResultSemantics.push_back(
-        cloneDependentTensorSemanticsWithIndex(semantics, newIndex));
+    unsigned newIndex = refinement.valueIndex -
+                        countErasedBefore(resultIndices, refinement.valueIndex);
+    newResultRefinements.push_back(
+        cloneDependentTensorRefinementWithIndex(refinement, newIndex));
   }
 
-  properties.dependentTensorResultSemantics = std::move(newResultSemantics);
+  properties.dependentTensorResultRefinements = std::move(newResultRefinements);
   reattachPropertyOperands(*this);
   return success();
 }
 
-FailureOr<DependentTensorValueSemantics>
-FuncOp::getDependentTensorBlockArgumentSemantics(unsigned regionNumber,
-                                                 unsigned blockNumber,
-                                                 unsigned argumentNumber) {
+FailureOr<DependentTensorValueRefinement>
+FuncOp::getDependentTensorBlockArgumentRefinement(unsigned regionNumber,
+                                                  unsigned blockNumber,
+                                                  unsigned argumentNumber) {
   if (regionNumber != 0 || blockNumber != 0)
     return failure();
-  if (const DependentTensorValueSemantics *semantics = findBoundarySemantics(
-          getProperties().dependentTensorArgSemantics, argumentNumber))
-    return *semantics;
+  if (const DependentTensorValueRefinement *refinement = findBoundaryRefinement(
+          getProperties().dependentTensorArgRefinements, argumentNumber))
+    return *refinement;
   return failure();
 }
 

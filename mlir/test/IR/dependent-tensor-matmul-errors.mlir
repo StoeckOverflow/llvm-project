@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -split-input-file -verify-dependent-tensor-semantics -verify-diagnostics
+// RUN: mlir-opt %s -split-input-file -verify-dependent-tensor-refinements -verify-diagnostics
 
 func.func @dependent_matmul_bad_result_row(
     %m0 : index,

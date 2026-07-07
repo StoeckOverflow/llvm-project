@@ -26,8 +26,8 @@
 using namespace mlir;
 
 namespace {
-static constexpr StringLiteral kExpectSemanticsEqualAttr =
-    "test.expect_semantics_equal";
+static constexpr StringLiteral kExpectRefinementsEqualAttr =
+    "test.expect_refinements_equal";
 static constexpr StringLiteral kExpectDimEqualAttr = "test.expect_dim_equal";
 static constexpr StringLiteral kDimPairAttr = "test.dim_pair";
 
@@ -77,7 +77,7 @@ struct TestDependentTensorEqualityPass
     return "test-dependent-tensor-equality";
   }
   StringRef getDescription() const final {
-    return "Exercise dependent_tensor semantic equality helpers";
+    return "Exercise dependent_tensor refinement equality helpers";
   }
 
   void runOnOperation() override {
@@ -89,13 +89,13 @@ struct TestDependentTensorEqualityPass
     Value lhs = ret.getOperand(0);
     Value rhs = ret.getOperand(1);
 
-    if (func->hasAttr(kExpectSemanticsEqualAttr)) {
-      auto expected = getRequiredBoolAttr(func, kExpectSemanticsEqualAttr);
-      auto actual = dependent_tensor::haveEqualSemantics(lhs, rhs);
+    if (func->hasAttr(kExpectRefinementsEqualAttr)) {
+      auto expected = getRequiredBoolAttr(func, kExpectRefinementsEqualAttr);
+      auto actual = dependent_tensor::haveEqualRefinements(lhs, rhs);
       if (failed(expected) || failed(actual))
         return signalPassFailure();
       if (*expected != *actual) {
-        func.emitOpError() << "expected semantic equality to be "
+        func.emitOpError() << "expected refinement equality to be "
                            << (*expected ? "true" : "false");
         return signalPassFailure();
       }
@@ -106,7 +106,7 @@ struct TestDependentTensorEqualityPass
       auto pair = getDimPair(func);
       if (failed(expected) || failed(pair))
         return signalPassFailure();
-      auto actual = dependent_tensor::haveEqualDimSemantics(
+      auto actual = dependent_tensor::haveEqualDimRefinements(
           lhs, static_cast<unsigned>((*pair)[0]), rhs,
           static_cast<unsigned>((*pair)[1]));
       if (failed(actual))
@@ -529,7 +529,7 @@ struct TestDependentTensorReplaceOpUsesPass
         replaceUsesOfWithIncludingDependentTensorProperties(
             &op, makeOps.front().getResult(), makeOps[1].getResult());
       for (dependent_tensor::InsertOp insertOp : insertOps)
-        if (failed(dependent_tensor::refreshDependentTensorForwardingSemantics(
+        if (failed(dependent_tensor::refreshDependentTensorForwardingRefinement(
                 insertOp)))
           return signalPassFailure();
       return;
@@ -1072,14 +1072,14 @@ struct TestDependentTensorEraseLiveEntryBlockPass
   }
 };
 
-struct TestDependentTensorCorruptSemanticsPass
-    : public PassWrapper<TestDependentTensorCorruptSemanticsPass,
+struct TestDependentTensorCorruptRefinementsPass
+    : public PassWrapper<TestDependentTensorCorruptRefinementsPass,
                          OperationPass<ModuleOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(
-      TestDependentTensorCorruptSemanticsPass)
+      TestDependentTensorCorruptRefinementsPass)
 
   StringRef getArgument() const final {
-    return "test-dependent-tensor-corrupt-semantics";
+    return "test-dependent-tensor-corrupt-refinements";
   }
   StringRef getDescription() const final {
     return "Inject invalid dependent tensor metadata for verifier tests";
@@ -1120,7 +1120,7 @@ struct TestDependentTensorCorruptSemanticsPass
 
   static void corruptDominance(ModuleOp module) {
     auto func = module.lookupSymbol<func::FuncOp>(
-        "semantic_bad_dominance_property_owner");
+        "refinement_bad_dominance_property_owner");
     if (!func)
       return;
     dependent_tensor::MakeOp makeOp = findFirstMake(func);
@@ -1172,7 +1172,7 @@ struct TestDependentTensorCorruptSemanticsPass
 
   static void corruptCycleLikeDimension(ModuleOp module) {
     auto func =
-        module.lookupSymbol<func::FuncOp>("semantic_cycle_like_dimension");
+        module.lookupSymbol<func::FuncOp>("refinement_cycle_like_dimension");
     if (!func)
       return;
     dependent_tensor::MakeOp makeOp = findFirstMake(func);
@@ -1190,9 +1190,9 @@ struct TestDependentTensorCorruptSemanticsPass
 
   static void corruptIsolatedCapture(ModuleOp module) {
     auto source =
-        module.lookupSymbol<func::FuncOp>("semantic_isolated_capture_source");
+        module.lookupSymbol<func::FuncOp>("refinement_isolated_capture_source");
     auto victim =
-        module.lookupSymbol<func::FuncOp>("semantic_isolated_capture_victim");
+        module.lookupSymbol<func::FuncOp>("refinement_isolated_capture_victim");
     if (!source || !victim || source.getNumArguments() == 0)
       return;
     dependent_tensor::MakeOp makeOp = findFirstMake(victim);
@@ -1203,22 +1203,22 @@ struct TestDependentTensorCorruptSemanticsPass
 
   static void corruptFuncBoundaryIsolatedCapture(ModuleOp module) {
     auto source = module.lookupSymbol<func::FuncOp>(
-        "semantic_func_boundary_isolated_capture_source");
+        "refinement_func_boundary_isolated_capture_source");
     auto victim = module.lookupSymbol<func::FuncOp>(
-        "semantic_func_boundary_isolated_capture_victim");
+        "refinement_func_boundary_isolated_capture_victim");
     if (!source || !victim || source.getNumArguments() == 0)
       return;
 
-    auto &semantics = victim.getProperties().dependentTensorArgSemantics;
-    if (semantics.empty() || semantics.front().dimValues.empty())
+    auto &refinements = victim.getProperties().dependentTensorArgRefinements;
+    if (refinements.empty() || refinements.front().dimValues.empty())
       return;
-    semantics.front().dimValues.front().set(source.getArgument(0));
+    refinements.front().dimValues.front().set(source.getArgument(0));
     reattachPropertyOperands(victim);
   }
 
   static void corruptScfForBoundaryDominance(ModuleOp module) {
     auto func =
-        module.lookupSymbol<func::FuncOp>("semantic_bad_scf_for_body_dim");
+        module.lookupSymbol<func::FuncOp>("refinement_bad_scf_for_body_dim");
     if (!func)
       return;
     scf::ForOp forOp;
@@ -1265,7 +1265,7 @@ struct TestDependentTensorCorruptGenericPropertyUsePass
     if (!func)
       return;
     dependent_tensor::MakeOp makeOp =
-        TestDependentTensorCorruptSemanticsPass::findFirstMake(func);
+        TestDependentTensorCorruptRefinementsPass::findFirstMake(func);
     if (!makeOp)
       return;
 
@@ -1275,8 +1275,8 @@ struct TestDependentTensorCorruptGenericPropertyUsePass
         if (result.getType().isIndex())
           lateIndex = result;
     if (lateIndex)
-      TestDependentTensorCorruptSemanticsPass::setFirstPropertyValue(makeOp,
-                                                                     lateIndex);
+      TestDependentTensorCorruptRefinementsPass::setFirstPropertyValue(
+          makeOp, lateIndex);
   }
 
   static void corruptIsolatedCapture(ModuleOp module) {
@@ -1287,10 +1287,10 @@ struct TestDependentTensorCorruptGenericPropertyUsePass
     if (!source || !victim || source.getNumArguments() == 0)
       return;
     dependent_tensor::MakeOp makeOp =
-        TestDependentTensorCorruptSemanticsPass::findFirstMake(victim);
+        TestDependentTensorCorruptRefinementsPass::findFirstMake(victim);
     if (!makeOp)
       return;
-    TestDependentTensorCorruptSemanticsPass::setFirstPropertyValue(
+    TestDependentTensorCorruptRefinementsPass::setFirstPropertyValue(
         makeOp, source.getArgument(0));
   }
 };
@@ -1360,7 +1360,7 @@ void registerDependentTensorTestPasses() {
   PassRegistration<TestDependentTensorCheckPropertyUsesPass>();
   PassRegistration<TestDependentTensorDceLocalDimsPass>();
   PassRegistration<TestDependentTensorEraseLiveEntryBlockPass>();
-  PassRegistration<TestDependentTensorCorruptSemanticsPass>();
+  PassRegistration<TestDependentTensorCorruptRefinementsPass>();
   PassRegistration<TestDependentTensorCorruptGenericPropertyUsePass>();
   PassRegistration<TestDependentTensorCorruptPropertyOperandAttachmentPass>();
 }

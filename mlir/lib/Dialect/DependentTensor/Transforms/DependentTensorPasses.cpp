@@ -16,7 +16,7 @@
 
 namespace mlir {
 namespace dependent_tensor {
-#define GEN_PASS_DEF_VERIFYDEPENDENTTENSORSEMANTICSPASS
+#define GEN_PASS_DEF_VERIFYDEPENDENTTENSORREFINEMENTSPASS
 #include "mlir/Dialect/DependentTensor/Transforms/Passes.h.inc"
 } // namespace dependent_tensor
 } // namespace mlir
@@ -25,13 +25,13 @@ using namespace mlir;
 using namespace mlir::dependent_tensor;
 
 namespace {
-static FailureOr<TensorValueSemantics>
+static FailureOr<TensorValueRefinement>
 buildInfoFromStored(RankedTensorType type,
-                    const DependentTensorValueSemantics &stored) {
+                    const DependentTensorValueRefinement &stored) {
   if (stored.rank != type.getRank() ||
       stored.dimValues.size() != static_cast<size_t>(type.getRank()))
     return failure();
-  TensorValueSemantics info{type, {}};
+  TensorValueRefinement info{type, {}};
   info.dimValues.reserve(stored.dimValues.size());
   for (Value dimValue : stored.getDimValues()) {
     if (!dimValue || !dimValue.getType().isIndex())
@@ -42,18 +42,18 @@ buildInfoFromStored(RankedTensorType type,
 }
 
 static LogicalResult
-verifyStoredTensorSemantics(Operation *owner, StringRef kind, Type type,
-                            const DependentTensorValueSemantics &stored,
-                            unsigned expectedIndex, DominanceInfo &dominance,
-                            Operation *dominanceUseSite = nullptr,
-                            func::FuncOp funcBoundaryOwner = nullptr) {
+verifyStoredTensorRefinement(Operation *owner, StringRef kind, Type type,
+                             const DependentTensorValueRefinement &stored,
+                             unsigned expectedIndex, DominanceInfo &dominance,
+                             Operation *dominanceUseSite = nullptr,
+                             func::FuncOp funcBoundaryOwner = nullptr) {
   auto rankedType = dyn_cast<RankedTensorType>(type);
   if (!rankedType)
     return owner->emitOpError() << "requires ranked tensor type for dependent "
-                                << kind << " semantics";
+                                << kind << " refinements";
   if (stored.valueIndex != expectedIndex)
     return owner->emitOpError()
-           << "has dependent " << kind << " semantics for wrong value index";
+           << "has dependent " << kind << " refinements for wrong value index";
   if (stored.rank != rankedType.getRank())
     return owner->emitOpError()
            << "requires dependent " << kind << " rank to match tensor rank";
@@ -93,10 +93,10 @@ verifyStoredTensorSemantics(Operation *owner, StringRef kind, Type type,
   return success();
 }
 
-static const DependentTensorValueSemantics *
-findStoredSemantics(ArrayRef<DependentTensorValueSemantics> semantics,
-                    unsigned valueIndex) {
-  for (const DependentTensorValueSemantics &candidate : semantics)
+static const DependentTensorValueRefinement *
+findStoredRefinement(ArrayRef<DependentTensorValueRefinement> refinements,
+                     unsigned valueIndex) {
+  for (const DependentTensorValueRefinement &candidate : refinements)
     if (candidate.valueIndex == valueIndex)
       return &candidate;
   return nullptr;
@@ -104,29 +104,30 @@ findStoredSemantics(ArrayRef<DependentTensorValueSemantics> semantics,
 
 static LogicalResult verifyFuncBoundaryProperties(func::FuncOp func,
                                                   DominanceInfo &dominance) {
-  llvm::SmallDenseSet<unsigned> seenArgSemantics;
-  for (const DependentTensorValueSemantics &stored :
-       func.getProperties().dependentTensorArgSemantics) {
-    if (!seenArgSemantics.insert(stored.valueIndex).second)
-      return func.emitOpError() << "has duplicate dependent argument semantics";
+  llvm::SmallDenseSet<unsigned> seenArgRefinements;
+  for (const DependentTensorValueRefinement &stored :
+       func.getProperties().dependentTensorArgRefinements) {
+    if (!seenArgRefinements.insert(stored.valueIndex).second)
+      return func.emitOpError()
+             << "has duplicate dependent argument refinements";
     if (stored.valueIndex >= func.getNumArguments())
       return func.emitOpError()
-             << "has dependent argument semantics out of range";
-    if (failed(verifyStoredTensorSemantics(
+             << "has dependent argument refinements out of range";
+    if (failed(verifyStoredTensorRefinement(
             func, "argument", func.getArgument(stored.valueIndex).getType(),
             stored, stored.valueIndex, dominance, /*dominanceUseSite=*/nullptr,
             func)))
       return failure();
   }
-  llvm::SmallDenseSet<unsigned> seenResultSemantics;
-  for (const DependentTensorValueSemantics &stored :
-       func.getProperties().dependentTensorResultSemantics) {
-    if (!seenResultSemantics.insert(stored.valueIndex).second)
-      return func.emitOpError() << "has duplicate dependent result semantics";
+  llvm::SmallDenseSet<unsigned> seenResultRefinements;
+  for (const DependentTensorValueRefinement &stored :
+       func.getProperties().dependentTensorResultRefinements) {
+    if (!seenResultRefinements.insert(stored.valueIndex).second)
+      return func.emitOpError() << "has duplicate dependent result refinements";
     if (stored.valueIndex >= func.getNumResults())
       return func.emitOpError()
-             << "has dependent result semantics out of range";
-    if (failed(verifyStoredTensorSemantics(
+             << "has dependent result refinements out of range";
+    if (failed(verifyStoredTensorRefinement(
             func, "result", func.getResultTypes()[stored.valueIndex], stored,
             stored.valueIndex, dominance, /*dominanceUseSite=*/nullptr, func)))
       return failure();
@@ -143,25 +144,25 @@ static LogicalResult verifyInterfaceProperties(Operation *op,
     return success();
 
   for (OpResult result : op->getResults()) {
-    FailureOr<DependentTensorValueSemantics> stored =
-        iface.getDependentTensorResultSemantics(result.getResultNumber());
+    FailureOr<DependentTensorValueRefinement> stored =
+        iface.getDependentTensorResultRefinement(result.getResultNumber());
     if (failed(stored))
       continue;
-    if (failed(verifyStoredTensorSemantics(op, "result", result.getType(),
-                                           *stored, result.getResultNumber(),
-                                           dominance)))
+    if (failed(verifyStoredTensorRefinement(op, "result", result.getType(),
+                                            *stored, result.getResultNumber(),
+                                            dominance)))
       return failure();
   }
 
   for (auto [regionNumber, region] : llvm::enumerate(op->getRegions())) {
     for (auto [blockNumber, block] : llvm::enumerate(region)) {
       for (BlockArgument arg : block.getArguments()) {
-        FailureOr<DependentTensorValueSemantics> stored =
-            iface.getDependentTensorBlockArgumentSemantics(
+        FailureOr<DependentTensorValueRefinement> stored =
+            iface.getDependentTensorBlockArgumentRefinement(
                 regionNumber, blockNumber, arg.getArgNumber());
         if (failed(stored))
           continue;
-        if (failed(verifyStoredTensorSemantics(
+        if (failed(verifyStoredTensorRefinement(
                 op, "block argument", arg.getType(), *stored,
                 arg.getArgNumber(), dominance, op)))
           return failure();
@@ -171,16 +172,16 @@ static LogicalResult verifyInterfaceProperties(Operation *op,
   return success();
 }
 
-static LogicalResult verifyReturnSemantics(func::FuncOp func,
-                                           func::ReturnOp ret) {
+static LogicalResult verifyReturnRefinements(func::FuncOp func,
+                                             func::ReturnOp ret) {
   for (auto [i, operand] : llvm::enumerate(ret.getOperands())) {
-    const DependentTensorValueSemantics *stored = findStoredSemantics(
-        func.getProperties().dependentTensorResultSemantics, i);
-    auto actual = getValueSemantics(operand);
+    const DependentTensorValueRefinement *stored = findStoredRefinement(
+        func.getProperties().dependentTensorResultRefinements, i);
+    auto actual = getValueRefinement(operand);
     if (!stored) {
       if (succeeded(actual))
         return ret.emitOpError()
-               << "returned value carries dependent_tensor semantics not "
+               << "returned value carries dependent_tensor refinements not "
                   "declared in function result properties";
       continue;
     }
@@ -190,15 +191,15 @@ static LogicalResult verifyReturnSemantics(func::FuncOp func,
     auto expected = buildInfoFromStored(rankedResultType, *stored);
     if (failed(actual) || failed(expected))
       return ret.emitOpError()
-             << "failed to resolve dependent_tensor result semantics";
-    if (!haveEqualSemantics(*actual, *expected))
+             << "failed to resolve dependent_tensor result refinements";
+    if (!haveEqualRefinements(*actual, *expected))
       return ret.emitOpError() << "returned value does not match function "
                                   "result dependency metadata";
   }
   return success();
 }
 
-static LogicalResult verifyCallSemantics(func::CallOp call) {
+static LogicalResult verifyCallRefinements(func::CallOp call) {
   auto callee = SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(
       call, call.getCalleeAttr());
   if (!callee)
@@ -206,14 +207,15 @@ static LogicalResult verifyCallSemantics(func::CallOp call) {
         "does not reference a valid callee for dependent_tensor verification");
 
   for (auto [i, operand] : llvm::enumerate(call.getOperands())) {
-    const DependentTensorValueSemantics *stored = findStoredSemantics(
-        callee.getProperties().dependentTensorArgSemantics, i);
-    auto actual = getValueSemantics(operand);
+    const DependentTensorValueRefinement *stored = findStoredRefinement(
+        callee.getProperties().dependentTensorArgRefinements, i);
+    auto actual = getValueRefinement(operand);
     if (!stored) {
       if (succeeded(actual))
-        return call.emitOpError() << "operand #" << i
-                                  << " carries dependent_tensor semantics not "
-                                     "declared by the callee";
+        return call.emitOpError()
+               << "operand #" << i
+               << " carries dependent_tensor refinements not "
+                  "declared by the callee";
       continue;
     }
 
@@ -227,85 +229,85 @@ static LogicalResult verifyCallSemantics(func::CallOp call) {
           arg.getOwner() != &callee.getBody().front() ||
           arg.getArgNumber() >= call.getNumOperands())
         return call.emitOpError() << "failed to map callee dependent_tensor "
-                                     "semantics for operand #"
+                                     "refinements for operand #"
                                   << i;
       mappedDims.push_back(call.getOperand(arg.getArgNumber()));
     }
-    DependentTensorValueSemantics mapped = *stored;
+    DependentTensorValueRefinement mapped = *stored;
     mapped.assignDimValues(mappedDims);
     auto expected = buildInfoFromStored(rankedArgType, mapped);
     if (failed(actual) || failed(expected))
       return call.emitOpError()
-             << "failed to resolve dependent_tensor semantics for operand #"
+             << "failed to resolve dependent_tensor refinements for operand #"
              << i;
-    if (!haveEqualSemantics(*actual, *expected))
+    if (!haveEqualRefinements(*actual, *expected))
       return call.emitOpError() << "operand #" << i
                                 << " does not match callee dependency metadata";
   }
   for (OpResult result : call.getResults()) {
-    const DependentTensorValueSemantics *stored = findStoredSemantics(
-        callee.getProperties().dependentTensorResultSemantics,
+    const DependentTensorValueRefinement *stored = findStoredRefinement(
+        callee.getProperties().dependentTensorResultRefinements,
         result.getResultNumber());
     if (!stored)
       continue;
-    if (failed(getValueSemantics(result)))
+    if (failed(getValueRefinement(result)))
       return call.emitOpError()
-             << "failed to resolve dependent_tensor semantics for result #"
+             << "failed to resolve dependent_tensor refinements for result #"
              << result.getResultNumber();
   }
   return success();
 }
 
-static LogicalResult verifyScfForSemantics(scf::ForOp forOp) {
+static LogicalResult verifyScfForRefinements(scf::ForOp forOp) {
   auto yield = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
   for (OpResult result : forOp.getResults()) {
-    auto resultInfo = getValueSemantics(result);
+    auto resultInfo = getValueRefinement(result);
     if (failed(resultInfo))
       continue;
     unsigned index = result.getResultNumber();
-    auto initInfo = getValueSemantics(forOp.getInitArgs()[index]);
-    auto iterInfo = getValueSemantics(forOp.getRegionIterArg(index));
-    auto yieldInfo = getValueSemantics(yield.getOperand(index));
+    auto initInfo = getValueRefinement(forOp.getInitArgs()[index]);
+    auto iterInfo = getValueRefinement(forOp.getRegionIterArg(index));
+    auto yieldInfo = getValueRefinement(yield.getOperand(index));
     if (failed(initInfo) || failed(iterInfo) || failed(yieldInfo))
       return forOp.emitOpError()
-             << "failed to resolve loop-carried dependent_tensor semantics";
-    if (!haveEqualSemantics(*resultInfo, *initInfo) ||
-        !haveEqualSemantics(*resultInfo, *iterInfo) ||
-        !haveEqualSemantics(*resultInfo, *yieldInfo))
+             << "failed to resolve loop-carried dependent_tensor refinements";
+    if (!haveEqualRefinements(*resultInfo, *initInfo) ||
+        !haveEqualRefinements(*resultInfo, *iterInfo) ||
+        !haveEqualRefinements(*resultInfo, *yieldInfo))
       return forOp.emitOpError()
-             << "loop-carried dependent_tensor semantics do not match";
+             << "loop-carried dependent_tensor refinements do not match";
   }
   return success();
 }
 
-static LogicalResult verifyAffineForSemantics(affine::AffineForOp forOp) {
+static LogicalResult verifyAffineForRefinements(affine::AffineForOp forOp) {
   auto yield = cast<affine::AffineYieldOp>(forOp.getBody()->getTerminator());
   for (OpResult result : forOp.getResults()) {
-    auto resultInfo = getValueSemantics(result);
+    auto resultInfo = getValueRefinement(result);
     if (failed(resultInfo))
       continue;
     unsigned index = result.getResultNumber();
-    auto initInfo = getValueSemantics(forOp.getInits()[index]);
-    auto iterInfo = getValueSemantics(forOp.getRegionIterArgs()[index]);
-    auto yieldInfo = getValueSemantics(yield.getOperand(index));
+    auto initInfo = getValueRefinement(forOp.getInits()[index]);
+    auto iterInfo = getValueRefinement(forOp.getRegionIterArgs()[index]);
+    auto yieldInfo = getValueRefinement(yield.getOperand(index));
     if (failed(initInfo) || failed(iterInfo) || failed(yieldInfo))
       return forOp.emitOpError()
-             << "failed to resolve loop-carried dependent_tensor semantics";
-    if (!haveEqualSemantics(*resultInfo, *initInfo) ||
-        !haveEqualSemantics(*resultInfo, *iterInfo) ||
-        !haveEqualSemantics(*resultInfo, *yieldInfo))
+             << "failed to resolve loop-carried dependent_tensor refinements";
+    if (!haveEqualRefinements(*resultInfo, *initInfo) ||
+        !haveEqualRefinements(*resultInfo, *iterInfo) ||
+        !haveEqualRefinements(*resultInfo, *yieldInfo))
       return forOp.emitOpError()
-             << "loop-carried dependent_tensor semantics do not match";
+             << "loop-carried dependent_tensor refinements do not match";
   }
   return success();
 }
 
-struct VerifyDependentTensorSemanticsPass
-    : public dependent_tensor::impl::VerifyDependentTensorSemanticsPassBase<
-          VerifyDependentTensorSemanticsPass> {
-  using VerifyDependentTensorSemanticsPassBase<
-      VerifyDependentTensorSemanticsPass>::
-      VerifyDependentTensorSemanticsPassBase;
+struct VerifyDependentTensorRefinementsPass
+    : public dependent_tensor::impl::VerifyDependentTensorRefinementsPassBase<
+          VerifyDependentTensorRefinementsPass> {
+  using VerifyDependentTensorRefinementsPassBase<
+      VerifyDependentTensorRefinementsPass>::
+      VerifyDependentTensorRefinementsPassBase;
 
   void runOnOperation() override {
     ModuleOp module = getOperation();
@@ -322,12 +324,12 @@ struct VerifyDependentTensorSemanticsPass
       if (failed(verifyFuncBoundaryProperties(func, dominance)))
         return signalPassFailure();
       for (func::ReturnOp ret : func.getOps<func::ReturnOp>())
-        if (failed(verifyReturnSemantics(func, ret)))
+        if (failed(verifyReturnRefinements(func, ret)))
           return signalPassFailure();
     }
 
     WalkResult callWalk = module.walk([&](func::CallOp call) {
-      if (failed(verifyCallSemantics(call)))
+      if (failed(verifyCallRefinements(call)))
         return WalkResult::interrupt();
       return WalkResult::advance();
     });
@@ -335,7 +337,7 @@ struct VerifyDependentTensorSemanticsPass
       return signalPassFailure();
 
     WalkResult scfWalk = module.walk([&](scf::ForOp forOp) {
-      if (failed(verifyScfForSemantics(forOp)))
+      if (failed(verifyScfForRefinements(forOp)))
         return WalkResult::interrupt();
       return WalkResult::advance();
     });
@@ -343,7 +345,7 @@ struct VerifyDependentTensorSemanticsPass
       return signalPassFailure();
 
     WalkResult affineWalk = module.walk([&](affine::AffineForOp forOp) {
-      if (failed(verifyAffineForSemantics(forOp)))
+      if (failed(verifyAffineForRefinements(forOp)))
         return WalkResult::interrupt();
       return WalkResult::advance();
     });

@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -split-input-file -verify-dependent-tensor-semantics -verify-diagnostics | FileCheck %s
+// RUN: mlir-opt %s -split-input-file -verify-dependent-tensor-refinements -verify-diagnostics | FileCheck %s
 
 func.func @basic_primitives(%m : index, %n : index, %i : index, %j : index,
                             %v : f32) -> tensor<?x?xf32>
@@ -94,7 +94,7 @@ func.func @make_element_type_mismatch(%m : index) {
 // -----
 
 func.func @extract_requires_dependent_source(%t : tensor<?xf32>, %i : index) {
-  // expected-error@+1 {{'dependent_tensor.extract' op requires source with dependent_tensor semantics}}
+  // expected-error@+1 {{'dependent_tensor.extract' op requires source with dependent_tensor refinements}}
   %v = dependent_tensor.extract %t[%i] : f32
   return
 }
@@ -110,7 +110,7 @@ func.func @extract_refinement_rejected(%m : index, %i : index) {
 
 // -----
 
-func.func @insert_inherits_destination_semantics(%m : index, %n : index,
+func.func @insert_inherits_destination_refinements(%m : index, %n : index,
                                                 %i : index, %j : index,
                                                 %v : f32) -> tensor<?x?xf32>
     #types[] -> #tensor<[%m, %n], f32> {
@@ -123,7 +123,7 @@ func.func @insert_inherits_destination_semantics(%m : index, %n : index,
 func.func @insert_refinement_dim_mismatch(%m : index, %n : index,
                                            %i : index, %j : index, %v : f32) {
   %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+1 {{stored result semantics must match destination semantics}}
+  // expected-error@+1 {{stored result refinements must match destination refinements}}
   %r = dependent_tensor.insert %v into %t[%i, %j] #tensor<[%n, %m], f32> : f32 into tensor<?x?xf32>
   return
 }
@@ -163,7 +163,7 @@ func.func @insert_refinement_element_type_mismatch(%m : index, %n : index,
 func.func @dim_assertion_mismatch(%m : index, %n : index) {
   %c0 = arith.constant 0 : index
   %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+1 {{#dim assertion must match source semantics}}
+  // expected-error@+1 {{#dim assertion must match source refinements}}
   %d = dependent_tensor.dim %t, %c0, #dim %n : tensor<?x?xf32>
   return
 }
@@ -212,7 +212,7 @@ func.func @loop_boundary_dim_mismatch(%m : index, %n : index, %v : f32) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %init = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+3 {{dependent tensor loop boundary must match init semantics}}
+  // expected-error@+3 {{dependent tensor loop boundary must match init refinements}}
   %r = affine.for %i = 0 to %m iter_args(%arg = %init)
       -> (tensor<?x?xf32>)
       #types[%arg : #tensor<[%n, %m], f32>] -> #tensor<[%m, %n], f32> {
@@ -227,7 +227,7 @@ func.func @loop_boundary_yield_mismatch(%m : index, %n : index, %v : f32) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %init = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+1 {{'scf.for' op loop-carried dependent_tensor semantics do not match}}
+  // expected-error@+1 {{'scf.for' op loop-carried dependent_tensor refinements do not match}}
   %r = scf.for %i = %c0 to %m step %c1 iter_args(%arg = %init)
       -> (tensor<?x?xf32>)
       #types[%arg : #tensor<[%m, %n], f32>] -> #tensor<[%m, %n], f32> {
@@ -272,7 +272,7 @@ func.func @loop_result_boundary_dim_mismatch(%m : index, %n : index) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %init = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+3 {{dependent tensor loop result boundary must match init semantics}}
+  // expected-error@+3 {{dependent tensor loop result boundary must match init refinements}}
   %r = affine.for %i = 0 to %m iter_args(%arg = %init)
       -> (tensor<?x?xf32>)
       #types[%arg : #tensor<[%m, %n], f32>] -> #tensor<[%n, %m], f32> {

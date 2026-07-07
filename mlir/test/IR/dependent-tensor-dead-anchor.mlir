@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -verify-dependent-tensor-semantics | FileCheck %s
+// RUN: mlir-opt %s -verify-dependent-tensor-refinements | FileCheck %s
 
 func.func @dead_anchor(%x : index) {
   %t = dependent_tensor.make () #tensor<[%x], f32> : tensor<?xf32>

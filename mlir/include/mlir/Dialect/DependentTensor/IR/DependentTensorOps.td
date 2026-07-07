@@ -22,17 +22,17 @@ def MakeOp : DependentTensor_Op<"make", [
     Pure, DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
       ["walkPropertySSAUses"]>,
     DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
-      ["getDependentTensorResultSemantics",
+      ["getDependentTensorResultRefinement",
        "walkDependentTensorPropertyUses"]>]> {
   let summary = "construct a property-native dependent tensor value";
   let description = [{
-    `dependent_tensor.make` constructs a tensor value whose dependency semantics
+    `dependent_tensor.make` constructs a tensor value whose dependency refinements
     are carried by the defining operation. Each result dimension is represented
     by a dependent SSA value stored in operation properties.
   }];
 
   let arguments = (ins
-    DependentTensorValueSemanticsProp:$result_semantics
+    DependentTensorValueRefinementProp:$result_refinement
   );
   let results = (outs AnyRankedTensor:$result);
   let builders = [
@@ -51,14 +51,14 @@ def DimOp : DependentTensor_Op<"dim", [
   let summary = "query a dependent tensor dimension";
   let description = [{
     `dependent_tensor.dim` mirrors `tensor.dim` for tensors with dependent
-    dimension semantics. The result is an index value, while the owning tensor
+    dimension refinements. The result is an index value, while the owning tensor
     value keeps its dependent dimension SSA values in operation properties.
   }];
 
   let arguments = (ins
     AnyRankedTensor:$source,
     Index:$dimension,
-    DependentTensorDimValueSemanticsProp:$dim_value_semantics
+    DependentTensorDimValueRefinementProp:$dim_value_refinement
   );
   let results = (outs Index:$result);
   let hasCustomAssemblyFormat = 1;
@@ -88,20 +88,20 @@ def InsertOp : DependentTensor_Op<"insert", [
     DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
       ["walkPropertySSAUses"]>,
     DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
-      ["getDependentTensorResultSemantics",
+      ["getDependentTensorResultRefinement",
        "walkDependentTensorPropertyUses"]>]> {
   let summary = "insert an element into a dependent tensor";
   let description = [{
-    `dependent_tensor.insert` mirrors `tensor.insert`. Its result semantics are
+    `dependent_tensor.insert` mirrors `tensor.insert`. Its result refinements are
     stored as dependent tensor property SSA uses and verified to match the
-    destination tensor semantics.
+    destination tensor refinements.
   }];
 
   let arguments = (ins
     AnyType:$scalar,
     AnyRankedTensor:$dest,
     Variadic<Index>:$indices,
-    DependentTensorValueSemanticsProp:$result_semantics
+    DependentTensorValueRefinementProp:$result_refinement
   );
   let results = (outs AnyRankedTensor:$result);
   let builders = [

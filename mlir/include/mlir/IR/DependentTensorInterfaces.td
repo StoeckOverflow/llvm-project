@@ -12,9 +12,9 @@
 include "mlir/IR/OpBase.td"
 include "mlir/IR/PropertySSAUseInterfaces.td"
 
-def DependentTensorValueSemanticsProp
-    : Property<"::mlir::DependentTensorValueSemantics",
-               "dependent tensor value semantics"> {
+def DependentTensorValueRefinementProp
+    : Property<"::mlir::DependentTensorValueRefinement",
+               "dependent tensor value refinements"> {
   // SSA-valued properties are contextual IR state. They are not serialized
   // through attributes or bytecode; custom assembly handles parsing and printing
   // of the embedded SSA references.
@@ -35,8 +35,8 @@ def DependentTensorValueSemanticsProp
   let hashProperty = "::mlir::hash_value($_storage)";
 }
 
-def DependentTensorDimValueSemanticsProp
-    : Property<"::mlir::DependentTensorDimValueSemantics",
+def DependentTensorDimValueRefinementProp
+    : Property<"::mlir::DependentTensorDimValueRefinement",
                "dependent tensor dimension value assertion"> {
   // SSA-valued properties are contextual IR state. They are not serialized
   // through attributes or bytecode; custom assembly handles parsing and printing
@@ -62,17 +62,17 @@ def DependentTensorPropertyOpInterface
     : OpInterface<"DependentTensorPropertyOpInterface"> {
   let cppNamespace = "::mlir";
   let methods = [
-    InterfaceMethod<"Get dependent tensor semantics for an op result.",
-      "::mlir::FailureOr<::mlir::DependentTensorValueSemantics>",
-      "getDependentTensorResultSemantics",
+    InterfaceMethod<"Get dependent tensor refinements for an op result.",
+      "::mlir::FailureOr<::mlir::DependentTensorValueRefinement>",
+      "getDependentTensorResultRefinement",
       (ins "unsigned":$resultNumber), [{}],
       /*defaultImplementation=*/[{
         return ::mlir::failure();
       }]
     >,
-    InterfaceMethod<"Get dependent tensor semantics for a region block argument.",
-      "::mlir::FailureOr<::mlir::DependentTensorValueSemantics>",
-      "getDependentTensorBlockArgumentSemantics",
+    InterfaceMethod<"Get dependent tensor refinements for a region block argument.",
+      "::mlir::FailureOr<::mlir::DependentTensorValueRefinement>",
+      "getDependentTensorBlockArgumentRefinement",
       (ins "unsigned":$regionNumber, "unsigned":$blockNumber,
            "unsigned":$argumentNumber), [{}],
       /*defaultImplementation=*/[{

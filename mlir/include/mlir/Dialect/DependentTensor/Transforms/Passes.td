@@ -11,8 +11,8 @@
 
 include "mlir/Pass/PassBase.td"
 
-def VerifyDependentTensorSemanticsPass
-    : Pass<"verify-dependent-tensor-semantics", "ModuleOp"> {
+def VerifyDependentTensorRefinementsPass
+    : Pass<"verify-dependent-tensor-refinements", "ModuleOp"> {
   let summary = "Verify dependent_tensor metadata across functions and calls";
 }
 

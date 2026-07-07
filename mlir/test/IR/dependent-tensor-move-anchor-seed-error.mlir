@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -verify-dependent-tensor-semantics | FileCheck %s
+// RUN: mlir-opt %s -verify-dependent-tensor-refinements | FileCheck %s
 
 func.func @move_anchor_seed_rejected() {
   %seed = arith.constant 1 : index

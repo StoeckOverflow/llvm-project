@@ -12,7 +12,7 @@ func.func @stale_insert_destination_refinement() {
   return
 }
 
-// STALE: stored result semantics must match destination semantics
+// STALE: stored result refinements must match destination refinements
 
 // -----
 
@@ -21,4 +21,4 @@ func.func @erase_func_boundary_live_dim_arg(%m : index, %t : tensor<?xf32>)
   return %t : tensor<?xf32>
 }
 
-// SIGERR: cannot erase function argument #0 because it is used by surviving dependent tensor argument boundary semantics
+// SIGERR: cannot erase function argument #0 because it is used by surviving dependent tensor argument boundary refinements
