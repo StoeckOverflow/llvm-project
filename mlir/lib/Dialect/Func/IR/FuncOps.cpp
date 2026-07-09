@@ -143,6 +143,13 @@ static ParseResult parseDependentTensorTypesBoundary(
 
   if (failed(parser.parseOptionalArrow()))
     return success();
+
+  if (resultTypes.empty()) {
+    if (parser.parseLParen() || parser.parseRParen())
+      return failure();
+    return success();
+  }
+
   auto parseResultRefinement =
       [&](unsigned resultIndex,
           SmallVectorImpl<PendingDependentTensorValueRefinement> &refinements)
@@ -546,7 +553,10 @@ void FuncOp::print(OpAsmPrinter &p) {
                                         type.getElementType());
     });
     p << "]";
-    if (!resultRefinements.empty()) {
+    if (resultRefinements.empty()) {
+      if (getNumResults() == 0)
+        p << " -> ()";
+    } else {
       p << " -> ";
       auto printResultRefinement = [&](const auto &refinement) {
         auto type = cast<RankedTensorType>(
