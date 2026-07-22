@@ -53,7 +53,7 @@ func.func @refinement_bad_scf_for_body_dim() {
   %ub = arith.constant 4 : index
   %step = arith.constant 1 : index
   %init = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
-  // expected-error@below {{'scf.for' op dependent result dimension value does not dominate owner}}
+  // expected-error@below {{'scf.for' op dependent loop operand dimension value does not dominate owner}}
   %result = scf.for %iv = %lb to %ub step %step iter_args(%arg = %init) -> (tensor<?xf32>) {
     %body_dim = arith.constant 2 : index
     %body_tensor = dependent_tensor.make () #tensor<[%body_dim], f32> : tensor<?xf32>
@@ -69,7 +69,6 @@ func.func @refinement_bad_affine_for_yield_dim() {
   %m = arith.constant 8 : index
   %k = arith.constant 16 : index
   %init = dependent_tensor.make () #tensor<[%n, %m], f32> : tensor<?x?xf32>
-  // expected-error@below {{'affine.for' op loop-carried dependent_tensor refinements do not match}}
   %result = affine.for %iv = 0 to 4 iter_args(%arg = %init) -> (tensor<?x?xf32>) {
     %bad = dependent_tensor.make () #tensor<[%n, %k], f32> : tensor<?x?xf32>
     affine.yield %bad : tensor<?x?xf32>

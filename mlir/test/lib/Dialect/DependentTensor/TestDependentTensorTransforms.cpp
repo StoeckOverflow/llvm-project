@@ -1229,14 +1229,20 @@ struct TestDependentTensorCorruptRefinementsPass
     if (!forOp || forOp.getInitArgs().empty())
       return;
 
-    dependent_tensor::MakeOp bodyMake;
-    forOp.getBody()->walk([&](dependent_tensor::MakeOp op) {
-      if (!bodyMake)
-        bodyMake = op;
-    });
-    if (!bodyMake)
+    Value bodyDim;
+    for (Operation &op : *forOp.getBody()) {
+      for (Value result : op.getResults()) {
+        if (result.getType().isIndex()) {
+          bodyDim = result;
+          break;
+        }
+      }
+      if (bodyDim)
+        break;
+    }
+    if (!bodyDim)
       return;
-    forOp->setOperand(3, bodyMake.getResult());
+    setFirstPropertyValue(forOp, bodyDim);
   }
 };
 

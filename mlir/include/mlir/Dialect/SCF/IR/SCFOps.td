@@ -167,6 +167,10 @@ def ForOp : SCF_Op<"for",
        DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
         ["getDependentTensorResultRefinement",
          "getDependentTensorBlockArgumentRefinement",
+         "getDependentTensorLoopOperandTypeRef",
+         "getDependentTensorLoopResultTypeRef",
+         "getDependentTensorLoopRegionArgumentTypeRef",
+         "getDependentTensorLoopRegionYieldTypeRef",
          "walkDependentTensorPropertyUses"]>,
        SingleBlockImplicitTerminator<"scf::YieldOp">,
        RecursiveMemoryEffects]> {
@@ -273,10 +277,8 @@ def ForOp : SCF_Op<"for",
                        AnySignlessIntegerOrIndex:$step,
                        Variadic<AnyType>:$initArgs,
                        UnitAttr:$unsignedCmp,
-                       ArrayProp<DependentTensorValueRefinementProp>:
-                           $dependentTensorIterArgRefinements,
-                       ArrayProp<DependentTensorValueRefinementProp>:
-                           $dependentTensorResultRefinements);
+                       DependentTensorLoopTypeRefArrayProp:$dependentTensorLoopTypeRefs,
+                       DependentTensorLoopRegionTypeRefArrayProp:$dependentTensorLoopRegionTypeRefs);
   let results = (outs Variadic<AnyType>:$results);
   let regions = (region SizedRegion<1>:$region);
 

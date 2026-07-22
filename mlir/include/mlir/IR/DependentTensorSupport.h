@@ -1,6 +1,7 @@
 #ifndef MLIR_IR_DEPENDENTTENSORSUPPORT_H
 #define MLIR_IR_DEPENDENTTENSORSUPPORT_H
 
+#include "mlir/IR/Block.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/DependentTensorInterfaces.h"
 #include "mlir/IR/Diagnostics.h"
@@ -45,6 +46,98 @@ parseTensorSpecBody(OpAsmParser &parser,
                     SmallVectorImpl<OpAsmParser::UnresolvedOperand> &dims,
                     Type &elementType);
 void printTensorSpec(OpAsmPrinter &printer, ValueRange dims, Type elementType);
+
+struct PendingTypeRef {
+  SMLoc loc;
+  SmallVector<OpAsmParser::UnresolvedOperand, 4> dims;
+  Type elementType;
+};
+
+struct PendingLoopTypeRef {
+  unsigned iterArgIndex = 0;
+  SMLoc iterLoc;
+  PendingTypeRef input;
+  PendingTypeRef output;
+};
+
+ParseResult
+parseOptionalLoopTypeRefs(OpAsmParser &parser, StringRef keyword,
+                          ArrayRef<OpAsmParser::Argument> regionArgs,
+                          SmallVectorImpl<PendingLoopTypeRef> &pending);
+
+ParseResult resolvePendingTypeRef(OpAsmParser &parser,
+                                  const PendingTypeRef &pending, Type valueType,
+                                  StringRef kind,
+                                  DependentTensorTypeRef &typeRef);
+
+ParseResult populateLoopTypeRefsFromInits(
+    OpAsmParser &parser, TypeRange resultTypes, ValueRange initOperands,
+    Block::BlockArgListType regionIterArgs, ValueRange yieldedValues,
+    ArrayRef<PendingLoopTypeRef> pendingLoopRefs,
+    ArrayRef<PendingLoopTypeRef> pendingRegionRefs,
+    function_ref<FailureOr<DependentTensorTypeRef>(Value)> getTypeRefFromValue,
+    SmallVectorImpl<DependentTensorLoopTypeRef> &loopTypeRefs,
+    SmallVectorImpl<DependentTensorLoopRegionTypeRef> &regionTypeRefs);
+
+const DependentTensorLoopTypeRef *
+findLoopTypeRef(ArrayRef<DependentTensorLoopTypeRef> typeRefs,
+                unsigned valueIndex);
+const DependentTensorLoopRegionTypeRef *
+findLoopRegionTypeRefByArg(ArrayRef<DependentTensorLoopRegionTypeRef> typeRefs,
+                           unsigned argumentIndex);
+const DependentTensorLoopRegionTypeRef *findLoopRegionTypeRefByYield(
+    ArrayRef<DependentTensorLoopRegionTypeRef> typeRefs, unsigned yieldedIndex);
+
+void buildLoopTypeRefLookup(
+    ArrayRef<DependentTensorLoopTypeRef> typeRefs, unsigned numValues,
+    SmallVectorImpl<const DependentTensorLoopTypeRef *> &lookup);
+void buildLoopRegionTypeRefByArgLookup(
+    ArrayRef<DependentTensorLoopRegionTypeRef> typeRefs, unsigned numArguments,
+    SmallVectorImpl<const DependentTensorLoopRegionTypeRef *> &lookup);
+void buildLoopRegionTypeRefByYieldLookup(
+    ArrayRef<DependentTensorLoopRegionTypeRef> typeRefs, unsigned numYields,
+    SmallVectorImpl<const DependentTensorLoopRegionTypeRef *> &lookup);
+void buildLoopTypeRefPresence(ArrayRef<DependentTensorLoopTypeRef> typeRefs,
+                              unsigned numValues,
+                              SmallVectorImpl<bool> &presence);
+void buildLoopRegionTypeRefByArgPresence(
+    ArrayRef<DependentTensorLoopRegionTypeRef> typeRefs, unsigned numArguments,
+    SmallVectorImpl<bool> &presence);
+
+bool isValueOwnedByOperation(Value value, Operation *op);
+FailureOr<DependentTensorTypeRef> getTypeRefFromValueUnlessOwned(
+    Value value, Operation *op,
+    function_ref<FailureOr<DependentTensorTypeRef>(Value)> getTypeRefFromValue);
+
+class ScopedLoopTypeRefPopulation {
+public:
+  explicit ScopedLoopTypeRefPopulation(Operation *op);
+  ~ScopedLoopTypeRefPopulation();
+
+  bool isRecursive() const { return !inserted; }
+
+private:
+  Operation *op = nullptr;
+  bool inserted = false;
+};
+
+void inferMissingLoopTypeRefs(
+    TypeRange resultTypes, ValueRange initOperands,
+    Block::BlockArgListType regionIterArgs, ValueRange yieldedValues,
+    function_ref<FailureOr<DependentTensorTypeRef>(Value)> getTypeRefFromValue,
+    SmallVectorImpl<DependentTensorLoopTypeRef> &loopTypeRefs,
+    SmallVectorImpl<DependentTensorLoopRegionTypeRef> &regionTypeRefs);
+
+bool isTypeRefVisibleFrom(Operation *op, const DependentTensorTypeRef &typeRef);
+void printTypeRef(OpAsmPrinter &printer, const DependentTensorTypeRef &typeRef,
+                  Type elementType);
+void printLoopTypeRefs(OpAsmPrinter &printer,
+                       Block::BlockArgListType regionIterArgs,
+                       TypeRange resultTypes,
+                       ArrayRef<DependentTensorLoopTypeRef> typeRefs);
+void printLoopRegionTypeRefs(
+    Operation *op, OpAsmPrinter &printer, Block::BlockArgListType bodyArgs,
+    TypeRange resultTypes, ArrayRef<DependentTensorLoopRegionTypeRef> typeRefs);
 } // namespace dependent_tensor
 
 } // namespace mlir

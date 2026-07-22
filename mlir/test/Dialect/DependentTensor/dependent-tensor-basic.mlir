@@ -54,13 +54,15 @@ func.func @loop_boundaries(%m : index, %n : index, %v : f32) -> tensor<?x?xf32>
   %init = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
   %scf_result = scf.for %i = %c0 to %m step %c1 iter_args(%arg = %init)
       -> (tensor<?x?xf32>)
-      #types[%arg : #tensor<[%m, %n], f32>] -> #tensor<[%m, %n], f32> {
+      #types[%arg : #tensor<[%m, %n], f32> -> #tensor<[%m, %n], f32>]
+      #region_types[%arg : #tensor<[%m, %n], f32> -> #tensor<[%m, %n], f32>] {
     %updated = dependent_tensor.insert %v into %arg[%i, %c0] #tensor<[%m, %n], f32> : f32 into tensor<?x?xf32>
     scf.yield %updated : tensor<?x?xf32>
   }
   %affine_result = affine.for %j = 0 to %n iter_args(%arg = %scf_result)
       -> (tensor<?x?xf32>)
-      #types[%arg : #tensor<[%m, %n], f32>] -> #tensor<[%m, %n], f32> {
+      #types[%arg : #tensor<[%m, %n], f32> -> #tensor<[%m, %n], f32>]
+      #region_types[%arg : #tensor<[%m, %n], f32> -> #tensor<[%m, %n], f32>] {
     %updated = dependent_tensor.insert %v into %arg[%c0, %j] #tensor<[%m, %n], f32> : f32 into tensor<?x?xf32>
     affine.yield %updated : tensor<?x?xf32>
   }
@@ -69,9 +71,9 @@ func.func @loop_boundaries(%m : index, %n : index, %v : f32) -> tensor<?x?xf32>
 
 // CHECK-LABEL: func.func @loop_boundaries
 // CHECK-SAME: #types[] -> #tensor<[%{{.*}}, %{{.*}}], f32>
-// CHECK: scf.for %{{.*}} iter_args(%[[SCF_ARG:.*]] = %{{.*}}) -> (tensor<?x?xf32>) #types[%[[SCF_ARG]] : #tensor<[%{{.*}}, %{{.*}}], f32>] -> #tensor<[%{{.*}}, %{{.*}}], f32>
+// CHECK: scf.for %{{.*}} iter_args(%[[SCF_ARG:.*]] = %{{.*}}) -> (tensor<?x?xf32>) #types[%[[SCF_ARG]] : #tensor<[%{{.*}}, %{{.*}}], f32> -> #tensor<[%{{.*}}, %{{.*}}], f32>] #region_types[%[[SCF_ARG]] : #tensor<[%{{.*}}, %{{.*}}], f32> -> #tensor<[%{{.*}}, %{{.*}}], f32>]
 // CHECK: scf.yield %{{.*}} : tensor<?x?xf32>
-// CHECK: affine.for %{{.*}} iter_args(%[[AFFINE_ARG:.*]] = %{{.*}}) -> (tensor<?x?xf32>) #types[%[[AFFINE_ARG]] : #tensor<[%{{.*}}, %{{.*}}], f32>] -> #tensor<[%{{.*}}, %{{.*}}], f32>
+// CHECK: affine.for %{{.*}} iter_args(%[[AFFINE_ARG:.*]] = %{{.*}}) -> (tensor<?x?xf32>) #types[%[[AFFINE_ARG]] : #tensor<[%{{.*}}, %{{.*}}], f32> -> #tensor<[%{{.*}}, %{{.*}}], f32>] #region_types[%[[AFFINE_ARG]] : #tensor<[%{{.*}}, %{{.*}}], f32> -> #tensor<[%{{.*}}, %{{.*}}], f32>]
 // CHECK: affine.yield %{{.*}} : tensor<?x?xf32>
 // CHECK: return %{{.*}} : tensor<?x?xf32>
 
@@ -182,10 +184,11 @@ func.func @loop_boundary_rank_mismatch(%m : index, %n : index, %v : f32) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %init = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+3 {{dependent tensor loop boundary rank mismatch}}
+  // expected-error@+3 {{dependent tensor loop operand type reference rank mismatch}}
   %r = scf.for %i = %c0 to %m step %c1 iter_args(%arg = %init)
       -> (tensor<?x?xf32>)
-      #types[%arg : #tensor<[%m], f32>] -> #tensor<[%m, %n], f32> {
+      #types[%arg : #tensor<[%m], f32> -> #tensor<[%m, %n], f32>]
+      #region_types[%arg : #tensor<[%m], f32> -> #tensor<[%m, %n], f32>] {
     scf.yield %arg : tensor<?x?xf32>
   }
   return
@@ -197,10 +200,11 @@ func.func @loop_boundary_element_type_mismatch(%m : index, %n : index, %v : f32)
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %init = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+3 {{dependent tensor loop boundary element type must match result type}}
+  // expected-error@+3 {{dependent tensor loop operand type reference element type must match value type}}
   %r = scf.for %i = %c0 to %m step %c1 iter_args(%arg = %init)
       -> (tensor<?x?xf32>)
-      #types[%arg : #tensor<[%m, %n], i32>] -> #tensor<[%m, %n], f32> {
+      #types[%arg : #tensor<[%m, %n], i32> -> #tensor<[%m, %n], f32>]
+      #region_types[%arg : #tensor<[%m, %n], i32> -> #tensor<[%m, %n], f32>] {
     scf.yield %arg : tensor<?x?xf32>
   }
   return
@@ -212,10 +216,11 @@ func.func @loop_boundary_dim_mismatch(%m : index, %n : index, %v : f32) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %init = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+3 {{dependent tensor loop boundary must match init refinements}}
+  // expected-error@+1 {{loop operand type reference does not match init refinements}}
   %r = affine.for %i = 0 to %m iter_args(%arg = %init)
       -> (tensor<?x?xf32>)
-      #types[%arg : #tensor<[%n, %m], f32>] -> #tensor<[%m, %n], f32> {
+      #types[%arg : #tensor<[%n, %m], f32> -> #tensor<[%m, %n], f32>]
+      #region_types[%arg : #tensor<[%n, %m], f32> -> #tensor<[%m, %n], f32>] {
     affine.yield %arg : tensor<?x?xf32>
   }
   return
@@ -227,10 +232,11 @@ func.func @loop_boundary_yield_mismatch(%m : index, %n : index, %v : f32) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %init = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+1 {{'scf.for' op loop-carried dependent_tensor refinements do not match}}
+  // expected-error@+1 {{'scf.for' op loop region yield type reference does not match yielded refinements}}
   %r = scf.for %i = %c0 to %m step %c1 iter_args(%arg = %init)
       -> (tensor<?x?xf32>)
-      #types[%arg : #tensor<[%m, %n], f32>] -> #tensor<[%m, %n], f32> {
+      #types[%arg : #tensor<[%m, %n], f32> -> #tensor<[%m, %n], f32>]
+      #region_types[%arg : #tensor<[%m, %n], f32> -> #tensor<[%m, %n], f32>] {
     %bad = dependent_tensor.make () #tensor<[%n, %m], f32> : tensor<?x?xf32>
     scf.yield %bad : tensor<?x?xf32>
   }
@@ -242,10 +248,11 @@ func.func @loop_result_boundary_rank_mismatch(%m : index, %n : index) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %init = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+3 {{dependent tensor loop result boundary rank mismatch}}
+  // expected-error@+3 {{dependent tensor loop result type reference rank mismatch}}
   %r = scf.for %i = %c0 to %m step %c1 iter_args(%arg = %init)
       -> (tensor<?x?xf32>)
-      #types[%arg : #tensor<[%m, %n], f32>] -> #tensor<[%m], f32> {
+      #types[%arg : #tensor<[%m, %n], f32> -> #tensor<[%m], f32>]
+      #region_types[%arg : #tensor<[%m, %n], f32> -> #tensor<[%m], f32>] {
     scf.yield %arg : tensor<?x?xf32>
   }
   return
@@ -257,10 +264,11 @@ func.func @loop_result_boundary_element_type_mismatch(%m : index, %n : index) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %init = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+3 {{dependent tensor loop result boundary element type must match result type}}
+  // expected-error@+3 {{dependent tensor loop result type reference element type must match value type}}
   %r = scf.for %i = %c0 to %m step %c1 iter_args(%arg = %init)
       -> (tensor<?x?xf32>)
-      #types[%arg : #tensor<[%m, %n], f32>] -> #tensor<[%m, %n], i32> {
+      #types[%arg : #tensor<[%m, %n], f32> -> #tensor<[%m, %n], i32>]
+      #region_types[%arg : #tensor<[%m, %n], f32> -> #tensor<[%m, %n], i32>] {
     scf.yield %arg : tensor<?x?xf32>
   }
   return
@@ -272,10 +280,11 @@ func.func @loop_result_boundary_dim_mismatch(%m : index, %n : index) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %init = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
-  // expected-error@+3 {{dependent tensor loop result boundary must match init refinements}}
+  // expected-error@+1 {{loop region yield type reference does not match yielded refinements}}
   %r = affine.for %i = 0 to %m iter_args(%arg = %init)
       -> (tensor<?x?xf32>)
-      #types[%arg : #tensor<[%m, %n], f32>] -> #tensor<[%n, %m], f32> {
+      #types[%arg : #tensor<[%m, %n], f32> -> #tensor<[%n, %m], f32>]
+      #region_types[%arg : #tensor<[%m, %n], f32> -> #tensor<[%n, %m], f32>] {
     affine.yield %arg : tensor<?x?xf32>
   }
   return

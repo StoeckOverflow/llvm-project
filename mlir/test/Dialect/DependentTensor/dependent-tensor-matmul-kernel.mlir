@@ -17,10 +17,12 @@ func.func @dependent_matmul_kernel(
   %zero = arith.constant 0.0 : f32
   %C_final = scf.for %i = %c0 to %n step %c1 iter_args(%Ci = %C)
       -> (tensor<?x?xf32>)
-      #types[%Ci : #tensor<[%n, %m], f32>] -> #tensor<[%n, %m], f32> {
+      #types[%Ci : #tensor<[%n, %m], f32> -> #tensor<[%n, %m], f32>]
+      #region_types[%Ci : #tensor<[%n, %m], f32> -> #tensor<[%n, %m], f32>] {
     %C_row = scf.for %j = %c0 to %m step %c1 iter_args(%Cj = %Ci)
         -> (tensor<?x?xf32>)
-        #types[%Cj : #tensor<[%n, %m], f32>] -> #tensor<[%n, %m], f32> {
+        #types[%Cj : #tensor<[%n, %m], f32> -> #tensor<[%n, %m], f32>]
+        #region_types[%Cj : #tensor<[%n, %m], f32> -> #tensor<[%n, %m], f32>] {
       %sum = scf.for %kk = %c0 to %k step %c1 iter_args(%sum_iter = %zero)
           -> (f32) {
         %a = dependent_tensor.extract %A[%i, %kk] : f32
@@ -41,8 +43,8 @@ func.func @dependent_matmul_kernel(
 // CHECK-SAME: (%[[N:arg[0-9]+]]: index, %[[K:arg[0-9]+]]: index, %[[M:arg[0-9]+]]: index,
 // CHECK-SAME:  %[[A:arg[0-9]+]]: tensor<?x?xf32>, %[[B:arg[0-9]+]]: tensor<?x?xf32>, %[[C:arg[0-9]+]]: tensor<?x?xf32>) -> tensor<?x?xf32>
 // CHECK-SAME: #types[%[[A]] : #tensor<[%[[N]], %[[K]]], f32>, %[[B]] : #tensor<[%[[K]], %[[M]]], f32>, %[[C]] : #tensor<[%[[N]], %[[M]]], f32>] -> #tensor<[%[[N]], %[[M]]], f32>
-// CHECK: %[[C_FINAL:.*]] = scf.for %[[I:.*]] = %{{.*}} to %[[N]] step %{{.*}} iter_args(%[[CI:.*]] = %[[C]]) -> (tensor<?x?xf32>) #types[%[[CI]] : #tensor<[%[[N]], %[[M]]], f32>] -> #tensor<[%[[N]], %[[M]]], f32> {
-// CHECK:   %[[C_ROW:.*]] = scf.for %[[J:.*]] = %{{.*}} to %[[M]] step %{{.*}} iter_args(%[[CJ:.*]] = %[[CI]]) -> (tensor<?x?xf32>) #types[%[[CJ]] : #tensor<[%[[N]], %[[M]]], f32>] -> #tensor<[%[[N]], %[[M]]], f32> {
+// CHECK: %[[C_FINAL:.*]] = scf.for %[[I:.*]] = %{{.*}} to %[[N]] step %{{.*}} iter_args(%[[CI:.*]] = %[[C]]) -> (tensor<?x?xf32>) #types[%[[CI]] : #tensor<[%[[N]], %[[M]]], f32> -> #tensor<[%[[N]], %[[M]]], f32>] #region_types[%[[CI]] : #tensor<[%[[N]], %[[M]]], f32> -> #tensor<[%[[N]], %[[M]]], f32>] {
+// CHECK:   %[[C_ROW:.*]] = scf.for %[[J:.*]] = %{{.*}} to %[[M]] step %{{.*}} iter_args(%[[CJ:.*]] = %[[CI]]) -> (tensor<?x?xf32>) #types[%[[CJ]] : #tensor<[%[[N]], %[[M]]], f32> -> #tensor<[%[[N]], %[[M]]], f32>] #region_types[%[[CJ]] : #tensor<[%[[N]], %[[M]]], f32> -> #tensor<[%[[N]], %[[M]]], f32>] {
 // CHECK:     %[[SUM:.*]] = scf.for %[[KK:.*]] = %{{.*}} to %[[K]] step %{{.*}} iter_args(%[[SUM_ITER:.*]] = %{{.*}}) -> (f32) {
 // CHECK:       %[[AV:.*]] = dependent_tensor.extract %[[A]][%[[I]], %[[KK]]] : f32
 // CHECK:       %[[BV:.*]] = dependent_tensor.extract %[[B]][%[[KK]], %[[J]]] : f32
@@ -69,11 +71,13 @@ func.func @dependent_matmul_kernel_inner_yield_mismatch(
   %c1 = arith.constant 1 : index
   %C_final = scf.for %i = %c0 to %n step %c1 iter_args(%Ci = %C)
       -> (tensor<?x?xf32>)
-      #types[%Ci : #tensor<[%n, %m], f32>] -> #tensor<[%n, %m], f32> {
-    // expected-error@+1 {{'scf.for' op loop-carried dependent_tensor refinements do not match}}
+      #types[%Ci : #tensor<[%n, %m], f32> -> #tensor<[%n, %m], f32>]
+      #region_types[%Ci : #tensor<[%n, %m], f32> -> #tensor<[%n, %m], f32>] {
+    // expected-error@+1 {{'scf.for' op loop region yield type reference does not match yielded refinements}}
     %C_row = scf.for %j = %c0 to %m step %c1 iter_args(%Cj = %Ci)
         -> (tensor<?x?xf32>)
-        #types[%Cj : #tensor<[%n, %m], f32>] -> #tensor<[%n, %m], f32> {
+        #types[%Cj : #tensor<[%n, %m], f32> -> #tensor<[%n, %m], f32>]
+        #region_types[%Cj : #tensor<[%n, %m], f32> -> #tensor<[%n, %m], f32>] {
       %bad = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
       scf.yield %bad : tensor<?x?xf32>
     }
@@ -94,10 +98,11 @@ func.func @dependent_matmul_kernel_outer_yield_mismatch(
     #types[%A : #tensor<[%n, %k], f32>, %B : #tensor<[%k, %m], f32>, %C : #tensor<[%n, %m], f32>] -> #tensor<[%n, %m], f32> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
-  // expected-error@+1 {{'scf.for' op loop-carried dependent_tensor refinements do not match}}
+  // expected-error@+1 {{'scf.for' op loop region yield type reference does not match yielded refinements}}
   %C_final = scf.for %i = %c0 to %n step %c1 iter_args(%Ci = %C)
       -> (tensor<?x?xf32>)
-      #types[%Ci : #tensor<[%n, %m], f32>] -> #tensor<[%n, %m], f32> {
+      #types[%Ci : #tensor<[%n, %m], f32> -> #tensor<[%n, %m], f32>]
+      #region_types[%Ci : #tensor<[%n, %m], f32> -> #tensor<[%n, %m], f32>] {
     %bad = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
     scf.yield %bad : tensor<?x?xf32>
   }
@@ -131,11 +136,12 @@ func.func @dependent_matmul_kernel_loop_result_metadata_mismatch(
     #types[%A : #tensor<[%n, %k], f32>, %B : #tensor<[%k, %m], f32>, %C : #tensor<[%n, %m], f32>] -> #tensor<[%n, %m], f32> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
-  // expected-error@+3 {{dependent tensor loop result boundary must match iter arg refinements}}
   %C_final = scf.for %i = %c0 to %n step %c1 iter_args(%Ci = %C)
       -> (tensor<?x?xf32>)
-      #types[%Ci : #tensor<[%n, %m], f32>] -> #tensor<[%m, %n], f32> {
+      #types[%Ci : #tensor<[%n, %m], f32> -> #tensor<[%m, %n], f32>]
+      #region_types[%Ci : #tensor<[%n, %m], f32> -> #tensor<[%m, %n], f32>] {
     scf.yield %Ci : tensor<?x?xf32>
   }
+  // expected-error@+1 {{'func.return' op returned value does not match function result dependency metadata}}
   return %C_final : tensor<?x?xf32>
 }

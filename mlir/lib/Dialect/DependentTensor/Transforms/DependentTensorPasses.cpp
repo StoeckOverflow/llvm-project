@@ -33,12 +33,88 @@ buildInfoFromStored(RankedTensorType type,
     return failure();
   TensorValueRefinement info{type, {}};
   info.dimValues.reserve(stored.dimValues.size());
-  for (Value dimValue : stored.getDimValues()) {
+  for (const PropertyOperand &operand : stored.dimValues) {
+    Value dimValue = operand.get();
     if (!dimValue || !dimValue.getType().isIndex())
       return failure();
     info.dimValues.push_back(dimValue);
   }
   return info;
+}
+
+static FailureOr<TensorValueRefinement>
+buildInfoFromTypeRef(RankedTensorType type,
+                     const DependentTensorTypeRef &stored) {
+  if (stored.rank != type.getRank() ||
+      stored.dimValues.size() != static_cast<size_t>(type.getRank()))
+    return failure();
+  TensorValueRefinement info{type, {}};
+  info.dimValues.reserve(stored.dimValues.size());
+  for (const PropertyOperand &operand : stored.dimValues) {
+    Value dimValue = operand.get();
+    if (!dimValue || !dimValue.getType().isIndex())
+      return failure();
+    info.dimValues.push_back(dimValue);
+  }
+  return info;
+}
+
+static LogicalResult
+verifyStoredTensorTypeRef(Operation *owner, StringRef kind, Type type,
+                          const DependentTensorTypeRef &stored,
+                          DominanceInfo &dominance,
+                          Operation *dominanceUseSite = nullptr) {
+  auto rankedType = dyn_cast<RankedTensorType>(type);
+  if (!rankedType)
+    return owner->emitOpError() << "requires ranked tensor type for dependent "
+                                << kind << " type refs";
+  if (stored.rank != rankedType.getRank())
+    return owner->emitOpError()
+           << "requires dependent " << kind << " rank to match tensor rank";
+  if (stored.dimValues.size() != static_cast<size_t>(rankedType.getRank()))
+    return owner->emitOpError() << "requires one dependent dimension value per "
+                                << kind << " tensor dimension";
+
+  for (auto [dim, operand] : llvm::enumerate(stored.dimValues)) {
+    Value dimValue = operand.get();
+    if (!rankedType.isDynamicDim(dim))
+      return owner->emitOpError()
+             << "requires dependent " << kind
+             << " dimensions to correspond to dynamic tensor dimensions";
+    if (!dimValue)
+      return owner->emitOpError()
+             << "has null dependent " << kind << " dimension value";
+    if (!dimValue.getType().isIndex())
+      return owner->emitOpError() << "requires index-typed dependent " << kind
+                                  << " dimension values";
+    if (crossesPropertySSAUseIsolatedFromAboveBoundary(owner, dimValue))
+      return owner->emitOpError() << "dependent " << kind
+                                  << " dimension value illegally crosses an "
+                                     "IsolatedFromAbove boundary";
+    Operation *useSite = dominanceUseSite ? dominanceUseSite : owner;
+    if (!dominance.dominates(dimValue, useSite))
+      return owner->emitOpError() << "dependent " << kind
+                                  << " dimension value does not dominate owner";
+  }
+  return success();
+}
+
+static LogicalResult
+verifyConcreteValueMatchesTypeRef(Operation *owner, StringRef message,
+                                  Value value,
+                                  const DependentTensorTypeRef &typeRef) {
+  FailureOr<TensorValueRefinement> actual = getValueRefinement(value);
+  if (failed(actual))
+    return success();
+  auto rankedType = dyn_cast<RankedTensorType>(value.getType());
+  if (!rankedType)
+    return owner->emitOpError()
+           << "requires ranked tensor type for dependent " << message;
+  FailureOr<TensorValueRefinement> expected =
+      buildInfoFromTypeRef(rankedType, typeRef);
+  if (failed(expected) || !haveEqualRefinements(*actual, *expected))
+    return owner->emitOpError() << message;
+  return success();
 }
 
 static LogicalResult
@@ -258,48 +334,87 @@ static LogicalResult verifyCallRefinements(func::CallOp call) {
   return success();
 }
 
-static LogicalResult verifyScfForRefinements(scf::ForOp forOp) {
-  auto yield = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
-  for (OpResult result : forOp.getResults()) {
-    auto resultInfo = getValueRefinement(result);
-    if (failed(resultInfo))
-      continue;
-    unsigned index = result.getResultNumber();
-    auto initInfo = getValueRefinement(forOp.getInitArgs()[index]);
-    auto iterInfo = getValueRefinement(forOp.getRegionIterArg(index));
-    auto yieldInfo = getValueRefinement(yield.getOperand(index));
-    if (failed(initInfo) || failed(iterInfo) || failed(yieldInfo))
-      return forOp.emitOpError()
-             << "failed to resolve loop-carried dependent_tensor refinements";
-    if (!haveEqualRefinements(*resultInfo, *initInfo) ||
-        !haveEqualRefinements(*resultInfo, *iterInfo) ||
-        !haveEqualRefinements(*resultInfo, *yieldInfo))
-      return forOp.emitOpError()
-             << "loop-carried dependent_tensor refinements do not match";
+static LogicalResult
+verifyLoopRefinements(Operation *owner,
+                      ArrayRef<DependentTensorLoopTypeRef> loopTypeRefs,
+                      ArrayRef<DependentTensorLoopRegionTypeRef> regionTypeRefs,
+                      ValueRange initOperands, TypeRange resultTypes,
+                      Block *body, ValueRange yieldedValues,
+                      Operation *yieldUseSite, DominanceInfo &dominance) {
+  llvm::SmallDenseSet<unsigned> seenLoopRefs;
+  for (const DependentTensorLoopTypeRef &ref : loopTypeRefs) {
+    if (!seenLoopRefs.insert(ref.valueIndex).second)
+      return owner->emitOpError()
+             << "has duplicate dependent tensor loop type refs";
+    if (ref.valueIndex >= resultTypes.size() ||
+        ref.valueIndex >= initOperands.size())
+      return owner->emitOpError()
+             << "has dependent tensor loop type refs out of range";
+    if (failed(verifyStoredTensorTypeRef(owner, "loop operand",
+                                         initOperands[ref.valueIndex].getType(),
+                                         ref.operandTypeRef, dominance, owner)))
+      return failure();
+    if (failed(verifyStoredTensorTypeRef(owner, "loop result",
+                                         resultTypes[ref.valueIndex],
+                                         ref.resultTypeRef, dominance, owner)))
+      return failure();
+    if (failed(verifyConcreteValueMatchesTypeRef(
+            owner,
+            "loop operand type reference does not match init refinements",
+            initOperands[ref.valueIndex], ref.operandTypeRef)))
+      return failure();
+  }
+
+  llvm::SmallDenseSet<unsigned> seenRegionArgs;
+  llvm::SmallDenseSet<unsigned> seenRegionYields;
+  for (const DependentTensorLoopRegionTypeRef &ref : regionTypeRefs) {
+    if (!seenRegionArgs.insert(ref.argumentIndex).second ||
+        !seenRegionYields.insert(ref.yieldedIndex).second)
+      return owner->emitOpError()
+             << "has duplicate dependent tensor loop region type refs";
+    if (ref.argumentIndex >= body->getNumArguments() ||
+        ref.yieldedIndex >= resultTypes.size() ||
+        ref.yieldedIndex >= yieldedValues.size())
+      return owner->emitOpError()
+             << "has dependent tensor loop region type refs out of range";
+    if (failed(verifyStoredTensorTypeRef(
+            owner, "loop region argument",
+            body->getArgument(ref.argumentIndex).getType(), ref.argumentTypeRef,
+            dominance, owner)))
+      return failure();
+    if (failed(verifyStoredTensorTypeRef(
+            owner, "loop region yield",
+            yieldedValues[ref.yieldedIndex].getType(), ref.yieldedTypeRef,
+            dominance, yieldUseSite)))
+      return failure();
+    if (failed(verifyConcreteValueMatchesTypeRef(
+            owner,
+            "loop region yield type reference does not match yielded "
+            "refinements",
+            yieldedValues[ref.yieldedIndex], ref.yieldedTypeRef)))
+      return failure();
   }
   return success();
 }
 
-static LogicalResult verifyAffineForRefinements(affine::AffineForOp forOp) {
+static LogicalResult verifyScfForRefinements(scf::ForOp forOp,
+                                             DominanceInfo &dominance) {
+  auto yield = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
+  return verifyLoopRefinements(
+      forOp.getOperation(), forOp.getProperties().dependentTensorLoopTypeRefs,
+      forOp.getProperties().dependentTensorLoopRegionTypeRefs,
+      forOp.getInitArgs(), forOp.getResultTypes(), forOp.getBody(),
+      yield.getResults(), yield.getOperation(), dominance);
+}
+
+static LogicalResult verifyAffineForRefinements(affine::AffineForOp forOp,
+                                                DominanceInfo &dominance) {
   auto yield = cast<affine::AffineYieldOp>(forOp.getBody()->getTerminator());
-  for (OpResult result : forOp.getResults()) {
-    auto resultInfo = getValueRefinement(result);
-    if (failed(resultInfo))
-      continue;
-    unsigned index = result.getResultNumber();
-    auto initInfo = getValueRefinement(forOp.getInits()[index]);
-    auto iterInfo = getValueRefinement(forOp.getRegionIterArgs()[index]);
-    auto yieldInfo = getValueRefinement(yield.getOperand(index));
-    if (failed(initInfo) || failed(iterInfo) || failed(yieldInfo))
-      return forOp.emitOpError()
-             << "failed to resolve loop-carried dependent_tensor refinements";
-    if (!haveEqualRefinements(*resultInfo, *initInfo) ||
-        !haveEqualRefinements(*resultInfo, *iterInfo) ||
-        !haveEqualRefinements(*resultInfo, *yieldInfo))
-      return forOp.emitOpError()
-             << "loop-carried dependent_tensor refinements do not match";
-  }
-  return success();
+  return verifyLoopRefinements(
+      forOp.getOperation(), forOp.getProperties().dependentTensorLoopTypeRefs,
+      forOp.getProperties().dependentTensorLoopRegionTypeRefs, forOp.getInits(),
+      forOp.getResultTypes(), forOp.getBody(), yield.getOperands(),
+      yield.getOperation(), dominance);
 }
 
 struct VerifyDependentTensorRefinementsPass
@@ -337,7 +452,7 @@ struct VerifyDependentTensorRefinementsPass
       return signalPassFailure();
 
     WalkResult scfWalk = module.walk([&](scf::ForOp forOp) {
-      if (failed(verifyScfForRefinements(forOp)))
+      if (failed(verifyScfForRefinements(forOp, dominance)))
         return WalkResult::interrupt();
       return WalkResult::advance();
     });
@@ -345,7 +460,7 @@ struct VerifyDependentTensorRefinementsPass
       return signalPassFailure();
 
     WalkResult affineWalk = module.walk([&](affine::AffineForOp forOp) {
-      if (failed(verifyAffineForRefinements(forOp)))
+      if (failed(verifyAffineForRefinements(forOp, dominance)))
         return WalkResult::interrupt();
       return WalkResult::advance();
     });
