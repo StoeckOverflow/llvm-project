@@ -21,6 +21,41 @@ Run the comparison from the repository root:
 mlir/examples/dependent-memref-matmul/compare.py --n 128 --k 128 --m 128 --repeats 10
 ```
 
+
+For a benchmark sweep, use:
+
+```sh
+mlir/examples/dependent-memref-matmul/run-benchmarks.py
+```
+
+The benchmark runner defaults to 30 repeats for each square size:
+
+```text
+128x128x128
+256x256x256
+512x512x512
+```
+
+Add the larger 1024 case with:
+
+```sh
+mlir/examples/dependent-memref-matmul/run-benchmarks.py --large
+```
+
+Benchmark outputs are stored under:
+
+```text
+artifacts/benchmarks/
+  summary.json
+  summary.md
+  size-128/results.json
+  size-256/results.json
+  size-512/results.json
+```
+
+Use `--skip-run` to collect lowering/code-size metrics without executing the
+kernels.
+
 The scripts save generated artifacts under
 `mlir/examples/dependent-memref-matmul/artifacts/`:
 
