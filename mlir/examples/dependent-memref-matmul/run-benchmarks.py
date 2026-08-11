@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 DEFAULT_SIZES = [128, 256, 512]
+PAPER_SIZES = [512, 1024, 2048, 4096]
 LARGE_SIZE = 1024
 
 
@@ -145,9 +146,14 @@ def main():
         help="Square matrix sizes to run. Defaults to 128 256 512.",
     )
     parser.add_argument(
+        "--paper",
+        action="store_true",
+        help="Run the paper-oriented sweep: 512 1024 2048 4096.",
+    )
+    parser.add_argument(
         "--large",
         action="store_true",
-        help="Also run the 1024x1024x1024 benchmark.",
+        help="Also run the 1024x1024x1024 benchmark for non-paper sweeps.",
     )
     parser.add_argument(
         "--repeats",
@@ -170,8 +176,8 @@ def main():
 
     script_dir = Path(__file__).resolve().parent
     out_dir = args.out or script_dir / "artifacts" / "benchmarks"
-    sizes = list(args.sizes)
-    if args.large and LARGE_SIZE not in sizes:
+    sizes = list(PAPER_SIZES if args.paper else args.sizes)
+    if args.large and not args.paper and LARGE_SIZE not in sizes:
         sizes.append(LARGE_SIZE)
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -201,6 +207,7 @@ def main():
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "repeats": args.repeats,
         "sizes": sizes,
+        "paper": args.paper,
         "skip_run": args.skip_run,
         "runs": runs,
     }
