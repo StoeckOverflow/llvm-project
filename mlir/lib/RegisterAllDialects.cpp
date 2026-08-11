@@ -32,8 +32,9 @@
 #include "mlir/Dialect/ControlFlow/IR/ControlFlow.h"
 #include "mlir/Dialect/ControlFlow/Transforms/BufferDeallocationOpInterfaceImpl.h"
 #include "mlir/Dialect/ControlFlow/Transforms/BufferizableOpInterfaceImpl.h"
-#include "mlir/Dialect/DependentTensor/IR/DependentTensor.h"
 #include "mlir/Dialect/DLTI/DLTI.h"
+#include "mlir/Dialect/DependentMemRef/IR/DependentMemRef.h"
+#include "mlir/Dialect/DependentTensor/IR/DependentTensor.h"
 #include "mlir/Dialect/EmitC/IR/EmitC.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
@@ -120,6 +121,7 @@ void mlir::registerAllDialects(DialectRegistry &registry) {
                   cf::ControlFlowDialect,
                   complex::ComplexDialect,
                   dependent_tensor::DependentTensorDialect,
+                  dependent_memref::DependentMemRefDialect,
                   DLTIDialect,
                   emitc::EmitCDialect,
                   func::FuncDialect,

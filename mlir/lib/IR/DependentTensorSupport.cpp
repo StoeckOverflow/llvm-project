@@ -45,6 +45,15 @@ mlir::hash_value(const DependentTensorDimValueRefinement &refinement) {
   return hashDependentTensorDimValues(refinement.dimValues);
 }
 
+llvm::hash_code
+mlir::hash_value(const DependentMemRefValueRefinement &refinement) {
+  return llvm::hash_combine(
+      refinement.valueIndex, refinement.rank, refinement.offset,
+      refinement.hasExplicitLayout,
+      hashDependentTensorDimValues(refinement.dimValues),
+      hashDependentTensorDimValues(refinement.strideValues));
+}
+
 void mlir::walkDependentTensorPropertyUses(
     Operation *op, function_ref<void(PropertyOperand &)> callback) {
   walkPropertyOperands(op, callback);

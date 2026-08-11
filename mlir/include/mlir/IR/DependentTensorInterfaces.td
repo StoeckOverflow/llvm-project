@@ -181,6 +181,29 @@ def DependentTensorDimValueRefinementProp
   let hashProperty = "::mlir::hash_value($_storage)";
 }
 
+def DependentMemRefValueRefinementProp
+    : Property<"::mlir::DependentMemRefValueRefinement",
+               "dependent memref value refinements"> {
+  // SSA-valued properties are contextual IR state. They are not serialized
+  // through attributes or bytecode; custom assembly handles parsing and printing
+  // of the embedded SSA references.
+  let convertToAttribute = [{
+    (void)$_storage;
+    return ::mlir::ArrayAttr::get($_ctxt, {});
+  }];
+  let convertFromAttribute = [{
+    $_storage = {};
+    return ::mlir::success();
+  }];
+  let readFromMlirBytecode = [{
+    $_storage = {};
+  }];
+  let writeToMlirBytecode = [{
+    (void)$_storage;
+  }];
+  let hashProperty = "::mlir::hash_value($_storage)";
+}
+
 def DependentTensorPropertyOpInterface
     : OpInterface<"DependentTensorPropertyOpInterface"> {
   let cppNamespace = "::mlir";
