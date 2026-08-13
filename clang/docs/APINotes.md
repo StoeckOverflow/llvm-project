@@ -148,6 +148,38 @@ arrays. Methods under Tags are C++ methods identified by 'Name' (rather than
       - Name: doSomething
         …
 
+Function-like entries under "Functions" and tag "Methods" can use
+``Where.Parameters`` to select a specific overload by its ordinary explicit
+function parameters. This selector is declaration-selection data and does not
+change the annotation payload.
+
+:Where.Parameters:
+
+  When omitted, a function-like API notes entry is selected by name only. An
+  explicitly empty list selects the zero-explicit-parameter overload, and a
+  non-empty list selects an exact ordered parameter list.
+
+  ::
+
+    Functions:
+    - Name: makeWidget
+      Where:
+        Parameters:
+        - int
+      SwiftName: makeWidget(_:)
+
+    Tags:
+    - Name: Widget
+      Methods:
+      - Name: reset
+        Where:
+          Parameters: []
+        SwiftName: reset()
+
+  Matching is based on the declaration's explicit function parameter list.
+  Default arguments do not change the selector arity, and static C++ methods
+  are matched by their explicit parameters.
+
 :Fields:
 
   Identified by 'Name'.
