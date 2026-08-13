@@ -1,0 +1,150 @@
+{
+  "generated_at": "2026-08-13T18:00:09.320739+00:00",
+  "paper": true,
+  "repeats": 30,
+  "runs": [
+    {
+      "baseline": {
+        "descriptor_ops": 33,
+        "llvm_dialect_lines": 90,
+        "llvm_ir_lines": 102,
+        "llvm_opt_ir_lines": 97,
+        "llvm_opt_wall_ms": 8.816,
+        "median_ns": 73666096.0,
+        "mlir_opt_wall_ms": 15.325,
+        "opt_descriptor_ops": 7
+      },
+      "dependent": {
+        "descriptor_ops": 0,
+        "llvm_dialect_lines": 63,
+        "llvm_ir_lines": 72,
+        "llvm_opt_ir_lines": 72,
+        "llvm_opt_wall_ms": 12.435,
+        "median_ns": 73893470.0,
+        "mlir_opt_wall_ms": 10.274,
+        "opt_descriptor_ops": 0
+      },
+      "problem": {
+        "k": 512,
+        "m": 512,
+        "n": 512,
+        "repeats": 30
+      },
+      "ratios": {
+        "llvm_opt_baseline_over_dependent": 0.7089666264575795,
+        "mlir_opt_baseline_over_dependent": 1.4916293556550517,
+        "runtime_baseline_over_dependent": 0.9969229486719192
+      },
+      "size": 512
+    },
+    {
+      "baseline": {
+        "descriptor_ops": 33,
+        "llvm_dialect_lines": 90,
+        "llvm_ir_lines": 102,
+        "llvm_opt_ir_lines": 97,
+        "llvm_opt_wall_ms": 12.197,
+        "median_ns": 2919927170.0,
+        "mlir_opt_wall_ms": 15.36,
+        "opt_descriptor_ops": 7
+      },
+      "dependent": {
+        "descriptor_ops": 0,
+        "llvm_dialect_lines": 63,
+        "llvm_ir_lines": 72,
+        "llvm_opt_ir_lines": 72,
+        "llvm_opt_wall_ms": 10.232,
+        "median_ns": 2850597958.0,
+        "mlir_opt_wall_ms": 12.352,
+        "opt_descriptor_ops": 0
+      },
+      "problem": {
+        "k": 1024,
+        "m": 1024,
+        "n": 1024,
+        "repeats": 30
+      },
+      "ratios": {
+        "llvm_opt_baseline_over_dependent": 1.19204456606724,
+        "mlir_opt_baseline_over_dependent": 1.2435233160621761,
+        "runtime_baseline_over_dependent": 1.0243209365268198
+      },
+      "size": 1024
+    },
+    {
+      "baseline": {
+        "descriptor_ops": 33,
+        "llvm_dialect_lines": 90,
+        "llvm_ir_lines": 102,
+        "llvm_opt_ir_lines": 97,
+        "llvm_opt_wall_ms": 12.307,
+        "median_ns": 24629127785.0,
+        "mlir_opt_wall_ms": 12.064,
+        "opt_descriptor_ops": 7
+      },
+      "dependent": {
+        "descriptor_ops": 0,
+        "llvm_dialect_lines": 63,
+        "llvm_ir_lines": 72,
+        "llvm_opt_ir_lines": 72,
+        "llvm_opt_wall_ms": 9.93,
+        "median_ns": 23958542533.0,
+        "mlir_opt_wall_ms": 11.346,
+        "opt_descriptor_ops": 0
+      },
+      "problem": {
+        "k": 2048,
+        "m": 2048,
+        "n": 2048,
+        "repeats": 30
+      },
+      "ratios": {
+        "llvm_opt_baseline_over_dependent": 1.239375629405841,
+        "mlir_opt_baseline_over_dependent": 1.063282213996122,
+        "runtime_baseline_over_dependent": 1.027989400902678
+      },
+      "size": 2048
+    },
+    {
+      "baseline": {
+        "descriptor_ops": 33,
+        "llvm_dialect_lines": 90,
+        "llvm_ir_lines": 102,
+        "llvm_opt_ir_lines": 97,
+        "llvm_opt_wall_ms": 12.618,
+        "median_ns": 549159620372.0,
+        "mlir_opt_wall_ms": 14.541,
+        "opt_descriptor_ops": 7
+      },
+      "dependent": {
+        "descriptor_ops": 0,
+        "llvm_dialect_lines": 63,
+        "llvm_ir_lines": 72,
+        "llvm_opt_ir_lines": 72,
+        "llvm_opt_wall_ms": 12.549,
+        "median_ns": 566730314611.0,
+        "mlir_opt_wall_ms": 12.983,
+        "opt_descriptor_ops": 0
+      },
+      "problem": {
+        "k": 4096,
+        "m": 4096,
+        "n": 4096,
+        "repeats": 30
+      },
+      "ratios": {
+        "llvm_opt_baseline_over_dependent": 1.005498446091322,
+        "mlir_opt_baseline_over_dependent": 1.120003080952014,
+        "runtime_baseline_over_dependent": 0.9689963748435437
+      },
+      "size": 4096
+    }
+  ],
+  "sizes": [
+    512,
+    1024,
+    2048,
+    4096
+  ],
+  "skip_run": false
+}

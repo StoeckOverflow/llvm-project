@@ -1,0 +1,13 @@
+===-------------------------------------------------------------------------===
+                         ... Execution time report ...
+===-------------------------------------------------------------------------===
+  Total Execution Time: 0.0020 seconds
+
+  ----Wall Time----  ----Name----
+    0.0005 ( 27.0%)  Parser
+    0.0002 (  8.9%)  ConvertDependentTensorToDependentMemRefPass
+    0.0005 ( 24.5%)  LowerDependentMemRefToLLVMPass
+    0.0000 (  1.2%)  ReconcileUnrealizedCastsPass
+    0.0001 (  6.2%)  Output
+    0.0007 ( 32.3%)  Rest
+    0.0020 (100.0%)  Total

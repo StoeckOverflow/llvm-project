@@ -1,0 +1,106 @@
+{
+  "baseline": {
+    "llvm_dialect_extractvalue": 12,
+    "llvm_dialect_gep": 6,
+    "llvm_dialect_insertvalue": 21,
+    "llvm_dialect_lines": 90,
+    "llvm_dialect_load": 2,
+    "llvm_dialect_store": 1,
+    "llvm_dialect_struct_type": 64,
+    "llvm_ir_extractvalue": 12,
+    "llvm_ir_insertvalue": 21,
+    "llvm_ir_lines": 102,
+    "llvm_opt": {
+      "wall_ms": 12.618
+    },
+    "llvm_opt_ir_extractvalue": 0,
+    "llvm_opt_ir_insertvalue": 7,
+    "llvm_opt_ir_lines": 97,
+    "llvm_opt_ir_struct_type": 9,
+    "mlir_opt": {
+      "timing_file": "/home/stoeckoverflow/llvm-project/mlir/examples/dependent-memref-matmul/artifacts/benchmarks/size-4096/baseline.mlir-timing.txt",
+      "wall_ms": 14.541
+    },
+    "run": {
+      "checksum": "0.250000",
+      "k": "4096",
+      "kind": "baseline",
+      "m": "4096",
+      "max_error": "0",
+      "median_ns": "549159620372",
+      "n": "4096",
+      "repeats": "30"
+    }
+  },
+  "delta": {
+    "llvm_dialect_extractvalue": 12,
+    "llvm_dialect_insertvalue": 21,
+    "llvm_dialect_lines": 27,
+    "llvm_ir_lines": 30,
+    "llvm_opt_ir_extractvalue": 0,
+    "llvm_opt_ir_insertvalue": 7,
+    "llvm_opt_ir_lines": 25
+  },
+  "dependent": {
+    "llvm_dialect_extractvalue": 0,
+    "llvm_dialect_gep": 3,
+    "llvm_dialect_insertvalue": 0,
+    "llvm_dialect_lines": 63,
+    "llvm_dialect_load": 2,
+    "llvm_dialect_store": 1,
+    "llvm_dialect_struct_type": 0,
+    "llvm_ir_extractvalue": 0,
+    "llvm_ir_insertvalue": 0,
+    "llvm_ir_lines": 72,
+    "llvm_opt": {
+      "wall_ms": 12.549
+    },
+    "llvm_opt_ir_extractvalue": 0,
+    "llvm_opt_ir_insertvalue": 0,
+    "llvm_opt_ir_lines": 72,
+    "llvm_opt_ir_struct_type": 0,
+    "mlir_opt": {
+      "timing_file": "/home/stoeckoverflow/llvm-project/mlir/examples/dependent-memref-matmul/artifacts/benchmarks/size-4096/dependent.mlir-timing.txt",
+      "wall_ms": 12.983
+    },
+    "run": {
+      "checksum": "0.250000",
+      "k": "4096",
+      "kind": "dependent",
+      "m": "4096",
+      "max_error": "0",
+      "median_ns": "566730314611",
+      "n": "4096",
+      "repeats": "30"
+    }
+  },
+  "dependent_strided": {
+    "llvm_dialect_extractvalue": 0,
+    "llvm_dialect_gep": 3,
+    "llvm_dialect_insertvalue": 0,
+    "llvm_dialect_lines": 62,
+    "llvm_dialect_load": 2,
+    "llvm_dialect_store": 1,
+    "llvm_dialect_struct_type": 0,
+    "llvm_ir_extractvalue": 0,
+    "llvm_ir_insertvalue": 0,
+    "llvm_ir_lines": 72,
+    "llvm_opt": {
+      "wall_ms": 15.736
+    },
+    "llvm_opt_ir_extractvalue": 0,
+    "llvm_opt_ir_insertvalue": 0,
+    "llvm_opt_ir_lines": 162,
+    "llvm_opt_ir_struct_type": 0,
+    "mlir_opt": {
+      "timing_file": "/home/stoeckoverflow/llvm-project/mlir/examples/dependent-memref-matmul/artifacts/benchmarks/size-4096/dependent-strided.mlir-timing.txt",
+      "wall_ms": 11.569
+    }
+  },
+  "problem": {
+    "k": 4096,
+    "m": 4096,
+    "n": 4096,
+    "repeats": 30
+  }
+}

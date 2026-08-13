@@ -1,0 +1,20 @@
+===-------------------------------------------------------------------------===
+                         ... Execution time report ...
+===-------------------------------------------------------------------------===
+  Total Execution Time: 0.0066 seconds
+
+  ----Wall Time----  ----Name----
+    0.0029 ( 44.4%)  Parser
+    0.0004 (  6.5%)  OneShotBufferizePass
+    0.0007 ( 10.4%)  'func.func' Pipeline
+    0.0003 (  3.8%)    SCFToControlFlowPass
+    0.0004 (  6.5%)    ArithToLLVMConversionPass
+    0.0003 (  4.5%)  FinalizeMemRefToLLVMConversionPass
+    0.0000 (  0.2%)    (A) DataLayoutAnalysis
+    0.0003 (  4.2%)  ConvertFuncToLLVMPass
+    0.0000 (  0.1%)    (A) DataLayoutAnalysis
+    0.0002 (  3.0%)  ConvertControlFlowToLLVMPass
+    0.0001 (  1.0%)  ReconcileUnrealizedCastsPass
+    0.0003 (  5.1%)  Output
+    0.0013 ( 19.8%)  Rest
+    0.0066 (100.0%)  Total

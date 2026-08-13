@@ -1,0 +1,12 @@
+===-------------------------------------------------------------------------===
+                         ... Execution time report ...
+===-------------------------------------------------------------------------===
+  Total Execution Time: 0.0031 seconds
+
+  ----Wall Time----  ----Name----
+    0.0009 ( 29.5%)  Parser
+    0.0011 ( 33.9%)  LowerDependentMemRefToLLVMPass
+    0.0002 (  6.2%)  ReconcileUnrealizedCastsPass
+    0.0002 (  6.3%)  Output
+    0.0008 ( 24.1%)  Rest
+    0.0031 (100.0%)  Total

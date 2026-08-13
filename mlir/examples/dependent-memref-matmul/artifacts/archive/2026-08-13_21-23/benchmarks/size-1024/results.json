@@ -1,0 +1,106 @@
+{
+  "baseline": {
+    "llvm_dialect_extractvalue": 12,
+    "llvm_dialect_gep": 6,
+    "llvm_dialect_insertvalue": 21,
+    "llvm_dialect_lines": 90,
+    "llvm_dialect_load": 2,
+    "llvm_dialect_store": 1,
+    "llvm_dialect_struct_type": 64,
+    "llvm_ir_extractvalue": 12,
+    "llvm_ir_insertvalue": 21,
+    "llvm_ir_lines": 102,
+    "llvm_opt": {
+      "wall_ms": 12.197
+    },
+    "llvm_opt_ir_extractvalue": 0,
+    "llvm_opt_ir_insertvalue": 7,
+    "llvm_opt_ir_lines": 97,
+    "llvm_opt_ir_struct_type": 9,
+    "mlir_opt": {
+      "timing_file": "/home/stoeckoverflow/llvm-project/mlir/examples/dependent-memref-matmul/artifacts/benchmarks/size-1024/baseline.mlir-timing.txt",
+      "wall_ms": 15.36
+    },
+    "run": {
+      "checksum": "13.875000",
+      "k": "1024",
+      "kind": "baseline",
+      "m": "1024",
+      "max_error": "0",
+      "median_ns": "2919927170",
+      "n": "1024",
+      "repeats": "30"
+    }
+  },
+  "delta": {
+    "llvm_dialect_extractvalue": 12,
+    "llvm_dialect_insertvalue": 21,
+    "llvm_dialect_lines": 27,
+    "llvm_ir_lines": 30,
+    "llvm_opt_ir_extractvalue": 0,
+    "llvm_opt_ir_insertvalue": 7,
+    "llvm_opt_ir_lines": 25
+  },
+  "dependent": {
+    "llvm_dialect_extractvalue": 0,
+    "llvm_dialect_gep": 3,
+    "llvm_dialect_insertvalue": 0,
+    "llvm_dialect_lines": 63,
+    "llvm_dialect_load": 2,
+    "llvm_dialect_store": 1,
+    "llvm_dialect_struct_type": 0,
+    "llvm_ir_extractvalue": 0,
+    "llvm_ir_insertvalue": 0,
+    "llvm_ir_lines": 72,
+    "llvm_opt": {
+      "wall_ms": 10.232
+    },
+    "llvm_opt_ir_extractvalue": 0,
+    "llvm_opt_ir_insertvalue": 0,
+    "llvm_opt_ir_lines": 72,
+    "llvm_opt_ir_struct_type": 0,
+    "mlir_opt": {
+      "timing_file": "/home/stoeckoverflow/llvm-project/mlir/examples/dependent-memref-matmul/artifacts/benchmarks/size-1024/dependent.mlir-timing.txt",
+      "wall_ms": 12.352
+    },
+    "run": {
+      "checksum": "13.875000",
+      "k": "1024",
+      "kind": "dependent",
+      "m": "1024",
+      "max_error": "0",
+      "median_ns": "2850597958",
+      "n": "1024",
+      "repeats": "30"
+    }
+  },
+  "dependent_strided": {
+    "llvm_dialect_extractvalue": 0,
+    "llvm_dialect_gep": 3,
+    "llvm_dialect_insertvalue": 0,
+    "llvm_dialect_lines": 62,
+    "llvm_dialect_load": 2,
+    "llvm_dialect_store": 1,
+    "llvm_dialect_struct_type": 0,
+    "llvm_ir_extractvalue": 0,
+    "llvm_ir_insertvalue": 0,
+    "llvm_ir_lines": 72,
+    "llvm_opt": {
+      "wall_ms": 13.992
+    },
+    "llvm_opt_ir_extractvalue": 0,
+    "llvm_opt_ir_insertvalue": 0,
+    "llvm_opt_ir_lines": 162,
+    "llvm_opt_ir_struct_type": 0,
+    "mlir_opt": {
+      "timing_file": "/home/stoeckoverflow/llvm-project/mlir/examples/dependent-memref-matmul/artifacts/benchmarks/size-1024/dependent-strided.mlir-timing.txt",
+      "wall_ms": 21.488
+    }
+  },
+  "problem": {
+    "k": 1024,
+    "m": 1024,
+    "n": 1024,
+    "repeats": 30
+  }
+}
