@@ -1,0 +1,6 @@
+#ifndef WHERE_PARAMETERS_TEMPLATE_DEPENDENT_REFERENCE_H
+#define WHERE_PARAMETERS_TEMPLATE_DEPENDENT_REFERENCE_H
+
+template <typename T> void f(const T &);
+
+#endif

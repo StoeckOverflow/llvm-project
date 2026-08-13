@@ -1,0 +1,13 @@
+---
+Name: WhereParametersTemplateParameterRename
+Functions:
+- Name: f
+  Template:
+    Parameters:
+    - Kind: type
+  Where:
+    Parameters:
+    - TemplateParameter:
+        Depth: 0
+        Index: 0
+  SwiftName: f(_:)

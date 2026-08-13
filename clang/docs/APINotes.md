@@ -180,6 +180,108 @@ change the annotation payload.
   Default arguments do not change the selector arity, and static C++ methods
   are matched by their explicit parameters.
 
+  C++ template matching is outside this selector model. A template type that
+  appears as an ordinary parameter type is treated as a parameter spelling.
+  Future support may need to keep ordinary parameters, template parameter
+  structure, and concrete template arguments separate. For example,
+  ``Template.Parameters`` could describe the template parameter list,
+  ``TemplateArguments`` could select a specialization such as ``f<int>``, and
+  uses of template parameters in ``Where.Parameters`` may need structural
+  identity such as depth and index rather than redeclaration-local names like
+  ``T`` or ``P``.
+
+  Mixed template and non-template overload sets may also need an additional
+  declaration-identity layer so an entry can say whether it targets the primary
+  template, a concrete specialization, or the non-template overload. Template
+  parameters must also remain separate from ordinary function parameters: a
+  function template such as ``template <typename P> void f()`` has no explicit
+  function parameters, so ``Where.Parameters: []`` would still describe the
+  ordinary function parameter list, not the template parameter list.
+
+  Redeclarations of the same function template may use different local template
+  parameter names, such as ``template <typename T> void f(T)`` followed by
+  ``template <typename P> void f(P)``. Future matching for dependent parameter
+  types should therefore use structural template parameter identity rather than
+  treating ``T`` and ``P`` as distinct selector spellings.
+
+  Dependent parameter types add another layer: the template parameter might be
+  part of a larger type spelling rather than the whole parameter type. Examples
+  include ``template <typename T> void f(const T&)``,
+  ``template <typename Container> void f(const typename
+  Container::value_type&)``, and ``template <typename Key, typename Value> void
+  f(const std::pair<Key, Value>&)``.
+
+  One possible design would match the concrete source name of the template
+  parameter, but this is tied to declaration-local names and would not work well
+  for shared API notes that need to cover library implementations with
+  different template parameter naming conventions. Another design would use
+  placeholders directly in parameter spellings, such as
+  ``const _TemplateParam(0, 0)&``. That keeps the structural identity explicit,
+  but makes the spelling less natural.
+
+  A more readable future direction is to introduce API-notes-local names for
+  structurally identified template parameters, then use those names in
+  ``Where.Parameters`` spellings:
+
+  ::
+
+    Functions:
+    - Name: f
+      TemplateParameters:
+      - Name: T
+        Depth: 0
+        Index: 0
+      Where:
+        Parameters:
+        - const T&
+
+    - Name: f
+      TemplateParameters:
+      - Name: Container
+        Depth: 0
+        Index: 0
+      Where:
+        Parameters:
+        - const Container::value_type&
+
+    - Name: f
+      TemplateParameters:
+      - Name: Key
+        Depth: 0
+        Index: 0
+      - Name: Value
+        Depth: 0
+        Index: 1
+      Where:
+        Parameters:
+        - const std::pair<Key,Value>&
+
+  Here, ``Name`` would be API-notes-local notation rather than the source
+  template parameter name. ``Depth`` and ``Index`` would provide the structural
+  identity used for matching, so redeclarations that use different local names
+  could still be matched consistently.
+
+  Questions such as default template arguments, non-type template parameters,
+  template-template parameters, parameter packs, alias equivalence, and whether
+  primary templates or only concrete instantiations are matched remain future
+  design work. The following syntax is illustrative and rejected by current API
+  notes:
+
+  ::
+
+    Functions:
+    - Name: f
+      Template:
+        Parameters:
+        - Kind: type
+      Where:
+        TemplateArguments:
+        - int
+        Parameters:
+        - TemplateParameter:
+            Depth: 0
+            Index: 0
+
 :Fields:
 
   Identified by 'Name'.

@@ -5,6 +5,22 @@ RUN: apinotes-test %S/Inputs/Headers/WhereParametersScalar.apinotes 2>&1 | FileC
 RUN: apinotes-test %S/Inputs/Headers/WhereParametersMapElement.apinotes 2>&1 | FileCheck %s --check-prefix=PARAMETERS-MAP-ELEMENT
 RUN: apinotes-test %S/Inputs/Headers/WhereParametersUnknownWhereKey.apinotes 2>&1 | FileCheck %s --check-prefix=UNKNOWN-WHERE-KEY
 RUN: apinotes-test %S/Inputs/Headers/WhereParametersMethodWhereSequence.apinotes 2>&1 | FileCheck %s --check-prefix=METHOD-WHERE-SEQUENCE
+RUN: apinotes-test %S/Inputs/Headers/WhereParametersTemplateArguments.apinotes 2>&1 | FileCheck %s --check-prefix=TEMPLATE-ARGUMENTS
+RUN: apinotes-test %S/Inputs/Headers/WhereParametersTemplateParameterSelector.apinotes 2>&1 | FileCheck %s --check-prefix=TEMPLATE-PARAMETER-SELECTOR
+RUN: apinotes-test %S/Inputs/Headers/WhereParametersTemplateParameterNestedSelector.apinotes 2>&1 | FileCheck %s --check-prefix=TEMPLATE-PARAMETER-NESTED-SELECTOR
+RUN: apinotes-test %S/Inputs/Headers/WhereParametersTemplateParameterRename.apinotes 2>&1 | FileCheck %s --check-prefix=TEMPLATE-PARAMETER-RENAME
+RUN: apinotes-test %S/Inputs/Headers/WhereParametersTemplateZeroFunctionParameters.apinotes 2>&1 | FileCheck %s --check-prefix=TEMPLATE-ZERO-FUNCTION-PARAMETERS
+RUN: apinotes-test %S/Inputs/Headers/WhereParametersTemplateDependentReference.apinotes 2>&1 | FileCheck %s --check-prefix=TEMPLATE-DEPENDENT-REFERENCE
+RUN: apinotes-test %S/Inputs/Headers/WhereParametersTemplateDependentMemberType.apinotes 2>&1 | FileCheck %s --check-prefix=TEMPLATE-DEPENDENT-MEMBER-TYPE
+RUN: apinotes-test %S/Inputs/Headers/WhereParametersTemplateDependentPair.apinotes 2>&1 | FileCheck %s --check-prefix=TEMPLATE-DEPENDENT-PAIR
+RUN: %clang_cc1 -fsyntax-only -x c++ %S/Inputs/Headers/WhereParametersTemplateArguments.h
+RUN: %clang_cc1 -fsyntax-only -x c++ %S/Inputs/Headers/WhereParametersTemplateParameterSelector.h
+RUN: %clang_cc1 -fsyntax-only -x c++ %S/Inputs/Headers/WhereParametersTemplateParameterNestedSelector.h
+RUN: %clang_cc1 -fsyntax-only -x c++ %S/Inputs/Headers/WhereParametersTemplateParameterRename.h
+RUN: %clang_cc1 -fsyntax-only -x c++ %S/Inputs/Headers/WhereParametersTemplateZeroFunctionParameters.h
+RUN: %clang_cc1 -fsyntax-only -x c++ %S/Inputs/Headers/WhereParametersTemplateDependentReference.h
+RUN: %clang_cc1 -fsyntax-only -x c++ %S/Inputs/Headers/WhereParametersTemplateDependentMemberType.h
+RUN: %clang_cc1 -fsyntax-only -x c++ %S/Inputs/Headers/WhereParametersTemplateDependentPair.h
 
 CHECK:      Name:            WhereParametersParser
 CHECK:      Functions:
@@ -54,3 +70,11 @@ PARAMETERS-SCALAR: not a sequence
 PARAMETERS-MAP-ELEMENT: unexpected scalar
 UNKNOWN-WHERE-KEY: unknown key 'ResultType'
 METHOD-WHERE-SEQUENCE: not a mapping
+TEMPLATE-ARGUMENTS: unknown key 'TemplateArguments'
+TEMPLATE-PARAMETER-SELECTOR: unexpected scalar
+TEMPLATE-PARAMETER-NESTED-SELECTOR: unexpected scalar
+TEMPLATE-PARAMETER-RENAME: unexpected scalar
+TEMPLATE-ZERO-FUNCTION-PARAMETERS: unknown key 'Template'
+TEMPLATE-DEPENDENT-REFERENCE: unknown key 'TemplateParameters'
+TEMPLATE-DEPENDENT-MEMBER-TYPE: unknown key 'TemplateParameters'
+TEMPLATE-DEPENDENT-PAIR: unknown key 'TemplateParameters'

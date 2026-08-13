@@ -1,0 +1,10 @@
+---
+Name: WhereParametersTemplateParameterSelector
+Functions:
+- Name: makeWidget
+  Where:
+    Parameters:
+    - TemplateParameter:
+        Depth: 0
+        Index: 0
+  SwiftName: makeWidget(_:)

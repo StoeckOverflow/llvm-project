@@ -1,0 +1,12 @@
+---
+Name: WhereParametersTemplateDependentReference
+Functions:
+- Name: f
+  TemplateParameters:
+  - Name: T
+    Depth: 0
+    Index: 0
+  Where:
+    Parameters:
+    - const T&
+  SwiftName: f(_:)

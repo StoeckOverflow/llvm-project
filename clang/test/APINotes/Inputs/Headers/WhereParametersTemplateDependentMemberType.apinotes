@@ -1,0 +1,12 @@
+---
+Name: WhereParametersTemplateDependentMemberType
+Functions:
+- Name: f
+  TemplateParameters:
+  - Name: Container
+    Depth: 0
+    Index: 0
+  Where:
+    Parameters:
+    - const Container::value_type&
+  SwiftName: f(_:)

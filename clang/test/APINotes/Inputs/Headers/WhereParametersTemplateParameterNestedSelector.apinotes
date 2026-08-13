@@ -1,0 +1,10 @@
+---
+Name: WhereParametersTemplateParameterNestedSelector
+Functions:
+- Name: makeWidget
+  Where:
+    Parameters:
+    - TemplateParameter:
+        Depth: 1
+        Index: 2
+  SwiftName: makeWidget(_:)

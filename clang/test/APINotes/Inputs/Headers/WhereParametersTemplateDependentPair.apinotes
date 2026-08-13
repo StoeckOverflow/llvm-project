@@ -1,0 +1,15 @@
+---
+Name: WhereParametersTemplateDependentPair
+Functions:
+- Name: f
+  TemplateParameters:
+  - Name: Key
+    Depth: 0
+    Index: 0
+  - Name: Value
+    Depth: 0
+    Index: 1
+  Where:
+    Parameters:
+    - const std::pair<Key,Value>&
+  SwiftName: f(_:)

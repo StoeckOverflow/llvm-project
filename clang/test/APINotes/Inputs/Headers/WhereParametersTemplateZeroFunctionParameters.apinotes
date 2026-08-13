@@ -1,0 +1,10 @@
+---
+Name: WhereParametersTemplateZeroFunctionParameters
+Functions:
+- Name: f
+  Template:
+    Parameters:
+    - Kind: type
+  Where:
+    Parameters: []
+  SwiftName: f()

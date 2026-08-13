@@ -1,0 +1,10 @@
+---
+Name: WhereParametersTemplateArguments
+Functions:
+- Name: makeWidget
+  Where:
+    TemplateArguments:
+    - int
+    Parameters:
+    - int
+  SwiftName: makeWidget(_:)

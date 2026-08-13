@@ -1,0 +1,6 @@
+#ifndef WHERE_PARAMETERS_TEMPLATE_PARAMETER_SELECTOR_H
+#define WHERE_PARAMETERS_TEMPLATE_PARAMETER_SELECTOR_H
+
+template <typename T> void makeWidget(T);
+
+#endif
