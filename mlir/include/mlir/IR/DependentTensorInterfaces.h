@@ -97,20 +97,6 @@ struct DependentTensorLoopTypeRef {
   }
 };
 
-struct DependentTensorLoopRegionTypeRef {
-  uint32_t argumentIndex = 0;
-  uint32_t yieldedIndex = 0;
-  DependentTensorTypeRef argumentTypeRef;
-  DependentTensorTypeRef yieldedTypeRef;
-
-  bool operator==(const DependentTensorLoopRegionTypeRef &other) const {
-    return argumentIndex == other.argumentIndex &&
-           yieldedIndex == other.yieldedIndex &&
-           argumentTypeRef == other.argumentTypeRef &&
-           yieldedTypeRef == other.yieldedTypeRef;
-  }
-};
-
 struct DependentTensorDimValueRefinement {
   SmallVector<PropertyOperand, 1> dimValues;
 
@@ -184,7 +170,6 @@ struct DependentMemRefValueRefinement {
 llvm::hash_code hash_value(const DependentTensorTypeRef &refinement);
 llvm::hash_code hash_value(const DependentTensorValueRefinement &refinement);
 llvm::hash_code hash_value(const DependentTensorLoopTypeRef &refinement);
-llvm::hash_code hash_value(const DependentTensorLoopRegionTypeRef &refinement);
 llvm::hash_code hash_value(const DependentTensorDimValueRefinement &refinement);
 llvm::hash_code hash_value(const DependentMemRefValueRefinement &refinement);
 } // namespace mlir

@@ -55,7 +55,7 @@ func.func @affine.yield() {
   // CHECK: affine.for
   // CHECK-NEXT: }
   //
-  // GENERIC:      "affine.for"() <{dependentTensorLoopRegionTypeRefs = [], dependentTensorLoopTypeRefs = [], lowerBoundMap = #[[$map]], operandSegmentSizes = array<i32: 0, 0, 0>, step = 1 : index, upperBoundMap = #[[$map1]]}> ({
+  // GENERIC:      "affine.for"() <{dependentTensorLoopTypeRefs = [], lowerBoundMap = #[[$map]], operandSegmentSizes = array<i32: 0, 0, 0>, step = 1 : index, upperBoundMap = #[[$map1]]}> ({
   // GENERIC-NEXT: ^bb0(%{{.*}}: index):
   // GENERIC-NEXT:   "affine.yield"() : () -> ()
   // GENERIC-NEXT: }) : () -> ()

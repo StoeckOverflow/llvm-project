@@ -53,7 +53,7 @@ func.func @refinement_bad_scf_for_body_dim() {
   %ub = arith.constant 4 : index
   %step = arith.constant 1 : index
   %init = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
-  // expected-error@below {{'scf.for' op dependent loop operand dimension value does not dominate owner}}
+  // expected-error@below {{'scf.for' op dependent block argument dimension value does not dominate owner}}
   %result = scf.for %iv = %lb to %ub step %step iter_args(%arg = %init) -> (tensor<?xf32>) {
     %body_dim = arith.constant 2 : index
     %body_tensor = dependent_tensor.make () #tensor<[%body_dim], f32> : tensor<?xf32>

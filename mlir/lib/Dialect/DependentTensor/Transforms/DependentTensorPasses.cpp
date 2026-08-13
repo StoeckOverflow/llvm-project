@@ -334,20 +334,18 @@ static LogicalResult verifyCallRefinements(func::CallOp call) {
   return success();
 }
 
-static LogicalResult
-verifyLoopRefinements(Operation *owner,
-                      ArrayRef<DependentTensorLoopTypeRef> loopTypeRefs,
-                      ArrayRef<DependentTensorLoopRegionTypeRef> regionTypeRefs,
-                      ValueRange initOperands, TypeRange resultTypes,
-                      Block *body, ValueRange yieldedValues,
-                      Operation *yieldUseSite, DominanceInfo &dominance) {
+static LogicalResult verifyLoopRefinements(
+    Operation *owner, ArrayRef<DependentTensorLoopTypeRef> loopTypeRefs,
+    ValueRange initOperands, TypeRange resultTypes, ValueRange yieldedValues,
+    Operation *yieldUseSite, DominanceInfo &dominance) {
   llvm::SmallDenseSet<unsigned> seenLoopRefs;
   for (const DependentTensorLoopTypeRef &ref : loopTypeRefs) {
     if (!seenLoopRefs.insert(ref.valueIndex).second)
       return owner->emitOpError()
              << "has duplicate dependent tensor loop type refs";
     if (ref.valueIndex >= resultTypes.size() ||
-        ref.valueIndex >= initOperands.size())
+        ref.valueIndex >= initOperands.size() ||
+        ref.valueIndex >= yieldedValues.size())
       return owner->emitOpError()
              << "has dependent tensor loop type refs out of range";
     if (failed(verifyStoredTensorTypeRef(owner, "loop operand",
@@ -358,40 +356,19 @@ verifyLoopRefinements(Operation *owner,
                                          resultTypes[ref.valueIndex],
                                          ref.resultTypeRef, dominance, owner)))
       return failure();
+    if (failed(verifyStoredTensorTypeRef(
+            owner, "loop yield", yieldedValues[ref.valueIndex].getType(),
+            ref.resultTypeRef, dominance, yieldUseSite)))
+      return failure();
     if (failed(verifyConcreteValueMatchesTypeRef(
             owner,
             "loop operand type reference does not match init refinements",
             initOperands[ref.valueIndex], ref.operandTypeRef)))
       return failure();
-  }
-
-  llvm::SmallDenseSet<unsigned> seenRegionArgs;
-  llvm::SmallDenseSet<unsigned> seenRegionYields;
-  for (const DependentTensorLoopRegionTypeRef &ref : regionTypeRefs) {
-    if (!seenRegionArgs.insert(ref.argumentIndex).second ||
-        !seenRegionYields.insert(ref.yieldedIndex).second)
-      return owner->emitOpError()
-             << "has duplicate dependent tensor loop region type refs";
-    if (ref.argumentIndex >= body->getNumArguments() ||
-        ref.yieldedIndex >= resultTypes.size() ||
-        ref.yieldedIndex >= yieldedValues.size())
-      return owner->emitOpError()
-             << "has dependent tensor loop region type refs out of range";
-    if (failed(verifyStoredTensorTypeRef(
-            owner, "loop region argument",
-            body->getArgument(ref.argumentIndex).getType(), ref.argumentTypeRef,
-            dominance, owner)))
-      return failure();
-    if (failed(verifyStoredTensorTypeRef(
-            owner, "loop region yield",
-            yieldedValues[ref.yieldedIndex].getType(), ref.yieldedTypeRef,
-            dominance, yieldUseSite)))
-      return failure();
     if (failed(verifyConcreteValueMatchesTypeRef(
             owner,
-            "loop region yield type reference does not match yielded "
-            "refinements",
-            yieldedValues[ref.yieldedIndex], ref.yieldedTypeRef)))
+            "loop result type reference does not match yielded refinements",
+            yieldedValues[ref.valueIndex], ref.resultTypeRef)))
       return failure();
   }
   return success();
@@ -402,9 +379,8 @@ static LogicalResult verifyScfForRefinements(scf::ForOp forOp,
   auto yield = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
   return verifyLoopRefinements(
       forOp.getOperation(), forOp.getProperties().dependentTensorLoopTypeRefs,
-      forOp.getProperties().dependentTensorLoopRegionTypeRefs,
-      forOp.getInitArgs(), forOp.getResultTypes(), forOp.getBody(),
-      yield.getResults(), yield.getOperation(), dominance);
+      forOp.getInitArgs(), forOp.getResultTypes(), yield.getResults(),
+      yield.getOperation(), dominance);
 }
 
 static LogicalResult verifyAffineForRefinements(affine::AffineForOp forOp,
@@ -412,8 +388,7 @@ static LogicalResult verifyAffineForRefinements(affine::AffineForOp forOp,
   auto yield = cast<affine::AffineYieldOp>(forOp.getBody()->getTerminator());
   return verifyLoopRefinements(
       forOp.getOperation(), forOp.getProperties().dependentTensorLoopTypeRefs,
-      forOp.getProperties().dependentTensorLoopRegionTypeRefs, forOp.getInits(),
-      forOp.getResultTypes(), forOp.getBody(), yield.getOperands(),
+      forOp.getInits(), forOp.getResultTypes(), yield.getOperands(),
       yield.getOperation(), dominance);
 }
 

@@ -119,14 +119,11 @@ static ParseResult populateDependentTensorLoopTypeRefsFromInits(
     OpAsmParser &parser, TypeRange resultTypes, ValueRange initOperands,
     Block::BlockArgListType regionIterArgs, ValueRange yieldedValues,
     ArrayRef<dependent_tensor::PendingLoopTypeRef> pendingLoopRefs,
-    ArrayRef<dependent_tensor::PendingLoopTypeRef> pendingRegionRefs,
-    SmallVectorImpl<DependentTensorLoopTypeRef> &loopTypeRefs,
-    SmallVectorImpl<DependentTensorLoopRegionTypeRef> &regionTypeRefs) {
+    SmallVectorImpl<DependentTensorLoopTypeRef> &loopTypeRefs) {
   return dependent_tensor::populateLoopTypeRefsFromInits(
       parser, resultTypes, initOperands, regionIterArgs, yieldedValues,
-      pendingLoopRefs, pendingRegionRefs,
-      [](Value value) { return getTypeRefFromValue(value); }, loopTypeRefs,
-      regionTypeRefs);
+      pendingLoopRefs, [](Value value) { return getTypeRefFromValue(value); },
+      loopTypeRefs);
 }
 
 static LogicalResult populateDependentTensorLoopTypeRefs(ForOp forOp) {
@@ -156,8 +153,7 @@ static LogicalResult populateDependentTensorLoopTypeRefs(ForOp forOp) {
       [&](Value value) -> FailureOr<DependentTensorTypeRef> {
         return getTypeRefFromValue(value, op);
       },
-      properties.dependentTensorLoopTypeRefs,
-      properties.dependentTensorLoopRegionTypeRefs);
+      properties.dependentTensorLoopTypeRefs);
   reattachPropertyOperands(forOp);
   return success();
 }
@@ -648,9 +644,6 @@ void ForOp::print(OpAsmPrinter &p) {
     dependent_tensor::printLoopTypeRefs(
         p, getRegionIterArgs(), getResultTypes(),
         getProperties().dependentTensorLoopTypeRefs);
-    dependent_tensor::printLoopRegionTypeRefs(
-        *this, p, getBody()->getArguments(), getResultTypes(),
-        getProperties().dependentTensorLoopRegionTypeRefs);
   }
   p << ' ';
   if (Type t = getInductionVar().getType(); !t.isIndex())
@@ -688,7 +681,6 @@ ParseResult ForOp::parse(OpAsmParser &parser, OperationState &result) {
 
   bool hasIterArgs = succeeded(parser.parseOptionalKeyword("iter_args"));
   SmallVector<dependent_tensor::PendingLoopTypeRef, 2> pendingLoopTypeRefs;
-  SmallVector<dependent_tensor::PendingLoopTypeRef, 2> pendingRegionTypeRefs;
   if (hasIterArgs) {
     // Parse assignment list, results type list, and optional dependent tensor
     // boundary annotations.
@@ -696,9 +688,6 @@ ParseResult ForOp::parse(OpAsmParser &parser, OperationState &result) {
         parser.parseArrowTypeList(result.types) ||
         dependent_tensor::parseOptionalLoopTypeRefs(parser, "types", regionArgs,
                                                     pendingLoopTypeRefs))
-      return failure();
-    if (dependent_tensor::parseOptionalLoopTypeRefs(
-            parser, "region_types", regionArgs, pendingRegionTypeRefs))
       return failure();
   }
 
@@ -748,16 +737,13 @@ ParseResult ForOp::parse(OpAsmParser &parser, OperationState &result) {
 
   auto &properties = result.getOrAddProperties<ForOp::Properties>();
   properties.dependentTensorLoopTypeRefs.clear();
-  properties.dependentTensorLoopRegionTypeRefs.clear();
   if (hasIterArgs) {
     ValueRange initOperands = ArrayRef<Value>(result.operands).drop_front(3);
     auto yield = cast<scf::YieldOp>(body->front().getTerminator());
     if (populateDependentTensorLoopTypeRefsFromInits(
             parser, result.types, initOperands,
             body->front().getArguments().drop_front(1), yield.getResults(),
-            pendingLoopTypeRefs, pendingRegionTypeRefs,
-            properties.dependentTensorLoopTypeRefs,
-            properties.dependentTensorLoopRegionTypeRefs))
+            pendingLoopTypeRefs, properties.dependentTensorLoopTypeRefs))
       return failure();
   }
 
@@ -794,44 +780,6 @@ ForOp::getDependentTensorLoopResultTypeRef(unsigned resultNumber) {
   return failure();
 }
 
-FailureOr<DependentTensorTypeRef>
-ForOp::getDependentTensorLoopRegionArgumentTypeRef(unsigned regionNumber,
-                                                   unsigned blockNumber,
-                                                   unsigned argumentNumber) {
-  if (regionNumber != 0 || blockNumber != 0)
-    return failure();
-  if (const DependentTensorLoopRegionTypeRef *ref =
-          dependent_tensor::findLoopRegionTypeRefByArg(
-              getProperties().dependentTensorLoopRegionTypeRefs,
-              argumentNumber))
-    return ref->argumentTypeRef;
-  (void)populateDependentTensorLoopTypeRefs(*this);
-  if (const DependentTensorLoopRegionTypeRef *ref =
-          dependent_tensor::findLoopRegionTypeRefByArg(
-              getProperties().dependentTensorLoopRegionTypeRefs,
-              argumentNumber))
-    return ref->argumentTypeRef;
-  return failure();
-}
-
-FailureOr<DependentTensorTypeRef>
-ForOp::getDependentTensorLoopRegionYieldTypeRef(unsigned regionNumber,
-                                                unsigned blockNumber,
-                                                unsigned yieldedNumber) {
-  if (regionNumber != 0 || blockNumber != 0)
-    return failure();
-  if (const DependentTensorLoopRegionTypeRef *ref =
-          dependent_tensor::findLoopRegionTypeRefByYield(
-              getProperties().dependentTensorLoopRegionTypeRefs, yieldedNumber))
-    return ref->yieldedTypeRef;
-  (void)populateDependentTensorLoopTypeRefs(*this);
-  if (const DependentTensorLoopRegionTypeRef *ref =
-          dependent_tensor::findLoopRegionTypeRefByYield(
-              getProperties().dependentTensorLoopRegionTypeRefs, yieldedNumber))
-    return ref->yieldedTypeRef;
-  return failure();
-}
-
 FailureOr<DependentTensorValueRefinement>
 ForOp::getDependentTensorResultRefinement(unsigned resultNumber) {
   FailureOr<DependentTensorTypeRef> typeRef =
@@ -845,9 +793,11 @@ FailureOr<DependentTensorValueRefinement>
 ForOp::getDependentTensorBlockArgumentRefinement(unsigned regionNumber,
                                                  unsigned blockNumber,
                                                  unsigned argumentNumber) {
+  if (regionNumber != 0 || blockNumber != 0 || argumentNumber == 0)
+    return failure();
+  unsigned iterArgIndex = argumentNumber - getNumInductionVars();
   FailureOr<DependentTensorTypeRef> typeRef =
-      getDependentTensorLoopRegionArgumentTypeRef(regionNumber, blockNumber,
-                                                  argumentNumber);
+      getDependentTensorLoopOperandTypeRef(iterArgIndex);
   if (failed(typeRef))
     return failure();
   return getValueRefinementFromTypeRef(argumentNumber, *typeRef);
@@ -860,13 +810,6 @@ void ForOp::walkPropertySSAUses(
     for (PropertyOperand &operand : ref.operandTypeRef.dimValues)
       callback(operand);
     for (PropertyOperand &operand : ref.resultTypeRef.dimValues)
-      callback(operand);
-  }
-  for (DependentTensorLoopRegionTypeRef &ref :
-       getProperties().dependentTensorLoopRegionTypeRefs) {
-    for (PropertyOperand &operand : ref.argumentTypeRef.dimValues)
-      callback(operand);
-    for (PropertyOperand &operand : ref.yieldedTypeRef.dimValues)
       callback(operand);
   }
 }
@@ -902,19 +845,7 @@ ForOp::updatePropertiesForResultErasure(Operation *oldOp,
     loopTypeRefs.push_back(std::move(ref));
   }
 
-  SmallVector<DependentTensorLoopRegionTypeRef, 2> regionTypeRefs;
-  for (DependentTensorLoopRegionTypeRef ref :
-       sourceProperties.dependentTensorLoopRegionTypeRefs) {
-    if (ref.yieldedIndex >= eraseIndices.size() ||
-        eraseIndices.test(ref.yieldedIndex))
-      continue;
-    ref.yieldedIndex -= countErasedBefore(ref.yieldedIndex);
-    ref.argumentIndex = ref.yieldedIndex + getNumInductionVars();
-    regionTypeRefs.push_back(std::move(ref));
-  }
-
   properties.dependentTensorLoopTypeRefs = std::move(loopTypeRefs);
-  properties.dependentTensorLoopRegionTypeRefs = std::move(regionTypeRefs);
   reattachPropertyOperands(*this);
   return populateDependentTensorLoopTypeRefs(*this);
 }

@@ -17,12 +17,12 @@ func.func @dependent_matmul_kernel(
   %zero = arith.constant 0.0 : f32
   %C_final = scf.for %i = %c0 to %n step %c1 iter_args(%Ci = %C)
       -> (tensor<?x?xf32>)
-      #types[%Ci : #tensor<[%n, %m], f32> -> #tensor<[%n, %m], f32>]
-      #region_types[%Ci : #tensor<[%n, %m], f32> -> #tensor<[%n, %m], f32>] {
+      #types[%Ci : #tensor<[%n, %m], f32>] -> #tensor<[%n, %m], f32>
+ {
     %C_row = scf.for %j = %c0 to %m step %c1 iter_args(%Cj = %Ci)
         -> (tensor<?x?xf32>)
-        #types[%Cj : #tensor<[%n, %m], f32> -> #tensor<[%n, %m], f32>]
-        #region_types[%Cj : #tensor<[%n, %m], f32> -> #tensor<[%n, %m], f32>] {
+        #types[%Cj : #tensor<[%n, %m], f32>] -> #tensor<[%n, %m], f32>
+ {
       %sum = scf.for %kk = %c0 to %k step %c1 iter_args(%sum_iter = %zero)
           -> (f32) {
         %a = dependent_tensor.extract %A[%i, %kk] : f32

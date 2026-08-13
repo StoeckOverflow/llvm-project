@@ -81,60 +81,10 @@ def DependentTensorLoopTypeRefProp
   let hashProperty = "::mlir::hash_value($_storage)";
 }
 
-def DependentTensorLoopRegionTypeRefProp
-    : Property<"::mlir::DependentTensorLoopRegionTypeRef",
-               "dependent tensor loop region boundary type references"> {
-  // SSA-valued properties are contextual IR state. They are not serialized
-  // through attributes or bytecode; custom assembly handles parsing and printing
-  // of the embedded SSA references.
-  let convertToAttribute = [{
-    (void)$_storage;
-    return ::mlir::ArrayAttr::get($_ctxt, {});
-  }];
-  let convertFromAttribute = [{
-    $_storage = {};
-    return ::mlir::success();
-  }];
-  let readFromMlirBytecode = [{
-    $_storage = {};
-  }];
-  let writeToMlirBytecode = [{
-    (void)$_storage;
-  }];
-  let hashProperty = "::mlir::hash_value($_storage)";
-}
-
 def DependentTensorLoopTypeRefArrayProp
     : Property<"::llvm::SmallVector<::mlir::DependentTensorLoopTypeRef, 2>",
                "dependent tensor loop operand/result type reference array",
                "::llvm::ArrayRef<::mlir::DependentTensorLoopTypeRef>"> {
-  // SSA-valued properties are contextual IR state. They are not serialized
-  // through attributes or bytecode; custom assembly handles parsing and printing
-  // of the embedded SSA references.
-  let convertFromStorage = "$_storage";
-  let assignToStorage = "$_storage.assign($_value.begin(), $_value.end())";
-  let convertToAttribute = [{
-    (void)$_storage;
-    return ::mlir::ArrayAttr::get($_ctxt, {});
-  }];
-  let convertFromAttribute = [{
-    $_storage.clear();
-    return ::mlir::success();
-  }];
-  let readFromMlirBytecode = [{
-    $_storage.clear();
-  }];
-  let writeToMlirBytecode = [{
-    (void)$_storage;
-  }];
-  let hashProperty =
-      "::llvm::hash_combine_range($_storage.begin(), $_storage.end())";
-}
-
-def DependentTensorLoopRegionTypeRefArrayProp
-    : Property<"::llvm::SmallVector<::mlir::DependentTensorLoopRegionTypeRef, 2>",
-               "dependent tensor loop region boundary type reference array",
-               "::llvm::ArrayRef<::mlir::DependentTensorLoopRegionTypeRef>"> {
   // SSA-valued properties are contextual IR state. They are not serialized
   // through attributes or bytecode; custom assembly handles parsing and printing
   // of the embedded SSA references.
@@ -237,24 +187,6 @@ def DependentTensorPropertyOpInterface
       "::mlir::FailureOr<::mlir::DependentTensorTypeRef>",
       "getDependentTensorLoopResultTypeRef",
       (ins "unsigned":$resultNumber), [{}],
-      /*defaultImplementation=*/[{
-        return ::mlir::failure();
-      }]
-    >,
-    InterfaceMethod<"Get dependent tensor loop region argument type reference.",
-      "::mlir::FailureOr<::mlir::DependentTensorTypeRef>",
-      "getDependentTensorLoopRegionArgumentTypeRef",
-      (ins "unsigned":$regionNumber, "unsigned":$blockNumber,
-           "unsigned":$argumentNumber), [{}],
-      /*defaultImplementation=*/[{
-        return ::mlir::failure();
-      }]
-    >,
-    InterfaceMethod<"Get dependent tensor loop region yield type reference.",
-      "::mlir::FailureOr<::mlir::DependentTensorTypeRef>",
-      "getDependentTensorLoopRegionYieldTypeRef",
-      (ins "unsigned":$regionNumber, "unsigned":$blockNumber,
-           "unsigned":$yieldedNumber), [{}],
       /*defaultImplementation=*/[{
         return ::mlir::failure();
       }]
