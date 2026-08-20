@@ -943,6 +943,17 @@ static void ProcessVersionedAPINotes(
   }
 }
 
+static bool mergeAPINotesInfo(api_notes::CXXMethodInfo &Merged,
+                              const api_notes::CXXMethodInfo &Incoming) {
+  api_notes::CXXMethodInfo ReverseMerged = Incoming;
+  ReverseMerged |= Merged;
+  Merged |= Incoming;
+
+  // A different result depending on merge order means that both entries set
+  // at least one field to different values.
+  return Merged != ReverseMerged;
+}
+
 static std::optional<api_notes::Context>
 UnwindNamespaceContext(DeclContext *DC, api_notes::APINotesManager &APINotes) {
   if (auto NamespaceContext = dyn_cast<NamespaceDecl>(DC)) {
@@ -1144,30 +1155,31 @@ static void getAPINotesObjectSelectorSubsets(
   }
 }
 
-// Apply the first exact selector entry found. This preserves source-spelling
-// precedence over the desugared fallback and avoids applying multiple exact
+// Return the first exact selector entry found. This preserves source-spelling
+// precedence over the desugared fallback and avoids selecting multiple exact
 // entries for the same declaration.
-template <typename SpecificInfo, typename SpecificDecl>
-static void processExactAPINotes(
-    Sema &S, SpecificDecl *D,
+template <typename SpecificInfo>
+static api_notes::APINotesReader::VersionedInfo<SpecificInfo>
+lookupExactAPINotes(
     const APINotesParameterSelectorCandidates &ParameterSelectorCandidates,
     llvm::function_ref<api_notes::APINotesReader::VersionedInfo<SpecificInfo>(
         ArrayRef<std::string>)>
         LookupExact) {
-  auto ProcessSelector = [&](const APINotesParameterSelector &Selector) {
+  auto LookupSelector = [&](const APINotesParameterSelector &Selector) {
     auto Info = LookupExact(Selector.Parameters);
-    if (Info.size() == 0)
-      return false;
-
-    ProcessVersionedAPINotes(S, D, Info);
-    return true;
+    if (Info.size() != 0)
+      return Info;
+    return api_notes::APINotesReader::VersionedInfo<SpecificInfo>(std::nullopt);
   };
 
-  if (ProcessSelector(ParameterSelectorCandidates.Source))
-    return;
+  auto Info = LookupSelector(ParameterSelectorCandidates.Source);
+  if (Info.size() != 0)
+    return Info;
 
   if (ParameterSelectorCandidates.Desugared)
-    ProcessSelector(*ParameterSelectorCandidates.Desugared);
+    return LookupSelector(*ParameterSelectorCandidates.Desugared);
+
+  return std::nullopt;
 }
 
 /// Process API notes that are associated with this declaration, mapping them
@@ -1209,13 +1221,15 @@ void Sema::ProcessAPINotes(Decl *D) {
               Reader->lookupGlobalFunction(FD->getName(), APINotesContext);
           ProcessVersionedAPINotes(*this, FD, Info);
 
-          if (ParameterSelectorCandidates)
-            processExactAPINotes<api_notes::GlobalFunctionInfo>(
-                *this, FD, *ParameterSelectorCandidates,
+          if (ParameterSelectorCandidates) {
+            auto ExactInfo = lookupExactAPINotes<api_notes::GlobalFunctionInfo>(
+                *ParameterSelectorCandidates,
                 [&](ArrayRef<std::string> Parameters) {
                   return Reader->lookupGlobalFunction(FD->getName(), Parameters,
                                                       APINotesContext);
                 });
+            ProcessVersionedAPINotes(*this, FD, ExactInfo);
+          }
 
           if (ParameterSelectorCandidates) {
             auto &DiagnosticState =
@@ -1416,18 +1430,43 @@ void Sema::ProcessAPINotes(Decl *D) {
           !isa<CXXConversionDecl>(CXXMethod)) {
         auto ParameterSelectorCandidates =
             getAPINotesParameterSelectorCandidates(*this, CXXMethod);
+
+        std::string MethodName;
+        if (CXXMethod->isOverloadedOperator())
+          MethodName = std::string("operator") +
+                       getOperatorSpelling(CXXMethod->getOverloadedOperator());
+        else
+          MethodName = CXXMethod->getName();
+
+        std::optional<api_notes::CXXMethodInfo> MergedInfo;
+        bool DiagnosedConflict = false;
+        auto ProcessMatchedInfo = [&](api_notes::APINotesReader::VersionedInfo<
+                                      api_notes::CXXMethodInfo>
+                                          Info) {
+          if (auto Selected = Info.getSelected()) {
+            const auto &Incoming = Info[*Selected].second;
+            if (MergedInfo) {
+              bool Conflict = mergeAPINotesInfo(*MergedInfo, Incoming);
+              if (Conflict && !DiagnosedConflict) {
+                Diag(CXXMethod->getLocation(), diag::warn_apinotes_message)
+                    << (llvm::Twine("conflicting API notes entries apply "
+                                    "to C++ method '") +
+                        MethodName + "'")
+                           .str();
+                DiagnosedConflict = true;
+              }
+            } else {
+              MergedInfo = Incoming;
+            }
+          }
+
+          ProcessVersionedAPINotes(*this, CXXMethod, std::move(Info));
+        };
+
         for (auto Reader : Readers) {
           if (auto Context = UnwindTagContext(TagContext, APINotes)) {
-            std::string MethodName;
-            if (CXXMethod->isOverloadedOperator())
-              MethodName =
-                  std::string("operator") +
-                  getOperatorSpelling(CXXMethod->getOverloadedOperator());
-            else
-              MethodName = CXXMethod->getName();
-
             auto Info = Reader->lookupCXXMethod(Context->id, MethodName);
-            ProcessVersionedAPINotes(*this, CXXMethod, Info);
+            ProcessMatchedInfo(std::move(Info));
 
             auto &DiagnosticState =
                 getAPINotesSelectorDiagnosticState(*this, Reader);
@@ -1455,21 +1494,22 @@ void Sema::ProcessAPINotes(Decl *D) {
               if (BaseSelector.Object) {
                 auto ObjectInfo = Reader->lookupCXXMethod(
                     Context->id, MethodName, BaseSelector);
-                ProcessVersionedAPINotes(*this, CXXMethod, ObjectInfo);
+                ProcessMatchedInfo(std::move(ObjectInfo));
                 if (auto ObjectKey = Reader->getCXXMethodSelectorKey(
                         Context->id, MethodName, BaseSelector))
                   DiagnosticState.markUsed(*ObjectKey);
               }
 
               if (ParameterSelectorCandidates) {
-                processExactAPINotes<api_notes::CXXMethodInfo>(
-                    *this, CXXMethod, *ParameterSelectorCandidates,
+                auto ExactInfo = lookupExactAPINotes<api_notes::CXXMethodInfo>(
+                    *ParameterSelectorCandidates,
                     [&](ArrayRef<std::string> Parameters) {
                       api_notes::FunctionSelector Selector = BaseSelector;
                       Selector.setParameters(Parameters);
                       return Reader->lookupCXXMethod(Context->id, MethodName,
                                                      Selector);
                     });
+                ProcessMatchedInfo(std::move(ExactInfo));
                 DiagnosticState.markCandidatesUsed(
                     [&](ArrayRef<std::string> Parameters) {
                       api_notes::FunctionSelector Selector = BaseSelector;

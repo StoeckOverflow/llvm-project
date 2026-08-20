@@ -93,6 +93,26 @@ Tags:
       Parameters:
       - int
     SwiftName: buildObjectAndParameterInt(_:)
+  - Name: buildConflictingObjectNotes
+    Where:
+      Object:
+        Const: true
+    SwiftName: buildConflictingConst()
+  - Name: buildConflictingObjectNotes
+    Where:
+      Object:
+        Ref: lvalue
+    SwiftName: buildConflictingLValue()
+  - Name: buildSameObjectNotes
+    Where:
+      Object:
+        Const: true
+    SwiftName: buildSameObjectNotes()
+  - Name: buildSameObjectNotes
+    Where:
+      Object:
+        Ref: lvalue
+    SwiftName: buildSameObjectNotes()
   - Name: buildStatic
     Where:
       Parameters: []

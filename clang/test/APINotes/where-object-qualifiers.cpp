@@ -12,7 +12,7 @@
 // RUN: %clang_cc1 -fmodules -fimplicit-module-maps -fmodules-cache-path=%t/ModulesCache/WhereObjectQualifiers -fdisable-module-hash -fapinotes-modules -Wno-apinotes -I %S/Inputs/Headers %s -ast-dump -ast-dump-filter ObjectBuilder::buildObjectAndParameter -x c++ | FileCheck --check-prefix=OBJECT-PARAMETER %s
 // RUN: %clang_cc1 -fmodules -fimplicit-module-maps -fmodules-cache-path=%t/ModulesCache/WhereObjectQualifiers -fdisable-module-hash -fapinotes-modules -Wno-apinotes -I %S/Inputs/Headers %s -ast-dump -ast-dump-filter ObjectBuilder::buildStatic -x c++ | FileCheck --check-prefix=STATIC %s
 // RUN: %clang_cc1 -fmodules -fimplicit-module-maps -fmodules-cache-path=%t/ModulesCache/WhereObjectQualifiers -fdisable-module-hash -fapinotes-modules -Wno-apinotes -I %S/Inputs/Headers %s -ast-dump -ast-dump-filter ObjectBuilder::consume -x c++ | FileCheck --check-prefix=PARAM-REF %s
-// RUN: %clang_cc1 -fmodules -fimplicit-module-maps -fmodules-cache-path=%t/ModulesCache/WhereObjectQualifiersWarnings -fdisable-module-hash -fapinotes-modules -Wapinotes -fsyntax-only -I %S/Inputs/Headers %s -x c++ 2>&1 | FileCheck --check-prefix=UNMATCHED %s
+// RUN: %clang_cc1 -fmodules -fimplicit-module-maps -fmodules-cache-path=%t/ModulesCache/WhereObjectQualifiersWarnings -fdisable-module-hash -fapinotes-modules -Wapinotes -fsyntax-only -I %S/Inputs/Headers %s -x c++ 2>&1 | FileCheck --check-prefixes=UNMATCHED,CONFLICT --implicit-check-not="conflicting API notes entries apply to C++ method 'buildSameObjectNotes'" %s
 // RUN: %clang_cc1 -std=c++23 -fmodules -fimplicit-module-maps -fmodules-cache-path=%t/ModulesCache/WhereObjectQualifiersCXX23 -fdisable-module-hash -fapinotes-modules -Wno-apinotes -I %S/Inputs/Headers %s -ast-dump -ast-dump-filter buildExplicit -x c++ | FileCheck --check-prefix=EXPLICIT-OBJECT %s
 // RUN: %clang_cc1 -std=c++23 -fmodules -fimplicit-module-maps -fmodules-cache-path=%t/ModulesCache/WhereObjectQualifiersCXX23Warnings -fdisable-module-hash -fapinotes-modules -Wapinotes -fsyntax-only -I %S/Inputs/Headers %s -x c++ 2>&1 | FileCheck --check-prefix=EXPLICIT-OBJECT-UNMATCHED %s
 // RUN: not %clang_cc1 -fsyntax-only -fapinotes %s -I %S/Inputs/WhereObjectQualifiersDiag 2>&1 | FileCheck --check-prefix=DIAG %s
@@ -64,6 +64,8 @@
 
 // UNMATCHED-DAG: warning: API notes entry for 'buildStatic' has unmatched Where.Parameters [] Object{Ref: none}
 // UNMATCHED-DAG: warning: API notes entry for 'buildStaticObjectOnly' has unmatched Where.Object Object{Ref: none}
+
+// CONFLICT-DAG: warning: conflicting API notes entries apply to C++ method 'buildConflictingObjectNotes'
 
 // EXPLICIT-OBJECT: CXXMethodDecl {{.+}} buildExplicitConst 'void (const ExplicitObjectBuilder &)'
 // EXPLICIT-OBJECT-NOT: SwiftNameAttr

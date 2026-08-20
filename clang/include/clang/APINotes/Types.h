@@ -727,6 +727,33 @@ public:
     assert(getRetainCountConvention() == Value && "bitfield too small");
   }
 
+  FunctionInfo &operator|=(const FunctionInfo &RHS) {
+    static_cast<CommonEntityInfo &>(*this) |= RHS;
+
+    if (!NullabilityAudited && RHS.NullabilityAudited) {
+      NullabilityAudited = true;
+      NumAdjustedNullable = RHS.NumAdjustedNullable;
+      NullabilityPayload = RHS.NullabilityPayload;
+    }
+
+    if (!RawRetainCountConvention)
+      RawRetainCountConvention = RHS.RawRetainCountConvention;
+
+    UnsafeBufferUsage |= RHS.UnsafeBufferUsage;
+
+    if (ResultType.empty())
+      ResultType = RHS.ResultType;
+    if (SwiftReturnOwnership.empty())
+      SwiftReturnOwnership = RHS.SwiftReturnOwnership;
+
+    if (Params.size() < RHS.Params.size())
+      Params.resize(RHS.Params.size());
+    for (unsigned I = 0; I != RHS.Params.size(); ++I)
+      Params[I] |= RHS.Params[I];
+
+    return *this;
+  }
+
   friend bool operator==(const FunctionInfo &, const FunctionInfo &);
 
 private:
@@ -825,6 +852,17 @@ public:
   CXXMethodInfo() {}
 
   std::optional<ParamInfo> This;
+
+  CXXMethodInfo &operator|=(const CXXMethodInfo &RHS) {
+    static_cast<FunctionInfo &>(*this) |= RHS;
+
+    if (!This)
+      This = RHS.This;
+    else if (RHS.This)
+      *This |= *RHS.This;
+
+    return *this;
+  }
 
   LLVM_DUMP_METHOD void dump(llvm::raw_ostream &OS);
 };

@@ -22,6 +22,8 @@ struct ObjectBuilder {
   void buildObjectOnly(int) &&;
   void buildTwoObjectNotes() &;
   void buildObjectAndParameter(int) const;
+  void buildConflictingObjectNotes() const &;
+  void buildSameObjectNotes() const &;
   static void buildStatic();
   static void buildStaticObjectOnly();
 
