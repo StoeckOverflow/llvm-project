@@ -60,6 +60,34 @@ static Value llvmIndexConstant(OpBuilder &builder, Location loc, Type indexType,
                                   builder.getIntegerAttr(indexType, value));
 }
 
+static bool isLLVMIndexConstant(Value value, int64_t expected) {
+  auto constant = value.getDefiningOp<LLVM::ConstantOp>();
+  if (!constant)
+    return false;
+  auto attr = dyn_cast<IntegerAttr>(constant.getValue());
+  return attr && attr.getInt() == expected;
+}
+
+static Value maybeMul(ConversionPatternRewriter &rewriter, Location loc,
+                      Type indexType, Value lhs, Value rhs) {
+  if (isLLVMIndexConstant(lhs, 0) || isLLVMIndexConstant(rhs, 0))
+    return llvmIndexConstant(rewriter, loc, indexType, 0);
+  if (isLLVMIndexConstant(lhs, 1))
+    return rhs;
+  if (isLLVMIndexConstant(rhs, 1))
+    return lhs;
+  return LLVM::MulOp::create(rewriter, loc, indexType, lhs, rhs);
+}
+
+static Value maybeAdd(ConversionPatternRewriter &rewriter, Location loc,
+                      Type indexType, Value lhs, Value rhs) {
+  if (isLLVMIndexConstant(lhs, 0))
+    return rhs;
+  if (isLLVMIndexConstant(rhs, 0))
+    return lhs;
+  return LLVM::AddOp::create(rewriter, loc, indexType, lhs, rhs);
+}
+
 static unsigned elementSizeBytes(Type type) {
   if (auto intOrFloat = dyn_cast<IntegerType>(type))
     return std::max(1u, (intOrFloat.getWidth() + 7) / 8);
@@ -74,11 +102,13 @@ materializeDefaultStrides(ConversionPatternRewriter &rewriter, Location loc,
   SmallVector<Value> strides(dims.size());
   if (dims.empty())
     return strides;
-  Value one = llvmIndexConstant(rewriter, loc, indexType, 1);
-  strides.back() = one;
-  for (int64_t i = static_cast<int64_t>(dims.size()) - 2; i >= 0; --i)
-    strides[i] = LLVM::MulOp::create(rewriter, loc, indexType, dims[i + 1],
-                                     strides[i + 1]);
+  strides.back() = Value();
+  for (int64_t i = static_cast<int64_t>(dims.size()) - 2; i >= 0; --i) {
+    Value innerStride = strides[i + 1];
+    strides[i] = innerStride ? maybeMul(rewriter, loc, indexType, dims[i + 1],
+                                        innerStride)
+                             : dims[i + 1];
+  }
   return strides;
 }
 
@@ -193,11 +223,18 @@ linearizeIndex(ConversionPatternRewriter &rewriter, Location loc,
           : materializeDefaultStrides(rewriter, loc, indexType, dims);
   if (idxs.size() != strides.size())
     return failure();
-  Value linear = llvmIndexConstant(rewriter, loc, indexType, stored.offset);
+  Value linear;
+  if (stored.offset != 0)
+    linear = llvmIndexConstant(rewriter, loc, indexType, stored.offset);
   for (auto [idx, stride] : llvm::zip_equal(idxs, strides)) {
-    Value term = LLVM::MulOp::create(rewriter, loc, indexType, idx, stride);
-    linear = LLVM::AddOp::create(rewriter, loc, indexType, linear, term);
+    Value term = stride ? maybeMul(rewriter, loc, indexType, idx, stride) : idx;
+    if (!linear)
+      linear = term;
+    else
+      linear = maybeAdd(rewriter, loc, indexType, linear, term);
   }
+  if (!linear)
+    return llvmIndexConstant(rewriter, loc, indexType, 0);
   return linear;
 }
 
