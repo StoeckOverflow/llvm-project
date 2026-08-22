@@ -8,6 +8,8 @@
 // DEP-NOT: "llvm.insertvalue"
 // DEP-NOT: "llvm.extractvalue"
 // DEP-NOT: !llvm.struct
+// DEP-NOT: value = 0 : i64
+// DEP-NOT: value = 1 : i64
 // DEP: "llvm.getelementptr"(%{{.*}}, %{{.*}}) <{elem_type = f32{{.*}}> : (!llvm.ptr, i64) -> !llvm.ptr
 // DEP: "llvm.load"(%{{.*}}) <{ordering = 0 : i64}> : (!llvm.ptr) -> f32
 // DEP: "llvm.store"(%{{.*}}, %{{.*}}) <{ordering = 0 : i64}> : (f32, !llvm.ptr) -> ()

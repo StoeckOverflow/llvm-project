@@ -9,12 +9,18 @@ using namespace mlir;
 using namespace mlir::dependent_memref;
 
 namespace {
-static ParseResult
-parseMemRefSpec(OpAsmParser &parser,
-                SmallVectorImpl<OpAsmParser::UnresolvedOperand> &dims,
-                Type &elementType, int64_t &offset,
-                SmallVectorImpl<OpAsmParser::UnresolvedOperand> &strides,
-                bool &hasExplicitLayout) {
+struct ParsedMemRefSpec {
+  SmallVector<OpAsmParser::UnresolvedOperand> dims;
+  SmallVector<OpAsmParser::UnresolvedOperand> strides;
+  Type elementType;
+  int64_t offset = 0;
+  bool hasExplicitLayout = false;
+  SMLoc loc;
+};
+
+static ParseResult parseMemRefSpec(OpAsmParser &parser,
+                                   ParsedMemRefSpec &spec) {
+  spec.loc = parser.getCurrentLocation();
   if (parser.parseHashKeyword("memref") || parser.parseLess())
     return failure();
   if (parser.parseCommaSeparatedList(OpAsmParser::Delimiter::Square,
@@ -22,19 +28,17 @@ parseMemRefSpec(OpAsmParser &parser,
                                        OpAsmParser::UnresolvedOperand dim;
                                        if (parser.parseOperand(dim))
                                          return failure();
-                                       dims.push_back(dim);
+                                       spec.dims.push_back(dim);
                                        return success();
                                      }))
     return failure();
-  if (parser.parseComma() || parser.parseType(elementType))
+  if (parser.parseComma() || parser.parseType(spec.elementType))
     return failure();
 
-  offset = 0;
-  hasExplicitLayout = false;
   if (succeeded(parser.parseOptionalComma())) {
-    hasExplicitLayout = true;
+    spec.hasExplicitLayout = true;
     if (parser.parseKeyword("offset") || parser.parseColon() ||
-        parser.parseInteger(offset) || parser.parseComma() ||
+        parser.parseInteger(spec.offset) || parser.parseComma() ||
         parser.parseKeyword("strides") || parser.parseColon())
       return failure();
     if (parser.parseCommaSeparatedList(OpAsmParser::Delimiter::Square,
@@ -42,7 +46,7 @@ parseMemRefSpec(OpAsmParser &parser,
                                          OpAsmParser::UnresolvedOperand stride;
                                          if (parser.parseOperand(stride))
                                            return failure();
-                                         strides.push_back(stride);
+                                         spec.strides.push_back(stride);
                                          return success();
                                        }))
       return failure();
@@ -51,41 +55,39 @@ parseMemRefSpec(OpAsmParser &parser,
 }
 
 static ParseResult
-resolveMemRefSpec(OpAsmParser &parser, SMLoc loc, MemRefType type,
-                  ArrayRef<OpAsmParser::UnresolvedOperand> dims,
-                  Type elementType, int64_t offset,
-                  ArrayRef<OpAsmParser::UnresolvedOperand> strides,
-                  bool hasExplicitLayout, unsigned valueIndex,
+resolveMemRefSpec(OpAsmParser &parser, MemRefType type,
+                  const ParsedMemRefSpec &spec, unsigned valueIndex,
                   DependentMemRefValueRefinement &refinement) {
-  if (static_cast<int64_t>(dims.size()) != type.getRank())
-    return parser.emitError(loc, "dependent memref rank mismatch");
-  if (elementType != type.getElementType())
+  if (static_cast<int64_t>(spec.dims.size()) != type.getRank())
+    return parser.emitError(spec.loc, "dependent memref rank mismatch");
+  if (spec.elementType != type.getElementType())
     return parser.emitError(
-        loc, "dependent memref element type must match value type");
-  if (hasExplicitLayout &&
-      static_cast<int64_t>(strides.size()) != type.getRank())
-    return parser.emitError(loc,
+        spec.loc, "dependent memref element type must match value type");
+  if (spec.hasExplicitLayout &&
+      static_cast<int64_t>(spec.strides.size()) != type.getRank())
+    return parser.emitError(spec.loc,
                             "dependent memref stride count must match rank");
 
-  SmallVector<Type> indexTypes(dims.size(), parser.getBuilder().getIndexType());
+  SmallVector<Type> indexTypes(spec.dims.size(),
+                               parser.getBuilder().getIndexType());
   SmallVector<Value> resolvedDims;
-  if (parser.resolveOperands(dims, indexTypes, parser.getCurrentLocation(),
+  if (parser.resolveOperands(spec.dims, indexTypes, parser.getCurrentLocation(),
                              resolvedDims))
     return failure();
 
   SmallVector<Value> resolvedStrides;
-  if (hasExplicitLayout) {
-    SmallVector<Type> strideTypes(strides.size(),
+  if (spec.hasExplicitLayout) {
+    SmallVector<Type> strideTypes(spec.strides.size(),
                                   parser.getBuilder().getIndexType());
-    if (parser.resolveOperands(strides, strideTypes,
+    if (parser.resolveOperands(spec.strides, strideTypes,
                                parser.getCurrentLocation(), resolvedStrides))
       return failure();
   }
 
   refinement.valueIndex = valueIndex;
   refinement.rank = type.getRank();
-  refinement.offset = offset;
-  refinement.hasExplicitLayout = hasExplicitLayout;
+  refinement.offset = spec.offset;
+  refinement.hasExplicitLayout = spec.hasExplicitLayout;
   refinement.assignDimValues(resolvedDims);
   refinement.assignStrideValues(resolvedStrides);
   return success();
@@ -188,22 +190,16 @@ void dependent_memref::printMemRefSpec(
 }
 
 ParseResult AllocOp::parse(OpAsmParser &parser, OperationState &result) {
-  SmallVector<OpAsmParser::UnresolvedOperand> dims, strides;
-  Type elementType, resultType;
-  int64_t offset;
-  bool hasExplicitLayout;
-  SMLoc loc = parser.getCurrentLocation();
-  if (parseMemRefSpec(parser, dims, elementType, offset, strides,
-                      hasExplicitLayout) ||
-      parser.parseColonType(resultType))
+  ParsedMemRefSpec spec;
+  Type resultType;
+  if (parseMemRefSpec(parser, spec) || parser.parseColonType(resultType))
     return failure();
   auto memrefType = dyn_cast<MemRefType>(resultType);
   if (!memrefType)
     return parser.emitError(parser.getCurrentLocation(),
                             "expected memref result type");
   auto &props = result.getOrAddProperties<AllocOp::Properties>();
-  if (resolveMemRefSpec(parser, loc, memrefType, dims, elementType, offset,
-                        strides, hasExplicitLayout, 0, props.result_refinement))
+  if (resolveMemRefSpec(parser, memrefType, spec, 0, props.result_refinement))
     return failure();
   result.addTypes(resultType);
   return success();
@@ -229,18 +225,12 @@ void AllocOp::walkPropertySSAUses(function_ref<void(PropertyOperand &)> cb) {
 ParseResult ReinterpretCastOp::parse(OpAsmParser &parser,
                                      OperationState &result) {
   OpAsmParser::UnresolvedOperand source;
-  SmallVector<OpAsmParser::UnresolvedOperand> dims, strides;
-  Type elementType, sourceType, resultType;
-  int64_t offset;
-  bool hasExplicitLayout;
-  SMLoc loc;
+  ParsedMemRefSpec spec;
+  Type sourceType, resultType;
   if (parser.parseOperand(source) || parser.parseComma())
     return failure();
-  loc = parser.getCurrentLocation();
-  if (parseMemRefSpec(parser, dims, elementType, offset, strides,
-                      hasExplicitLayout) ||
-      parser.parseColonType(sourceType) || parser.parseKeyword("to") ||
-      parser.parseType(resultType))
+  if (parseMemRefSpec(parser, spec) || parser.parseColonType(sourceType) ||
+      parser.parseKeyword("to") || parser.parseType(resultType))
     return failure();
   auto memrefType = dyn_cast<MemRefType>(resultType);
   if (!memrefType)
@@ -249,8 +239,7 @@ ParseResult ReinterpretCastOp::parse(OpAsmParser &parser,
   if (parser.resolveOperand(source, sourceType, result.operands))
     return failure();
   auto &props = result.getOrAddProperties<ReinterpretCastOp::Properties>();
-  if (resolveMemRefSpec(parser, loc, memrefType, dims, elementType, offset,
-                        strides, hasExplicitLayout, 0, props.result_refinement))
+  if (resolveMemRefSpec(parser, memrefType, spec, 0, props.result_refinement))
     return failure();
   result.addTypes(resultType);
   return success();
@@ -286,18 +275,12 @@ void ReinterpretCastOp::walkPropertySSAUses(
 
 ParseResult CastOp::parse(OpAsmParser &parser, OperationState &result) {
   OpAsmParser::UnresolvedOperand source;
-  SmallVector<OpAsmParser::UnresolvedOperand> dims, strides;
-  Type elementType, sourceType, resultType;
-  int64_t offset;
-  bool hasExplicitLayout;
-  SMLoc loc;
+  ParsedMemRefSpec spec;
+  Type sourceType, resultType;
   if (parser.parseOperand(source) || parser.parseComma())
     return failure();
-  loc = parser.getCurrentLocation();
-  if (parseMemRefSpec(parser, dims, elementType, offset, strides,
-                      hasExplicitLayout) ||
-      parser.parseColonType(sourceType) || parser.parseKeyword("to") ||
-      parser.parseType(resultType))
+  if (parseMemRefSpec(parser, spec) || parser.parseColonType(sourceType) ||
+      parser.parseKeyword("to") || parser.parseType(resultType))
     return failure();
   auto memrefType = dyn_cast<MemRefType>(resultType);
   if (!memrefType)
@@ -306,8 +289,7 @@ ParseResult CastOp::parse(OpAsmParser &parser, OperationState &result) {
   if (parser.resolveOperand(source, sourceType, result.operands))
     return failure();
   auto &props = result.getOrAddProperties<CastOp::Properties>();
-  if (resolveMemRefSpec(parser, loc, memrefType, dims, elementType, offset,
-                        strides, hasExplicitLayout, 0, props.result_refinement))
+  if (resolveMemRefSpec(parser, memrefType, spec, 0, props.result_refinement))
     return failure();
   result.addTypes(resultType);
   return success();
@@ -346,19 +328,13 @@ parseSourceRefinedOp(OpAsmParser &parser, OperationState &result,
                      SmallVectorImpl<OpAsmParser::UnresolvedOperand> *indices,
                      Type &sourceType, Type *resultType,
                      DependentMemRefValueRefinement &refinement) {
-  SmallVector<OpAsmParser::UnresolvedOperand> dims, strides;
-  Type elementType;
-  int64_t offset;
-  bool hasExplicitLayout;
+  ParsedMemRefSpec spec;
   if (parser.parseOperand(source))
     return failure();
   if (indices &&
       parser.parseOperandList(*indices, OpAsmParser::Delimiter::Square))
     return failure();
-  SMLoc loc = parser.getCurrentLocation();
-  if (parseMemRefSpec(parser, dims, elementType, offset, strides,
-                      hasExplicitLayout) ||
-      parser.parseColonType(sourceType))
+  if (parseMemRefSpec(parser, spec) || parser.parseColonType(sourceType))
     return failure();
   if (resultType) {
     if (parser.parseArrow() || parser.parseType(*resultType))
@@ -368,8 +344,7 @@ parseSourceRefinedOp(OpAsmParser &parser, OperationState &result,
   if (!memrefType)
     return parser.emitError(parser.getCurrentLocation(),
                             "expected memref source type");
-  if (resolveMemRefSpec(parser, loc, memrefType, dims, elementType, offset,
-                        strides, hasExplicitLayout, 0, refinement))
+  if (resolveMemRefSpec(parser, memrefType, spec, 0, refinement))
     return failure();
   return success();
 }
@@ -380,14 +355,8 @@ ParseResult DimOp::parse(OpAsmParser &parser, OperationState &result) {
   if (parser.parseOperand(source) || parser.parseComma() ||
       parser.parseOperand(dimension) || parser.parseComma())
     return failure();
-  SmallVector<OpAsmParser::UnresolvedOperand> dims, strides;
-  Type elementType;
-  int64_t offset;
-  bool hasExplicitLayout;
-  SMLoc loc = parser.getCurrentLocation();
-  if (parseMemRefSpec(parser, dims, elementType, offset, strides,
-                      hasExplicitLayout) ||
-      parser.parseColonType(sourceType))
+  ParsedMemRefSpec spec;
+  if (parseMemRefSpec(parser, spec) || parser.parseColonType(sourceType))
     return failure();
   if (parser.resolveOperand(source, sourceType, result.operands) ||
       parser.resolveOperand(dimension, parser.getBuilder().getIndexType(),
@@ -398,8 +367,7 @@ ParseResult DimOp::parse(OpAsmParser &parser, OperationState &result) {
     return parser.emitError(parser.getCurrentLocation(),
                             "expected memref source type");
   auto &props = result.getOrAddProperties<DimOp::Properties>();
-  if (resolveMemRefSpec(parser, loc, memrefType, dims, elementType, offset,
-                        strides, hasExplicitLayout, 0, props.source_refinement))
+  if (resolveMemRefSpec(parser, memrefType, spec, 0, props.source_refinement))
     return failure();
   result.addTypes(parser.getBuilder().getIndexType());
   return success();
@@ -445,14 +413,8 @@ ParseResult DimExactOp::parse(OpAsmParser &parser, OperationState &result) {
       parser.parseLParen() || parser.parseAttribute(axis) ||
       parser.parseRParen())
     return failure();
-  SmallVector<OpAsmParser::UnresolvedOperand> dims, strides;
-  Type elementType;
-  int64_t offset;
-  bool hasExplicitLayout;
-  SMLoc loc = parser.getCurrentLocation();
-  if (parseMemRefSpec(parser, dims, elementType, offset, strides,
-                      hasExplicitLayout) ||
-      parser.parseColonType(sourceType))
+  ParsedMemRefSpec spec;
+  if (parseMemRefSpec(parser, spec) || parser.parseColonType(sourceType))
     return failure();
   if (parser.resolveOperand(source, sourceType, result.operands))
     return failure();
@@ -462,8 +424,7 @@ ParseResult DimExactOp::parse(OpAsmParser &parser, OperationState &result) {
                             "expected memref source type");
   auto &props = result.getOrAddProperties<DimExactOp::Properties>();
   props.axis = axis;
-  if (resolveMemRefSpec(parser, loc, memrefType, dims, elementType, offset,
-                        strides, hasExplicitLayout, 0, props.source_refinement))
+  if (resolveMemRefSpec(parser, memrefType, spec, 0, props.source_refinement))
     return failure();
   result.addTypes(parser.getBuilder().getIndexType());
   return success();

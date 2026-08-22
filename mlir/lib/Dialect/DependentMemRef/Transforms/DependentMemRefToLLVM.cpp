@@ -68,25 +68,15 @@ static bool isLLVMIndexConstant(Value value, int64_t expected) {
   return attr && attr.getInt() == expected;
 }
 
-static Value maybeMul(ConversionPatternRewriter &rewriter, Location loc,
-                      Type indexType, Value lhs, Value rhs) {
-  if (isLLVMIndexConstant(lhs, 0) || isLLVMIndexConstant(rhs, 0))
-    return llvmIndexConstant(rewriter, loc, indexType, 0);
-  if (isLLVMIndexConstant(lhs, 1))
-    return rhs;
-  if (isLLVMIndexConstant(rhs, 1))
-    return lhs;
-  return LLVM::MulOp::create(rewriter, loc, indexType, lhs, rhs);
-}
+struct StrideExpr {
+  enum class Kind { Unit, Value } kind = Kind::Unit;
+  Value value;
 
-static Value maybeAdd(ConversionPatternRewriter &rewriter, Location loc,
-                      Type indexType, Value lhs, Value rhs) {
-  if (isLLVMIndexConstant(lhs, 0))
-    return rhs;
-  if (isLLVMIndexConstant(rhs, 0))
-    return lhs;
-  return LLVM::AddOp::create(rewriter, loc, indexType, lhs, rhs);
-}
+  static StrideExpr unit() { return {Kind::Unit, Value()}; }
+  static StrideExpr valueStride(Value value) { return {Kind::Value, value}; }
+
+  bool isUnit() const { return kind == Kind::Unit; }
+};
 
 static unsigned elementSizeBytes(Type type) {
   if (auto intOrFloat = dyn_cast<IntegerType>(type))
@@ -94,22 +84,6 @@ static unsigned elementSizeBytes(Type type) {
   if (auto floatType = dyn_cast<FloatType>(type))
     return std::max(1u, (floatType.getWidth() + 7) / 8);
   return 8;
-}
-
-static SmallVector<Value>
-materializeDefaultStrides(ConversionPatternRewriter &rewriter, Location loc,
-                          Type indexType, ArrayRef<Value> dims) {
-  SmallVector<Value> strides(dims.size());
-  if (dims.empty())
-    return strides;
-  strides.back() = Value();
-  for (int64_t i = static_cast<int64_t>(dims.size()) - 2; i >= 0; --i) {
-    Value innerStride = strides[i + 1];
-    strides[i] = innerStride ? maybeMul(rewriter, loc, indexType, dims[i + 1],
-                                        innerStride)
-                             : dims[i + 1];
-  }
-  return strides;
 }
 
 static SmallVector<Value> remapValues(ConversionPatternRewriter &rewriter,
@@ -120,6 +94,97 @@ static SmallVector<Value> remapValues(ConversionPatternRewriter &rewriter,
     remapped.push_back(remappedOrSelf(rewriter, value));
   return remapped;
 }
+
+class DependentMemRefAddressBuilder {
+public:
+  DependentMemRefAddressBuilder(ConversionPatternRewriter &rewriter,
+                                Location loc, Type indexType)
+      : rewriter(rewriter), loc(loc), indexType(indexType) {}
+
+  Value constant(int64_t value) {
+    return llvmIndexConstant(rewriter, loc, indexType, value);
+  }
+
+  Value add(Value lhs, Value rhs) {
+    if (isLLVMIndexConstant(lhs, 0))
+      return rhs;
+    if (isLLVMIndexConstant(rhs, 0))
+      return lhs;
+    return LLVM::AddOp::create(rewriter, loc, indexType, lhs, rhs);
+  }
+
+  Value mul(Value lhs, Value rhs) {
+    if (isLLVMIndexConstant(lhs, 0) || isLLVMIndexConstant(rhs, 0))
+      return constant(0);
+    if (isLLVMIndexConstant(lhs, 1))
+      return rhs;
+    if (isLLVMIndexConstant(rhs, 1))
+      return lhs;
+    return LLVM::MulOp::create(rewriter, loc, indexType, lhs, rhs);
+  }
+
+  FailureOr<Value> linearize(ValueRange indices,
+                             const DependentMemRefValueRefinement &stored) {
+    SmallVector<Value> idxs = remapValues(rewriter, indices);
+    SmallVector<StrideExpr> strides = getStrides(stored);
+    if (idxs.size() != strides.size())
+      return failure();
+
+    Value linear;
+    if (stored.offset != 0)
+      linear = constant(stored.offset);
+    for (auto [idx, stride] : llvm::zip_equal(idxs, strides)) {
+      Value term = stride.isUnit() ? idx : mul(idx, stride.value);
+      linear = linear ? add(linear, term) : term;
+    }
+    return linear ? linear : constant(0);
+  }
+
+  Value gep(Value base, Type elementType, Value linear) {
+    auto ptrType = LLVM::LLVMPointerType::get(rewriter.getContext());
+    return LLVM::GEPOp::create(rewriter, loc, ptrType, elementType, base,
+                               linear);
+  }
+
+private:
+  SmallVector<StrideExpr> materializeDefaultStrides(ArrayRef<Value> dims) {
+    SmallVector<StrideExpr> strides(dims.size());
+    if (dims.empty())
+      return strides;
+    strides.back() = StrideExpr::unit();
+    for (int64_t i = static_cast<int64_t>(dims.size()) - 2; i >= 0; --i) {
+      StrideExpr innerStride = strides[i + 1];
+      strides[i] =
+          innerStride.isUnit()
+              ? StrideExpr::valueStride(dims[i + 1])
+              : StrideExpr::valueStride(mul(dims[i + 1], innerStride.value));
+    }
+    return strides;
+  }
+
+  SmallVector<StrideExpr>
+  getStrides(const DependentMemRefValueRefinement &stored) {
+    if (!stored.hasExplicitLayout) {
+      SmallVector<Value> dims = remapValues(rewriter, stored.getDimValues());
+      return materializeDefaultStrides(dims);
+    }
+
+    SmallVector<Value> values = remapValues(rewriter, stored.getStrideValues());
+    SmallVector<StrideExpr> strides;
+    strides.reserve(values.size());
+    for (Value value : values) {
+      if (isLLVMIndexConstant(value, 1))
+        strides.push_back(StrideExpr::unit());
+      else
+        strides.push_back(StrideExpr::valueStride(value));
+    }
+    return strides;
+  }
+
+  ConversionPatternRewriter &rewriter;
+  Location loc;
+  Type indexType;
+};
 
 static FailureOr<LLVM::LLVMFunctionType>
 convertFunctionTypeForDependentMemRef(func::FuncOp op,
@@ -211,39 +276,6 @@ struct LowerCallOp : public OpConversionPattern<func::CallOp> {
   }
 };
 
-static FailureOr<Value>
-linearizeIndex(ConversionPatternRewriter &rewriter, Location loc,
-               Type indexType, ValueRange indices,
-               const DependentMemRefValueRefinement &stored) {
-  SmallVector<Value> idxs = remapValues(rewriter, indices);
-  SmallVector<Value> dims = remapValues(rewriter, stored.getDimValues());
-  SmallVector<Value> strides =
-      stored.hasExplicitLayout
-          ? remapValues(rewriter, stored.getStrideValues())
-          : materializeDefaultStrides(rewriter, loc, indexType, dims);
-  if (idxs.size() != strides.size())
-    return failure();
-  Value linear;
-  if (stored.offset != 0)
-    linear = llvmIndexConstant(rewriter, loc, indexType, stored.offset);
-  for (auto [idx, stride] : llvm::zip_equal(idxs, strides)) {
-    Value term = stride ? maybeMul(rewriter, loc, indexType, idx, stride) : idx;
-    if (!linear)
-      linear = term;
-    else
-      linear = maybeAdd(rewriter, loc, indexType, linear, term);
-  }
-  if (!linear)
-    return llvmIndexConstant(rewriter, loc, indexType, 0);
-  return linear;
-}
-
-static Value gepForElement(ConversionPatternRewriter &rewriter, Location loc,
-                           Value base, Type elementType, Value linear) {
-  auto ptrType = LLVM::LLVMPointerType::get(rewriter.getContext());
-  return LLVM::GEPOp::create(rewriter, loc, ptrType, elementType, base, linear);
-}
-
 struct LowerAllocOp : public OpConversionPattern<AllocOp> {
   using OpConversionPattern::OpConversionPattern;
   LogicalResult
@@ -258,15 +290,13 @@ struct LowerAllocOp : public OpConversionPattern<AllocOp> {
       return failure();
     SmallVector<Value> dims = remapValues(
         rewriter, op.getProperties().result_refinement.getDimValues());
-    Value numElems = llvmIndexConstant(rewriter, op.getLoc(), indexType, 1);
+    DependentMemRefAddressBuilder address(rewriter, op.getLoc(), indexType);
+    Value numElems = address.constant(1);
     for (Value dim : dims)
-      numElems =
-          LLVM::MulOp::create(rewriter, op.getLoc(), indexType, numElems, dim);
+      numElems = address.mul(numElems, dim);
     Value elemBytes =
-        llvmIndexConstant(rewriter, op.getLoc(), indexType,
-                          elementSizeBytes(memrefType.getElementType()));
-    Value sizeBytes = LLVM::MulOp::create(rewriter, op.getLoc(), indexType,
-                                          numElems, elemBytes);
+        address.constant(elementSizeBytes(memrefType.getElementType()));
+    Value sizeBytes = address.mul(numElems, elemBytes);
     auto call = LLVM::CallOp::create(rewriter, op.getLoc(), mallocFn.value(),
                                      sizeBytes);
     rewriter.replaceOp(op, call.getResult());
@@ -297,14 +327,14 @@ struct LowerLoadOp : public OpConversionPattern<LoadOp> {
   matchAndRewrite(LoadOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Type indexType = getTypeConverter()->convertType(rewriter.getIndexType());
-    FailureOr<Value> linear =
-        linearizeIndex(rewriter, op.getLoc(), indexType, adaptor.getIndices(),
-                       op.getProperties().source_refinement);
+    DependentMemRefAddressBuilder address(rewriter, op.getLoc(), indexType);
+    FailureOr<Value> linear = address.linearize(
+        adaptor.getIndices(), op.getProperties().source_refinement);
     if (failed(linear))
       return failure();
     auto memrefType = cast<MemRefType>(op.getSource().getType());
-    Value ptr = gepForElement(rewriter, op.getLoc(), adaptor.getSource(),
-                              memrefType.getElementType(), *linear);
+    Value ptr =
+        address.gep(adaptor.getSource(), memrefType.getElementType(), *linear);
     rewriter.replaceOpWithNewOp<LLVM::LoadOp>(op, op.getResult().getType(),
                                               ptr);
     return success();
@@ -317,14 +347,14 @@ struct LowerStoreOp : public OpConversionPattern<StoreOp> {
   matchAndRewrite(StoreOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Type indexType = getTypeConverter()->convertType(rewriter.getIndexType());
-    FailureOr<Value> linear =
-        linearizeIndex(rewriter, op.getLoc(), indexType, adaptor.getIndices(),
-                       op.getProperties().source_refinement);
+    DependentMemRefAddressBuilder address(rewriter, op.getLoc(), indexType);
+    FailureOr<Value> linear = address.linearize(
+        adaptor.getIndices(), op.getProperties().source_refinement);
     if (failed(linear))
       return failure();
     auto memrefType = cast<MemRefType>(op.getSource().getType());
-    Value ptr = gepForElement(rewriter, op.getLoc(), adaptor.getSource(),
-                              memrefType.getElementType(), *linear);
+    Value ptr =
+        address.gep(adaptor.getSource(), memrefType.getElementType(), *linear);
     rewriter.replaceOpWithNewOp<LLVM::StoreOp>(op, adaptor.getValue(), ptr);
     return success();
   }

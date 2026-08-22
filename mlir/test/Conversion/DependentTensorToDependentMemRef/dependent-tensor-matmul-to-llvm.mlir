@@ -43,6 +43,8 @@ func.func @dependent_matmul_kernel(
 // CHECK-NOT: "dependent_tensor.
 // CHECK-NOT: "dependent_memref.
 // CHECK-NOT: "arith.
+// CHECK-NOT: value = 0 : i64
+// CHECK-NOT: value = 1 : i64
 // CHECK: "llvm.icmp"(%{{.*}}, %{{.*}}) <{predicate = 2 : i64}> : (i64, i64) -> i1
 // CHECK: "llvm.getelementptr"(%{{.*}}, %{{.*}}) <{elem_type = f32{{.*}}> : (!llvm.ptr, i64) -> !llvm.ptr
 // CHECK: "llvm.load"(%{{.*}}) <{ordering = 0 : i64}> : (!llvm.ptr) -> f32
