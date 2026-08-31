@@ -122,13 +122,58 @@ struct DependentTensorDimValueRefinement {
   }
 };
 
+struct DependentTypeValueRefinement {
+  uint32_t valueIndex = 0;
+  int64_t rank = 0;
+  int64_t offset = 0;
+  bool hasExplicitLayout = false;
+  SmallVector<PropertyOperand, 2> dimValues;
+  SmallVector<PropertyOperand, 2> strideValues;
+
+  SmallVector<Value, 4> getDimValues() const {
+    SmallVector<Value, 4> values;
+    values.reserve(dimValues.size());
+    for (const PropertyOperand &operand : dimValues)
+      values.push_back(operand.get());
+    return values;
+  }
+  void assignDimValues(ValueRange values) {
+    dimValues.clear();
+    dimValues.reserve(values.size());
+    for (Value value : values)
+      dimValues.emplace_back(value);
+  }
+
+  SmallVector<Value, 4> getStrideValues() const {
+    SmallVector<Value, 4> values;
+    values.reserve(strideValues.size());
+    for (const PropertyOperand &operand : strideValues)
+      values.push_back(operand.get());
+    return values;
+  }
+  void assignStrideValues(ValueRange values) {
+    strideValues.clear();
+    strideValues.reserve(values.size());
+    for (Value value : values)
+      strideValues.emplace_back(value);
+  }
+
+  bool operator==(const DependentTypeValueRefinement &other) const {
+    return valueIndex == other.valueIndex && rank == other.rank &&
+           offset == other.offset &&
+           hasExplicitLayout == other.hasExplicitLayout &&
+           areEqualDependentTensorDimValues(dimValues, other.dimValues) &&
+           areEqualDependentTensorDimValues(strideValues, other.strideValues);
+  }
+};
+
 struct DependentMemRefValueRefinement {
   uint32_t valueIndex = 0;
   int64_t rank = 0;
   int64_t offset = 0;
   bool hasExplicitLayout = false;
-  SmallVector<PropertyOperand, 4> dimValues;
-  SmallVector<PropertyOperand, 4> strideValues;
+  SmallVector<PropertyOperand, 2> dimValues;
+  SmallVector<PropertyOperand, 2> strideValues;
 
   SmallVector<Value, 4> getDimValues() const {
     SmallVector<Value, 4> values;
@@ -172,6 +217,7 @@ llvm::hash_code hash_value(const DependentTensorValueRefinement &refinement);
 llvm::hash_code hash_value(const DependentTensorLoopTypeRef &refinement);
 llvm::hash_code hash_value(const DependentTensorDimValueRefinement &refinement);
 llvm::hash_code hash_value(const DependentMemRefValueRefinement &refinement);
+llvm::hash_code hash_value(const DependentTypeValueRefinement &refinement);
 } // namespace mlir
 
 #include "mlir/IR/DependentTensorInterfaces.h.inc"

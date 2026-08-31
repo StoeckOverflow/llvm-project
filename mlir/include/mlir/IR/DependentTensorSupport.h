@@ -120,6 +120,34 @@ void printLoopTypeRefs(OpAsmPrinter &printer,
                        ArrayRef<DependentTensorLoopTypeRef> typeRefs);
 } // namespace dependent_tensor
 
+namespace dependent_memref {
+struct PendingMemRefSpec {
+  SmallVector<OpAsmParser::UnresolvedOperand, 4> dims;
+  SmallVector<OpAsmParser::UnresolvedOperand, 4> strides;
+  Type elementType;
+  int64_t offset = 0;
+  bool hasExplicitLayout = false;
+  SMLoc loc;
+};
+
+ParseResult parseMemRefSpec(OpAsmParser &parser, PendingMemRefSpec &spec);
+ParseResult resolveMemRefSpec(OpAsmParser &parser, MemRefType type,
+                              const PendingMemRefSpec &spec,
+                              unsigned valueIndex,
+                              DependentMemRefValueRefinement &refinement);
+bool allowsFlatMemRefCarrier(MemRefType type,
+                             const DependentMemRefValueRefinement &stored);
+LogicalResult
+verifyStoredRefinement(Operation *op, Value value,
+                       const DependentMemRefValueRefinement &stored);
+void printMemRefSpec(OpAsmPrinter &printer,
+                     const DependentMemRefValueRefinement &refinement,
+                     Type elementType);
+void printMemRefSpec(OpAsmPrinter &printer,
+                     const DependentTypeValueRefinement &refinement,
+                     Type elementType);
+} // namespace dependent_memref
+
 } // namespace mlir
 
 #endif // MLIR_IR_DEPENDENTTENSORSUPPORT_H

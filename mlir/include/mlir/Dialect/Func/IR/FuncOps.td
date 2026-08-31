@@ -305,10 +305,10 @@ def FuncOp : Func_Op<"func", [
                        OptionalAttr<DictArrayAttr>:$arg_attrs,
                        OptionalAttr<DictArrayAttr>:$res_attrs,
                        UnitAttr:$no_inline,
-                       DefaultValuedProp<ArrayProp<DependentTensorValueRefinementProp>, "{}">:
-                           $dependentTensorArgRefinements,
-                       DefaultValuedProp<ArrayProp<DependentTensorValueRefinementProp>, "{}">:
-                           $dependentTensorResultRefinements);
+                       DefaultValuedProp<ArrayProp<DependentTypeValueRefinementProp>, "{}">:
+                           $dependentTypeArgRefinements,
+                       DefaultValuedProp<ArrayProp<DependentTypeValueRefinementProp>, "{}">:
+                           $dependentTypeResultRefinements);
   let regions = (region AnyRegion:$body);
 
   let builders = [OpBuilder<(ins

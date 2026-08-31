@@ -235,8 +235,8 @@ struct ConvertDependentTensorToDependentMemRefPass
 
     getOperation()->walk([](func::FuncOp func) {
       auto &props = func.getProperties();
-      props.dependentTensorArgRefinements.clear();
-      props.dependentTensorResultRefinements.clear();
+      props.dependentTypeArgRefinements.clear();
+      props.dependentTypeResultRefinements.clear();
       reattachPropertyOperands(func);
     });
   }

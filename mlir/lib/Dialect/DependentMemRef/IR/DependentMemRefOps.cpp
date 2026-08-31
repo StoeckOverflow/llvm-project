@@ -9,90 +9,6 @@ using namespace mlir;
 using namespace mlir::dependent_memref;
 
 namespace {
-struct ParsedMemRefSpec {
-  SmallVector<OpAsmParser::UnresolvedOperand> dims;
-  SmallVector<OpAsmParser::UnresolvedOperand> strides;
-  Type elementType;
-  int64_t offset = 0;
-  bool hasExplicitLayout = false;
-  SMLoc loc;
-};
-
-static ParseResult parseMemRefSpec(OpAsmParser &parser,
-                                   ParsedMemRefSpec &spec) {
-  spec.loc = parser.getCurrentLocation();
-  if (parser.parseHashKeyword("memref") || parser.parseLess())
-    return failure();
-  if (parser.parseCommaSeparatedList(OpAsmParser::Delimiter::Square,
-                                     [&]() -> ParseResult {
-                                       OpAsmParser::UnresolvedOperand dim;
-                                       if (parser.parseOperand(dim))
-                                         return failure();
-                                       spec.dims.push_back(dim);
-                                       return success();
-                                     }))
-    return failure();
-  if (parser.parseComma() || parser.parseType(spec.elementType))
-    return failure();
-
-  if (succeeded(parser.parseOptionalComma())) {
-    spec.hasExplicitLayout = true;
-    if (parser.parseKeyword("offset") || parser.parseColon() ||
-        parser.parseInteger(spec.offset) || parser.parseComma() ||
-        parser.parseKeyword("strides") || parser.parseColon())
-      return failure();
-    if (parser.parseCommaSeparatedList(OpAsmParser::Delimiter::Square,
-                                       [&]() -> ParseResult {
-                                         OpAsmParser::UnresolvedOperand stride;
-                                         if (parser.parseOperand(stride))
-                                           return failure();
-                                         spec.strides.push_back(stride);
-                                         return success();
-                                       }))
-      return failure();
-  }
-  return parser.parseGreater();
-}
-
-static ParseResult
-resolveMemRefSpec(OpAsmParser &parser, MemRefType type,
-                  const ParsedMemRefSpec &spec, unsigned valueIndex,
-                  DependentMemRefValueRefinement &refinement) {
-  if (static_cast<int64_t>(spec.dims.size()) != type.getRank())
-    return parser.emitError(spec.loc, "dependent memref rank mismatch");
-  if (spec.elementType != type.getElementType())
-    return parser.emitError(
-        spec.loc, "dependent memref element type must match value type");
-  if (spec.hasExplicitLayout &&
-      static_cast<int64_t>(spec.strides.size()) != type.getRank())
-    return parser.emitError(spec.loc,
-                            "dependent memref stride count must match rank");
-
-  SmallVector<Type> indexTypes(spec.dims.size(),
-                               parser.getBuilder().getIndexType());
-  SmallVector<Value> resolvedDims;
-  if (parser.resolveOperands(spec.dims, indexTypes, parser.getCurrentLocation(),
-                             resolvedDims))
-    return failure();
-
-  SmallVector<Value> resolvedStrides;
-  if (spec.hasExplicitLayout) {
-    SmallVector<Type> strideTypes(spec.strides.size(),
-                                  parser.getBuilder().getIndexType());
-    if (parser.resolveOperands(spec.strides, strideTypes,
-                               parser.getCurrentLocation(), resolvedStrides))
-      return failure();
-  }
-
-  refinement.valueIndex = valueIndex;
-  refinement.rank = type.getRank();
-  refinement.offset = spec.offset;
-  refinement.hasExplicitLayout = spec.hasExplicitLayout;
-  refinement.assignDimValues(resolvedDims);
-  refinement.assignStrideValues(resolvedStrides);
-  return success();
-}
-
 static void printValueList(OpAsmPrinter &printer, ValueRange values) {
   printer << "[";
   llvm::interleaveComma(values, printer,
@@ -111,15 +27,18 @@ static void walkRefinement(DependentMemRefValueRefinement &refinement,
 static FailureOr<MemRefValueRefinement>
 decodeStored(Value value, const DependentMemRefValueRefinement &stored) {
   auto type = dyn_cast<MemRefType>(value.getType());
-  if (!type || stored.rank != type.getRank())
+  if (!type)
+    return failure();
+  bool flatCarrier = dependent_memref::allowsFlatMemRefCarrier(type, stored);
+  if (!flatCarrier && stored.rank != type.getRank())
     return failure();
   MemRefValueRefinement info{type, stored.getDimValues(), stored.offset,
                              stored.getStrideValues(),
                              stored.hasExplicitLayout};
-  if (info.dimValues.size() != static_cast<size_t>(type.getRank()))
+  if (info.dimValues.size() != static_cast<size_t>(stored.rank))
     return failure();
   if (info.hasExplicitLayout &&
-      info.strideValues.size() != static_cast<size_t>(type.getRank()))
+      info.strideValues.size() != static_cast<size_t>(stored.rank))
     return failure();
   return info;
 }
@@ -131,7 +50,9 @@ dependent_memref::buildStoredRefinement(unsigned valueIndex, MemRefType type,
                                         ValueRange strideValues) {
   DependentMemRefValueRefinement stored;
   stored.valueIndex = valueIndex;
-  stored.rank = type.getRank();
+  stored.rank = type.getRank() == 0 && !dimValues.empty()
+                    ? static_cast<int64_t>(dimValues.size())
+                    : type.getRank();
   stored.offset = offset;
   stored.hasExplicitLayout = !strideValues.empty();
   stored.assignDimValues(dimValues);
@@ -144,53 +65,8 @@ FailureOr<MemRefValueRefinement> dependent_memref::decodeStoredRefinement(
   return decodeStored(value, stored);
 }
 
-LogicalResult dependent_memref::verifyStoredRefinement(
-    Operation *op, Value value, const DependentMemRefValueRefinement &stored) {
-  auto type = dyn_cast<MemRefType>(value.getType());
-  if (!type)
-    return op->emitOpError("requires memref value refinements");
-  if (stored.rank != type.getRank())
-    return op->emitOpError(
-        "requires dependent memref rank to match value rank");
-  if (stored.dimValues.size() != static_cast<size_t>(type.getRank()))
-    return op->emitOpError(
-        "requires one dependent dimension value per memref dimension");
-  if (stored.hasExplicitLayout &&
-      stored.strideValues.size() != static_cast<size_t>(type.getRank()))
-    return op->emitOpError(
-        "requires one dependent stride value per memref dimension");
-  for (auto [dim, operand] : llvm::enumerate(stored.dimValues)) {
-    if (!type.isDynamicDim(dim))
-      return op->emitOpError(
-          "requires dependent dimensions to correspond to dynamic memref dims");
-    Value dimValue = operand.get();
-    if (!dimValue || !dimValue.getType().isIndex())
-      return op->emitOpError("requires index-typed dependent dimensions");
-  }
-  for (const PropertyOperand &operand : stored.strideValues) {
-    Value strideValue = operand.get();
-    if (!strideValue || !strideValue.getType().isIndex())
-      return op->emitOpError("requires index-typed dependent strides");
-  }
-  return success();
-}
-
-void dependent_memref::printMemRefSpec(
-    OpAsmPrinter &printer, const DependentMemRefValueRefinement &refinement,
-    Type elementType) {
-  printer << "#memref<";
-  printValueList(printer, refinement.getDimValues());
-  printer << ", ";
-  printer.printType(elementType);
-  if (refinement.hasExplicitLayout) {
-    printer << ", offset: " << refinement.offset << ", strides: ";
-    printValueList(printer, refinement.getStrideValues());
-  }
-  printer << ">";
-}
-
 ParseResult AllocOp::parse(OpAsmParser &parser, OperationState &result) {
-  ParsedMemRefSpec spec;
+  PendingMemRefSpec spec;
   Type resultType;
   if (parseMemRefSpec(parser, spec) || parser.parseColonType(resultType))
     return failure();
@@ -225,7 +101,7 @@ void AllocOp::walkPropertySSAUses(function_ref<void(PropertyOperand &)> cb) {
 ParseResult ReinterpretCastOp::parse(OpAsmParser &parser,
                                      OperationState &result) {
   OpAsmParser::UnresolvedOperand source;
-  ParsedMemRefSpec spec;
+  PendingMemRefSpec spec;
   Type sourceType, resultType;
   if (parser.parseOperand(source) || parser.parseComma())
     return failure();
@@ -275,7 +151,7 @@ void ReinterpretCastOp::walkPropertySSAUses(
 
 ParseResult CastOp::parse(OpAsmParser &parser, OperationState &result) {
   OpAsmParser::UnresolvedOperand source;
-  ParsedMemRefSpec spec;
+  PendingMemRefSpec spec;
   Type sourceType, resultType;
   if (parser.parseOperand(source) || parser.parseComma())
     return failure();
@@ -328,7 +204,7 @@ parseSourceRefinedOp(OpAsmParser &parser, OperationState &result,
                      SmallVectorImpl<OpAsmParser::UnresolvedOperand> *indices,
                      Type &sourceType, Type *resultType,
                      DependentMemRefValueRefinement &refinement) {
-  ParsedMemRefSpec spec;
+  PendingMemRefSpec spec;
   if (parser.parseOperand(source))
     return failure();
   if (indices &&
@@ -355,7 +231,7 @@ ParseResult DimOp::parse(OpAsmParser &parser, OperationState &result) {
   if (parser.parseOperand(source) || parser.parseComma() ||
       parser.parseOperand(dimension) || parser.parseComma())
     return failure();
-  ParsedMemRefSpec spec;
+  PendingMemRefSpec spec;
   if (parseMemRefSpec(parser, spec) || parser.parseColonType(sourceType))
     return failure();
   if (parser.resolveOperand(source, sourceType, result.operands) ||
@@ -413,7 +289,7 @@ ParseResult DimExactOp::parse(OpAsmParser &parser, OperationState &result) {
       parser.parseLParen() || parser.parseAttribute(axis) ||
       parser.parseRParen())
     return failure();
-  ParsedMemRefSpec spec;
+  PendingMemRefSpec spec;
   if (parseMemRefSpec(parser, spec) || parser.parseColonType(sourceType))
     return failure();
   if (parser.resolveOperand(source, sourceType, result.operands))
@@ -498,8 +374,9 @@ LogicalResult LoadOp::verify() {
   auto type = dyn_cast<MemRefType>(getSource().getType());
   if (!type)
     return emitOpError("requires memref source");
-  if (static_cast<int64_t>(getIndices().size()) != type.getRank())
-    return emitOpError("requires one index per memref dimension");
+  if (static_cast<int64_t>(getIndices().size()) !=
+      getProperties().source_refinement.rank)
+    return emitOpError("requires one index per logical memref dimension");
   if (getResult().getType() != type.getElementType())
     return emitOpError("requires result type to match memref element type");
   return verifyStoredRefinement(*this, getSource(),
@@ -551,8 +428,9 @@ LogicalResult StoreOp::verify() {
   auto type = dyn_cast<MemRefType>(getSource().getType());
   if (!type)
     return emitOpError("requires memref source");
-  if (static_cast<int64_t>(getIndices().size()) != type.getRank())
-    return emitOpError("requires one index per memref dimension");
+  if (static_cast<int64_t>(getIndices().size()) !=
+      getProperties().source_refinement.rank)
+    return emitOpError("requires one index per logical memref dimension");
   if (getValue().getType() != type.getElementType())
     return emitOpError(
         "requires stored value type to match memref element type");

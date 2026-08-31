@@ -54,15 +54,15 @@ func.func @op_with_passthrough_region_args() {
 // CHECK-NOT: func
 // CHECK: Materializing...
 // CHECK: "builtin.module"() ({
-// CHECK: "func.func"() <{dependentTensorArgRefinements = [], dependentTensorResultRefinements = [], function_type = () -> (), sym_name = "op_with_passthrough_region_args"}> ({
+// CHECK: "func.func"() <{dependentTypeArgRefinements = [], dependentTypeResultRefinements = [], function_type = () -> (), sym_name = "op_with_passthrough_region_args"}> ({
 // CHECK-NOT: arith
 // CHECK: Has 1 ops to materialize
 
 // CHECK: Before Materializing...
-// CHECK: "func.func"() <{dependentTensorArgRefinements = [], dependentTensorResultRefinements = [], function_type = () -> (), sym_name = "op_with_passthrough_region_args"}> ({
+// CHECK: "func.func"() <{dependentTypeArgRefinements = [], dependentTypeResultRefinements = [], function_type = () -> (), sym_name = "op_with_passthrough_region_args"}> ({
 // CHECK-NOT: arith
 // CHECK: Materializing...
-// CHECK: "func.func"() <{dependentTensorArgRefinements = [], dependentTensorResultRefinements = [], function_type = () -> (), sym_name = "op_with_passthrough_region_args"}> ({
+// CHECK: "func.func"() <{dependentTypeArgRefinements = [], dependentTypeResultRefinements = [], function_type = () -> (), sym_name = "op_with_passthrough_region_args"}> ({
 // CHECK: arith
 // CHECK: one_region_op
 // CHECK: test.consumer

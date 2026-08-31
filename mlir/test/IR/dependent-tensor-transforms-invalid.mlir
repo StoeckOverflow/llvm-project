@@ -21,4 +21,4 @@ func.func @erase_func_boundary_live_dim_arg(%m : index, %t : tensor<?xf32>)
   return %t : tensor<?xf32>
 }
 
-// SIGERR: cannot erase function argument #0 because it is used by surviving dependent tensor argument boundary refinements
+// SIGERR: cannot erase function argument #0 because it is used by surviving dependent type argument boundary refinements

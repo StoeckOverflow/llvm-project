@@ -47,6 +47,15 @@ mlir::hash_value(const DependentMemRefValueRefinement &refinement) {
       hashDependentTensorDimValues(refinement.strideValues));
 }
 
+llvm::hash_code
+mlir::hash_value(const DependentTypeValueRefinement &refinement) {
+  return llvm::hash_combine(
+      refinement.valueIndex, refinement.rank, refinement.offset,
+      refinement.hasExplicitLayout,
+      hashDependentTensorDimValues(refinement.dimValues),
+      hashDependentTensorDimValues(refinement.strideValues));
+}
+
 void mlir::walkDependentTensorPropertyUses(
     Operation *op, function_ref<void(PropertyOperand &)> callback) {
   walkPropertyOperands(op, callback);
@@ -148,6 +157,158 @@ void mlir::dependent_tensor::printTensorSpec(OpAsmPrinter &printer,
                         [&](Value value) { printer.printOperand(value); });
   printer << "], ";
   printer.printType(elementType);
+  printer << ">";
+}
+
+static void printDependentMemRefValueList(OpAsmPrinter &printer,
+                                          ValueRange values) {
+  printer << "[";
+  llvm::interleaveComma(values, printer,
+                        [&](Value value) { printer.printOperand(value); });
+  printer << "]";
+}
+
+ParseResult mlir::dependent_memref::parseMemRefSpec(OpAsmParser &parser,
+                                                    PendingMemRefSpec &spec) {
+  spec.loc = parser.getCurrentLocation();
+  if (parser.parseHashKeyword("memref") || parser.parseLess())
+    return failure();
+  if (parser.parseCommaSeparatedList(OpAsmParser::Delimiter::Square,
+                                     [&]() -> ParseResult {
+                                       OpAsmParser::UnresolvedOperand dim;
+                                       if (parser.parseOperand(dim))
+                                         return failure();
+                                       spec.dims.push_back(dim);
+                                       return success();
+                                     }))
+    return failure();
+  if (parser.parseComma() || parser.parseType(spec.elementType))
+    return failure();
+
+  if (succeeded(parser.parseOptionalComma())) {
+    spec.hasExplicitLayout = true;
+    if (parser.parseKeyword("offset") || parser.parseColon() ||
+        parser.parseInteger(spec.offset) || parser.parseComma() ||
+        parser.parseKeyword("strides") || parser.parseColon())
+      return failure();
+    if (parser.parseCommaSeparatedList(OpAsmParser::Delimiter::Square,
+                                       [&]() -> ParseResult {
+                                         OpAsmParser::UnresolvedOperand stride;
+                                         if (parser.parseOperand(stride))
+                                           return failure();
+                                         spec.strides.push_back(stride);
+                                         return success();
+                                       }))
+      return failure();
+  }
+  return parser.parseGreater();
+}
+
+ParseResult mlir::dependent_memref::resolveMemRefSpec(
+    OpAsmParser &parser, MemRefType type, const PendingMemRefSpec &spec,
+    unsigned valueIndex, DependentMemRefValueRefinement &refinement) {
+  bool flatCarrier = type.getRank() == 0 && !spec.dims.empty();
+  int64_t logicalRank =
+      flatCarrier ? static_cast<int64_t>(spec.dims.size()) : type.getRank();
+  if (static_cast<int64_t>(spec.dims.size()) != logicalRank)
+    return parser.emitError(spec.loc, "dependent memref rank mismatch");
+  if (spec.elementType != type.getElementType())
+    return parser.emitError(
+        spec.loc, "dependent memref element type must match value type");
+  if (spec.hasExplicitLayout &&
+      static_cast<int64_t>(spec.strides.size()) != logicalRank)
+    return parser.emitError(spec.loc,
+                            "dependent memref stride count must match rank");
+
+  SmallVector<Type> indexTypes(spec.dims.size(),
+                               parser.getBuilder().getIndexType());
+  SmallVector<Value> resolvedDims;
+  if (parser.resolveOperands(spec.dims, indexTypes, parser.getCurrentLocation(),
+                             resolvedDims))
+    return failure();
+
+  SmallVector<Value> resolvedStrides;
+  if (spec.hasExplicitLayout) {
+    SmallVector<Type> strideTypes(spec.strides.size(),
+                                  parser.getBuilder().getIndexType());
+    if (parser.resolveOperands(spec.strides, strideTypes,
+                               parser.getCurrentLocation(), resolvedStrides))
+      return failure();
+  }
+
+  refinement.valueIndex = valueIndex;
+  refinement.rank = logicalRank;
+  refinement.offset = spec.offset;
+  refinement.hasExplicitLayout = spec.hasExplicitLayout;
+  refinement.assignDimValues(resolvedDims);
+  refinement.assignStrideValues(resolvedStrides);
+  return success();
+}
+
+bool mlir::dependent_memref::allowsFlatMemRefCarrier(
+    MemRefType type, const DependentMemRefValueRefinement &stored) {
+  return type.getRank() == 0 && stored.rank > 0;
+}
+
+LogicalResult mlir::dependent_memref::verifyStoredRefinement(
+    Operation *op, Value value, const DependentMemRefValueRefinement &stored) {
+  auto type = dyn_cast<MemRefType>(value.getType());
+  if (!type)
+    return op->emitOpError("requires memref value refinements");
+
+  bool flatCarrier = allowsFlatMemRefCarrier(type, stored);
+  if (!flatCarrier && stored.rank != type.getRank())
+    return op->emitOpError(
+        "requires dependent memref rank to match value rank");
+  if (stored.dimValues.size() != static_cast<size_t>(stored.rank))
+    return op->emitOpError(
+        "requires one dependent dimension value per logical memref dimension");
+  if (stored.hasExplicitLayout &&
+      stored.strideValues.size() != static_cast<size_t>(stored.rank))
+    return op->emitOpError(
+        "requires one dependent stride value per logical memref dimension");
+
+  for (auto [dim, operand] : llvm::enumerate(stored.dimValues)) {
+    if (!flatCarrier && !type.isDynamicDim(dim))
+      return op->emitOpError(
+          "requires dependent dimensions to correspond to dynamic memref dims");
+    Value dimValue = operand.get();
+    if (!dimValue || !dimValue.getType().isIndex())
+      return op->emitOpError("requires index-typed dependent dimensions");
+  }
+  for (const PropertyOperand &operand : stored.strideValues) {
+    Value strideValue = operand.get();
+    if (!strideValue || !strideValue.getType().isIndex())
+      return op->emitOpError("requires index-typed dependent strides");
+  }
+  return success();
+}
+
+void mlir::dependent_memref::printMemRefSpec(
+    OpAsmPrinter &printer, const DependentMemRefValueRefinement &refinement,
+    Type elementType) {
+  printer << "#memref<";
+  printDependentMemRefValueList(printer, refinement.getDimValues());
+  printer << ", ";
+  printer.printType(elementType);
+  if (refinement.hasExplicitLayout) {
+    printer << ", offset: " << refinement.offset << ", strides: ";
+    printDependentMemRefValueList(printer, refinement.getStrideValues());
+  }
+  printer << ">";
+}
+
+void mlir::dependent_memref::printMemRefSpec(
+    OpAsmPrinter &printer, const DependentTypeValueRefinement &refinement,
+    Type elementType) {
+  printer << "#memref<";
+  printDependentMemRefValueList(printer, refinement.getDimValues());
+  printer << ", ";
+  printer.printType(elementType);
+  if (refinement.hasExplicitLayout) {
+    printer << ", offset: " << refinement.offset << ", strides: ";
+    printDependentMemRefValueList(printer, refinement.getStrideValues());
+  }
   printer << ">";
 }
 

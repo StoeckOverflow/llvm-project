@@ -42,6 +42,15 @@ buildInfoFromStored(RankedTensorType type,
   return info;
 }
 
+static DependentTensorValueRefinement
+convertToTensorRefinement(const DependentTypeValueRefinement &stored) {
+  DependentTensorValueRefinement converted;
+  converted.valueIndex = stored.valueIndex;
+  converted.rank = stored.rank;
+  converted.assignDimValues(stored.getDimValues());
+  return converted;
+}
+
 static FailureOr<TensorValueRefinement>
 buildInfoFromTypeRef(RankedTensorType type,
                      const DependentTensorTypeRef &stored) {
@@ -169,10 +178,10 @@ verifyStoredTensorRefinement(Operation *owner, StringRef kind, Type type,
   return success();
 }
 
-static const DependentTensorValueRefinement *
-findStoredRefinement(ArrayRef<DependentTensorValueRefinement> refinements,
+static const DependentTypeValueRefinement *
+findStoredRefinement(ArrayRef<DependentTypeValueRefinement> refinements,
                      unsigned valueIndex) {
-  for (const DependentTensorValueRefinement &candidate : refinements)
+  for (const DependentTypeValueRefinement &candidate : refinements)
     if (candidate.valueIndex == valueIndex)
       return &candidate;
   return nullptr;
@@ -181,30 +190,44 @@ findStoredRefinement(ArrayRef<DependentTensorValueRefinement> refinements,
 static LogicalResult verifyFuncBoundaryProperties(func::FuncOp func,
                                                   DominanceInfo &dominance) {
   llvm::SmallDenseSet<unsigned> seenArgRefinements;
-  for (const DependentTensorValueRefinement &stored :
-       func.getProperties().dependentTensorArgRefinements) {
-    if (!seenArgRefinements.insert(stored.valueIndex).second)
-      return func.emitOpError()
-             << "has duplicate dependent argument refinements";
+  for (const DependentTypeValueRefinement &stored :
+       func.getProperties().dependentTypeArgRefinements) {
     if (stored.valueIndex >= func.getNumArguments())
       return func.emitOpError()
              << "has dependent argument refinements out of range";
+    if (!isa<RankedTensorType>(func.getArgument(stored.valueIndex).getType()))
+      continue;
+    if (!seenArgRefinements.insert(stored.valueIndex).second)
+      return func.emitOpError()
+             << "has duplicate dependent argument refinements";
+    if (stored.hasExplicitLayout)
+      return func.emitOpError()
+             << "has layout on dependent tensor argument refinements";
+    DependentTensorValueRefinement tensorRef =
+        convertToTensorRefinement(stored);
     if (failed(verifyStoredTensorRefinement(
             func, "argument", func.getArgument(stored.valueIndex).getType(),
-            stored, stored.valueIndex, dominance, /*dominanceUseSite=*/nullptr,
-            func)))
+            tensorRef, stored.valueIndex, dominance,
+            /*dominanceUseSite=*/nullptr, func)))
       return failure();
   }
   llvm::SmallDenseSet<unsigned> seenResultRefinements;
-  for (const DependentTensorValueRefinement &stored :
-       func.getProperties().dependentTensorResultRefinements) {
-    if (!seenResultRefinements.insert(stored.valueIndex).second)
-      return func.emitOpError() << "has duplicate dependent result refinements";
+  for (const DependentTypeValueRefinement &stored :
+       func.getProperties().dependentTypeResultRefinements) {
     if (stored.valueIndex >= func.getNumResults())
       return func.emitOpError()
              << "has dependent result refinements out of range";
+    if (!isa<RankedTensorType>(func.getResultTypes()[stored.valueIndex]))
+      continue;
+    if (!seenResultRefinements.insert(stored.valueIndex).second)
+      return func.emitOpError() << "has duplicate dependent result refinements";
+    if (stored.hasExplicitLayout)
+      return func.emitOpError()
+             << "has layout on dependent tensor result refinements";
+    DependentTensorValueRefinement tensorRef =
+        convertToTensorRefinement(stored);
     if (failed(verifyStoredTensorRefinement(
-            func, "result", func.getResultTypes()[stored.valueIndex], stored,
+            func, "result", func.getResultTypes()[stored.valueIndex], tensorRef,
             stored.valueIndex, dominance, /*dominanceUseSite=*/nullptr, func)))
       return failure();
   }
@@ -251,10 +274,10 @@ static LogicalResult verifyInterfaceProperties(Operation *op,
 static LogicalResult verifyReturnRefinements(func::FuncOp func,
                                              func::ReturnOp ret) {
   for (auto [i, operand] : llvm::enumerate(ret.getOperands())) {
-    const DependentTensorValueRefinement *stored = findStoredRefinement(
-        func.getProperties().dependentTensorResultRefinements, i);
+    const DependentTypeValueRefinement *stored = findStoredRefinement(
+        func.getProperties().dependentTypeResultRefinements, i);
     auto actual = getValueRefinement(operand);
-    if (!stored) {
+    if (!stored || stored->hasExplicitLayout) {
       if (succeeded(actual))
         return ret.emitOpError()
                << "returned value carries dependent_tensor refinements not "
@@ -264,7 +287,9 @@ static LogicalResult verifyReturnRefinements(func::FuncOp func,
 
     auto rankedResultType =
         dyn_cast<RankedTensorType>(func.getResultTypes()[i]);
-    auto expected = buildInfoFromStored(rankedResultType, *stored);
+    DependentTensorValueRefinement tensorRef =
+        convertToTensorRefinement(*stored);
+    auto expected = buildInfoFromStored(rankedResultType, tensorRef);
     if (failed(actual) || failed(expected))
       return ret.emitOpError()
              << "failed to resolve dependent_tensor result refinements";
@@ -283,10 +308,10 @@ static LogicalResult verifyCallRefinements(func::CallOp call) {
         "does not reference a valid callee for dependent_tensor verification");
 
   for (auto [i, operand] : llvm::enumerate(call.getOperands())) {
-    const DependentTensorValueRefinement *stored = findStoredRefinement(
-        callee.getProperties().dependentTensorArgRefinements, i);
+    const DependentTypeValueRefinement *stored = findStoredRefinement(
+        callee.getProperties().dependentTypeArgRefinements, i);
     auto actual = getValueRefinement(operand);
-    if (!stored) {
+    if (!stored || stored->hasExplicitLayout) {
       if (succeeded(actual))
         return call.emitOpError()
                << "operand #" << i
@@ -309,7 +334,7 @@ static LogicalResult verifyCallRefinements(func::CallOp call) {
                                   << i;
       mappedDims.push_back(call.getOperand(arg.getArgNumber()));
     }
-    DependentTensorValueRefinement mapped = *stored;
+    DependentTensorValueRefinement mapped = convertToTensorRefinement(*stored);
     mapped.assignDimValues(mappedDims);
     auto expected = buildInfoFromStored(rankedArgType, mapped);
     if (failed(actual) || failed(expected))
@@ -321,10 +346,10 @@ static LogicalResult verifyCallRefinements(func::CallOp call) {
                                 << " does not match callee dependency metadata";
   }
   for (OpResult result : call.getResults()) {
-    const DependentTensorValueRefinement *stored = findStoredRefinement(
-        callee.getProperties().dependentTensorResultRefinements,
+    const DependentTypeValueRefinement *stored = findStoredRefinement(
+        callee.getProperties().dependentTypeResultRefinements,
         result.getResultNumber());
-    if (!stored)
+    if (!stored || stored->hasExplicitLayout)
       continue;
     if (failed(getValueRefinement(result)))
       return call.emitOpError()

@@ -1209,7 +1209,7 @@ struct TestDependentTensorCorruptRefinementsPass
     if (!source || !victim || source.getNumArguments() == 0)
       return;
 
-    auto &refinements = victim.getProperties().dependentTensorArgRefinements;
+    auto &refinements = victim.getProperties().dependentTypeArgRefinements;
     if (refinements.empty() || refinements.front().dimValues.empty())
       return;
     refinements.front().dimValues.front().set(source.getArgument(0));

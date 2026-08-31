@@ -8,7 +8,7 @@ module {}
 // The operation is invalid because the body does not have a terminator, print
 // the generic form.
 // CHECK:      Invalid operation:
-// CHECK-NEXT: "func.func"() <{dependentTensorArgRefinements = [], dependentTensorResultRefinements = [], function_type = () -> (), sym_name = "test"}> ({
+// CHECK-NEXT: "func.func"() <{dependentTypeArgRefinements = [], dependentTypeResultRefinements = [], function_type = () -> (), sym_name = "test"}> ({
 // CHECK-NEXT: ^bb0:
 // CHECK-NEXT: })
 

@@ -55,30 +55,46 @@ static std::optional<uint64_t> getConstantDim(Value value) {
 }
 
 template <typename Range>
-static const DependentTensorValueRefinement *
+static const DependentTypeValueRefinement *
 findStoredRefinement(Range &&range, unsigned valueIndex) {
-  for (const DependentTensorValueRefinement &refinement : range)
+  for (const DependentTypeValueRefinement &refinement : range)
     if (refinement.valueIndex == valueIndex)
       return &refinement;
   return nullptr;
 }
 
+static DependentTensorValueRefinement
+convertToTensorRefinement(const DependentTypeValueRefinement &refinement) {
+  DependentTensorValueRefinement converted;
+  converted.valueIndex = refinement.valueIndex;
+  converted.rank = refinement.rank;
+  converted.assignDimValues(refinement.getDimValues());
+  return converted;
+}
+
 static FailureOr<TensorValueRefinement>
 getFuncArgRefinement(BlockArgument arg, func::FuncOp func,
                      RankedTensorType rankedType) {
-  if (const DependentTensorValueRefinement *stored = findStoredRefinement(
-          func.getProperties().dependentTensorArgRefinements,
-          arg.getArgNumber()))
-    return decodeStoredRefinement(arg, *stored);
+  if (const DependentTypeValueRefinement *stored =
+          findStoredRefinement(func.getProperties().dependentTypeArgRefinements,
+                               arg.getArgNumber())) {
+    if (stored->hasExplicitLayout)
+      return failure();
+    DependentTensorValueRefinement tensorRef =
+        convertToTensorRefinement(*stored);
+    return decodeStoredRefinement(arg, tensorRef);
+  }
   return failure();
 }
 
 static FailureOr<TensorValueRefinement>
 getCallResultRefinement(OpResult result, func::CallOp call, func::FuncOp callee,
                         RankedTensorType rankedType) {
-  if (const DependentTensorValueRefinement *stored = findStoredRefinement(
-          callee.getProperties().dependentTensorResultRefinements,
+  if (const DependentTypeValueRefinement *stored = findStoredRefinement(
+          callee.getProperties().dependentTypeResultRefinements,
           result.getResultNumber())) {
+    if (stored->hasExplicitLayout)
+      return failure();
     SmallVector<Value> mappedDims;
     mappedDims.reserve(stored->dimValues.size());
     for (Value dimValue : stored->getDimValues()) {
