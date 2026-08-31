@@ -6,7 +6,7 @@ tensor-to-memref path for the same scalar matmul loop nest.
 The dependent path is:
 
 ```text
-dependent_tensor -> dependent_memref -> LLVM dialect -> LLVM IR -> opt -O3
+dependent_tensor #types -> dependent_memref #memref boundary refinements -> LLVM dialect -> LLVM IR -> opt -O3
 ```
 
 The baseline path is:
@@ -124,9 +124,6 @@ The scripts save generated artifacts under
 dependent.llvm.mlir
 dependent.ll
 dependent.opt.ll
-dependent-strided.llvm.mlir
-dependent-strided.ll
-dependent-strided.opt.ll
 baseline.llvm.mlir
 baseline.ll
 baseline.opt.ll
@@ -135,8 +132,9 @@ results.json
 
 The primary structural metric is descriptor traffic. The dependent lowering keeps
 memrefs as bare `!llvm.ptr` values and emits no `llvm.insertvalue` or
-`llvm.extractvalue` descriptor construction. The standard baseline intentionally
-uses standard memref descriptors.
+`llvm.extractvalue` descriptor construction. The explicit reinterpret-cast memref
+route is covered as a FileCheck regression test rather than a benchmark route.
+The standard baseline intentionally uses standard memref descriptors.
 
 `compare.py` reports both raw LLVM IR metrics and post-`opt -O3` metrics. The raw
 metrics show the direct lowering shape; the optimized metrics are the fairer

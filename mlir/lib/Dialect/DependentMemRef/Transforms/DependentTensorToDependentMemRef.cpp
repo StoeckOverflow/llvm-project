@@ -12,6 +12,8 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/StringMap.h"
+#include <optional>
 
 namespace mlir {
 namespace dependent_memref {
@@ -65,6 +67,140 @@ memrefRefinementFromTensor(Value originalValue, Value convertedValue,
   else
     dims.assign(memrefType.getRank(), Value());
   return buildStoredRefinement(/*valueIndex=*/0, memrefType, dims);
+}
+
+struct BoundaryRefinementSnapshot {
+  DependentTypeValueRefinement refinement;
+  SmallVector<unsigned, 4> dimArgIndices;
+  SmallVector<unsigned, 4> strideArgIndices;
+};
+
+struct FunctionBoundaryRefinementSnapshot {
+  SmallVector<BoundaryRefinementSnapshot, 4> argRefinements;
+  SmallVector<BoundaryRefinementSnapshot, 1> resultRefinements;
+};
+
+using FunctionBoundaryRefinementMap =
+    llvm::StringMap<FunctionBoundaryRefinementSnapshot>;
+
+static std::optional<unsigned> getFunctionArgumentIndex(func::FuncOp func,
+                                                        Value value) {
+  auto arg = dyn_cast<BlockArgument>(value);
+  if (!arg || arg.getOwner() != &func.getBody().front())
+    return std::nullopt;
+  return arg.getArgNumber();
+}
+
+static std::optional<BoundaryRefinementSnapshot>
+snapshotBoundaryRefinement(func::FuncOp func,
+                           const DependentTypeValueRefinement &refinement) {
+  BoundaryRefinementSnapshot snapshot;
+  snapshot.refinement = refinement;
+  snapshot.refinement.dimValues.clear();
+  snapshot.refinement.strideValues.clear();
+
+  for (const PropertyOperand &operand : refinement.dimValues) {
+    std::optional<unsigned> index =
+        getFunctionArgumentIndex(func, operand.get());
+    if (!index)
+      return std::nullopt;
+    snapshot.dimArgIndices.push_back(*index);
+  }
+  for (const PropertyOperand &operand : refinement.strideValues) {
+    std::optional<unsigned> index =
+        getFunctionArgumentIndex(func, operand.get());
+    if (!index)
+      return std::nullopt;
+    snapshot.strideArgIndices.push_back(*index);
+  }
+  return snapshot;
+}
+
+static void
+collectFunctionBoundaryRefinements(ModuleOp module,
+                                   FunctionBoundaryRefinementMap &snapshots) {
+  module.walk([&](func::FuncOp func) {
+    if (func.getBody().empty())
+      return;
+
+    FunctionBoundaryRefinementSnapshot snapshot;
+    TypeRange inputs = func.getFunctionType().getInputs();
+    for (const DependentTypeValueRefinement &refinement :
+         func.getProperties().dependentTypeArgRefinements) {
+      if (refinement.valueIndex >= inputs.size() ||
+          !isa<RankedTensorType>(inputs[refinement.valueIndex]))
+        continue;
+      if (std::optional<BoundaryRefinementSnapshot> saved =
+              snapshotBoundaryRefinement(func, refinement))
+        snapshot.argRefinements.push_back(std::move(*saved));
+    }
+
+    TypeRange results = func.getFunctionType().getResults();
+    for (const DependentTypeValueRefinement &refinement :
+         func.getProperties().dependentTypeResultRefinements) {
+      if (refinement.valueIndex >= results.size() ||
+          !isa<RankedTensorType>(results[refinement.valueIndex]))
+        continue;
+      if (std::optional<BoundaryRefinementSnapshot> saved =
+              snapshotBoundaryRefinement(func, refinement))
+        snapshot.resultRefinements.push_back(std::move(*saved));
+    }
+
+    if (!snapshot.argRefinements.empty() || !snapshot.resultRefinements.empty())
+      snapshots[func.getName()] = std::move(snapshot);
+  });
+}
+
+static DependentTypeValueRefinement
+restoreBoundaryRefinement(func::FuncOp func,
+                          const BoundaryRefinementSnapshot &snapshot) {
+  DependentTypeValueRefinement restored = snapshot.refinement;
+  SmallVector<Value> dims;
+  dims.reserve(snapshot.dimArgIndices.size());
+  for (unsigned index : snapshot.dimArgIndices)
+    dims.push_back(func.getArgument(index));
+  restored.assignDimValues(dims);
+
+  SmallVector<Value> strides;
+  strides.reserve(snapshot.strideArgIndices.size());
+  for (unsigned index : snapshot.strideArgIndices)
+    strides.push_back(func.getArgument(index));
+  restored.assignStrideValues(strides);
+  return restored;
+}
+
+static void restoreFunctionBoundaryRefinements(
+    ModuleOp module, const FunctionBoundaryRefinementMap &snapshots) {
+  module.walk([&](func::FuncOp func) {
+    auto it = snapshots.find(func.getName());
+    if (it == snapshots.end()) {
+      reattachPropertyOperands(func);
+      return;
+    }
+
+    auto &props = func.getProperties();
+    props.dependentTypeArgRefinements.clear();
+    props.dependentTypeResultRefinements.clear();
+
+    TypeRange inputs = func.getFunctionType().getInputs();
+    for (const BoundaryRefinementSnapshot &snapshot :
+         it->second.argRefinements) {
+      if (snapshot.refinement.valueIndex < inputs.size() &&
+          isa<MemRefType>(inputs[snapshot.refinement.valueIndex]))
+        props.dependentTypeArgRefinements.push_back(
+            restoreBoundaryRefinement(func, snapshot));
+    }
+
+    TypeRange results = func.getFunctionType().getResults();
+    for (const BoundaryRefinementSnapshot &snapshot :
+         it->second.resultRefinements) {
+      if (snapshot.refinement.valueIndex < results.size() &&
+          isa<MemRefType>(results[snapshot.refinement.valueIndex]))
+        props.dependentTypeResultRefinements.push_back(
+            restoreBoundaryRefinement(func, snapshot));
+    }
+    reattachPropertyOperands(func);
+  });
 }
 
 static Operation *createAllocLike(PatternRewriter &rewriter, Location loc,
@@ -220,6 +356,10 @@ struct ConvertDependentTensorToDependentMemRefPass
     populateReturnOpTypeConversionPattern(patterns, converter);
     scf::populateSCFStructuralTypeConversionsAndLegality(converter, patterns,
                                                          target);
+    FunctionBoundaryRefinementMap functionBoundaryRefinements;
+    collectFunctionBoundaryRefinements(getOperation(),
+                                       functionBoundaryRefinements);
+
     TensorDimRefinementMap tensorDims;
     collectTensorDimRefinements(getOperation(), tensorDims);
 
@@ -233,12 +373,8 @@ struct ConvertDependentTensorToDependentMemRefPass
       return;
     }
 
-    getOperation()->walk([](func::FuncOp func) {
-      auto &props = func.getProperties();
-      props.dependentTypeArgRefinements.clear();
-      props.dependentTypeResultRefinements.clear();
-      reattachPropertyOperands(func);
-    });
+    restoreFunctionBoundaryRefinements(getOperation(),
+                                       functionBoundaryRefinements);
   }
 };
 

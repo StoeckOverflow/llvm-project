@@ -127,7 +127,6 @@ def main():
         "problem": {"n": args.n, "k": k, "m": m, "repeats": args.repeats},
         "dependent": collect_ir_metrics("dependent", out_dir),
         "baseline": collect_ir_metrics("baseline", out_dir),
-        "dependent_strided": collect_ir_metrics("dependent-strided", out_dir),
     }
     result["dependent"]["mlir_opt"] = measure_mlir_opt(
         [
@@ -147,15 +146,6 @@ def main():
         ],
         out_dir / "baseline.mlir-timing.txt",
     )
-    result["dependent_strided"]["mlir_opt"] = measure_mlir_opt(
-        [
-            str(mlir_opt),
-            str(script_dir / "dependent-strided-matmul.mlir"),
-            "-lower-dependent-memref-to-llvm",
-            "-reconcile-unrealized-casts",
-        ],
-        out_dir / "dependent-strided.mlir-timing.txt",
-    )
     result["dependent"]["llvm_opt"] = measure_wall(
         [
             str(llvm_opt),
@@ -174,16 +164,6 @@ def main():
             str(out_dir / "baseline.ll"),
             "-o",
             str(out_dir / "baseline.opt.ll"),
-        ]
-    )
-    result["dependent_strided"]["llvm_opt"] = measure_wall(
-        [
-            str(llvm_opt),
-            "-O3",
-            "-S",
-            str(out_dir / "dependent-strided.ll"),
-            "-o",
-            str(out_dir / "dependent-strided.opt.ll"),
         ]
     )
 

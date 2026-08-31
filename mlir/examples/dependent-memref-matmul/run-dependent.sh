@@ -63,17 +63,6 @@ mkdir -p "${OUT_DIR}"
 
 "${LLVM_OPT}" -O3 -S "${OUT_DIR}/dependent.ll" -o "${OUT_DIR}/dependent.opt.ll"
 
-"${MLIR_OPT}" "${SCRIPT_DIR}/dependent-strided-matmul.mlir" \
-  -lower-dependent-memref-to-llvm \
-  -reconcile-unrealized-casts \
-  -mlir-print-op-generic >"${OUT_DIR}/dependent-strided.llvm.mlir"
-
-"${MLIR_OPT}" "${SCRIPT_DIR}/dependent-strided-matmul.mlir" \
-  -lower-dependent-memref-to-llvm \
-  -reconcile-unrealized-casts |
-  "${MLIR_TRANSLATE}" -mlir-to-llvmir >"${OUT_DIR}/dependent-strided.ll"
-
-"${LLVM_OPT}" -O3 -S "${OUT_DIR}/dependent-strided.ll" -o "${OUT_DIR}/dependent-strided.opt.ll"
 
 "${CLANG}" -O3 -Wno-override-module -c "${OUT_DIR}/dependent.opt.ll" \
   -o "${OUT_DIR}/dependent.o"
