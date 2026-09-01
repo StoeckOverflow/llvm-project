@@ -129,11 +129,16 @@ def main():
         "dependent": collect_ir_metrics("dependent", out_dir),
         "baseline": collect_ir_metrics("baseline", out_dir),
         "structural_artifacts": {
+            "baseline_strided": collect_ir_metrics(
+                "baseline_strided",
+                out_dir / "baseline-strided",
+                "baseline_matmul_strided",
+            ),
             "direct_strided": collect_ir_metrics(
                 "direct_strided",
                 out_dir / "direct-strided",
                 "dependent_matmul_strided",
-            )
+            ),
         },
     }
     result["dependent"]["mlir_opt"] = measure_mlir_opt(
@@ -213,6 +218,15 @@ def main():
     print(
         "baseline_descriptor_ops="
         f"{result['baseline']['llvm_dialect_insertvalue'] + result['baseline']['llvm_dialect_extractvalue']}"
+    )
+    baseline_strided = result["structural_artifacts"]["baseline_strided"]
+    print(
+        "baseline_strided_llvm_dialect_lines="
+        f"{baseline_strided['llvm_dialect_lines']}"
+    )
+    print(
+        "baseline_strided_descriptor_ops="
+        f"{baseline_strided['llvm_dialect_insertvalue'] + baseline_strided['llvm_dialect_extractvalue']}"
     )
     direct_strided = result["structural_artifacts"]["direct_strided"]
     print(

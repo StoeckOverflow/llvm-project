@@ -127,6 +127,10 @@ dependent.opt.ll
 baseline.llvm.mlir
 baseline.ll
 baseline.opt.ll
+baseline-strided/input.mlir
+baseline-strided/baseline_matmul_strided.llvm.mlir
+baseline-strided/baseline_matmul_strided.ll
+baseline-strided/baseline_matmul_strided.opt.ll
 direct-strided/input.mlir
 direct-strided/dependent_matmul_strided.llvm.mlir
 direct-strided/dependent_matmul_strided.ll
@@ -136,9 +140,13 @@ results.json
 
 The primary structural metric is descriptor traffic. The dependent lowering keeps
 memrefs as bare `!llvm.ptr` values and emits no `llvm.insertvalue` or
-`llvm.extractvalue` descriptor construction. `direct-strided/` is a structural
-artifact for the fully dynamic-strided dependent memref signature; it is not a
-third benchmark route. The explicit reinterpret-cast memref route is covered as
+`llvm.extractvalue` descriptor construction. `baseline-strided/` and
+`direct-strided/` are structural artifacts for the fully dynamic-strided memref
+case: `baseline-strided/` uses ordinary `memref.reinterpret_cast` views over flat
+buffers, while `direct-strided/`
+is generated from `dependent-strided-matmul.mlir` and uses dependent memref
+refinements. They are not third and fourth benchmark routes.
+The explicit reinterpret-cast memref route is covered as
 a FileCheck regression test rather than a benchmark route. The standard baseline
 intentionally uses standard memref descriptors.
 

@@ -49,6 +49,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 mkdir -p "${OUT_DIR}"
+mkdir -p "${OUT_DIR}/baseline-strided"
 
 "${MLIR_OPT}" "${SCRIPT_DIR}/baseline-tensor-matmul.mlir" \
   -pass-pipeline="${PIPELINE}" \
@@ -59,6 +60,20 @@ mkdir -p "${OUT_DIR}"
   "${MLIR_TRANSLATE}" -mlir-to-llvmir >"${OUT_DIR}/baseline.ll"
 
 "${LLVM_OPT}" -O3 -S "${OUT_DIR}/baseline.ll" -o "${OUT_DIR}/baseline.opt.ll"
+
+cp "${SCRIPT_DIR}/baseline-strided-matmul.mlir" \
+  "${OUT_DIR}/baseline-strided/input.mlir"
+
+"${MLIR_OPT}" "${SCRIPT_DIR}/baseline-strided-matmul.mlir" \
+  -pass-pipeline="builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),finalize-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)" \
+  -mlir-print-op-generic >"${OUT_DIR}/baseline-strided/baseline_matmul_strided.llvm.mlir"
+
+"${MLIR_OPT}" "${SCRIPT_DIR}/baseline-strided-matmul.mlir" \
+  -pass-pipeline="builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),finalize-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)" |
+  "${MLIR_TRANSLATE}" -mlir-to-llvmir >"${OUT_DIR}/baseline-strided/baseline_matmul_strided.ll"
+
+"${LLVM_OPT}" -O3 -S "${OUT_DIR}/baseline-strided/baseline_matmul_strided.ll" \
+  -o "${OUT_DIR}/baseline-strided/baseline_matmul_strided.opt.ll"
 
 "${CLANG}" -O3 -Wno-override-module -c "${OUT_DIR}/baseline.opt.ll" \
   -o "${OUT_DIR}/baseline.o"
