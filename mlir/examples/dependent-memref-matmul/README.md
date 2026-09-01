@@ -127,14 +127,20 @@ dependent.opt.ll
 baseline.llvm.mlir
 baseline.ll
 baseline.opt.ll
+direct-strided/input.mlir
+direct-strided/dependent_matmul_strided.llvm.mlir
+direct-strided/dependent_matmul_strided.ll
+direct-strided/dependent_matmul_strided.opt.ll
 results.json
 ```
 
 The primary structural metric is descriptor traffic. The dependent lowering keeps
 memrefs as bare `!llvm.ptr` values and emits no `llvm.insertvalue` or
-`llvm.extractvalue` descriptor construction. The explicit reinterpret-cast memref
-route is covered as a FileCheck regression test rather than a benchmark route.
-The standard baseline intentionally uses standard memref descriptors.
+`llvm.extractvalue` descriptor construction. `direct-strided/` is a structural
+artifact for the fully dynamic-strided dependent memref signature; it is not a
+third benchmark route. The explicit reinterpret-cast memref route is covered as
+a FileCheck regression test rather than a benchmark route. The standard baseline
+intentionally uses standard memref descriptors.
 
 `compare.py` reports both raw LLVM IR metrics and post-`opt -O3` metrics. The raw
 metrics show the direct lowering shape; the optimized metrics are the fairer

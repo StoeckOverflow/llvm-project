@@ -48,6 +48,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 mkdir -p "${OUT_DIR}"
+mkdir -p "${OUT_DIR}/direct-strided"
 
 "${MLIR_OPT}" "${SCRIPT_DIR}/dependent-matmul.mlir" \
   -convert-dependent-tensor-to-dependent-memref \
@@ -62,6 +63,22 @@ mkdir -p "${OUT_DIR}"
   "${MLIR_TRANSLATE}" -mlir-to-llvmir >"${OUT_DIR}/dependent.ll"
 
 "${LLVM_OPT}" -O3 -S "${OUT_DIR}/dependent.ll" -o "${OUT_DIR}/dependent.opt.ll"
+
+cp "${SCRIPT_DIR}/dependent-direct-strided-matmul.mlir" \
+  "${OUT_DIR}/direct-strided/input.mlir"
+
+"${MLIR_OPT}" "${SCRIPT_DIR}/dependent-direct-strided-matmul.mlir" \
+  -lower-dependent-memref-to-llvm \
+  -reconcile-unrealized-casts \
+  -mlir-print-op-generic >"${OUT_DIR}/direct-strided/dependent_matmul_strided.llvm.mlir"
+
+"${MLIR_OPT}" "${SCRIPT_DIR}/dependent-direct-strided-matmul.mlir" \
+  -lower-dependent-memref-to-llvm \
+  -reconcile-unrealized-casts |
+  "${MLIR_TRANSLATE}" -mlir-to-llvmir >"${OUT_DIR}/direct-strided/dependent_matmul_strided.ll"
+
+"${LLVM_OPT}" -O3 -S "${OUT_DIR}/direct-strided/dependent_matmul_strided.ll" \
+  -o "${OUT_DIR}/direct-strided/dependent_matmul_strided.opt.ll"
 
 
 "${CLANG}" -O3 -Wno-override-module -c "${OUT_DIR}/dependent.opt.ll" \

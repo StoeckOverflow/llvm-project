@@ -52,10 +52,11 @@ def count_occurrences(path, needle):
     return path.read_text().count(needle)
 
 
-def collect_ir_metrics(prefix, out_dir):
-    llvm_mlir = out_dir / f"{prefix}.llvm.mlir"
-    llvm_ir = out_dir / f"{prefix}.ll"
-    llvm_opt_ir = out_dir / f"{prefix}.opt.ll"
+def collect_ir_metrics(prefix, out_dir, stem=None):
+    stem = stem or prefix
+    llvm_mlir = out_dir / f"{stem}.llvm.mlir"
+    llvm_ir = out_dir / f"{stem}.ll"
+    llvm_opt_ir = out_dir / f"{stem}.opt.ll"
     metrics = {
         "llvm_dialect_lines": line_count(llvm_mlir),
         "llvm_ir_lines": line_count(llvm_ir),
@@ -127,6 +128,13 @@ def main():
         "problem": {"n": args.n, "k": k, "m": m, "repeats": args.repeats},
         "dependent": collect_ir_metrics("dependent", out_dir),
         "baseline": collect_ir_metrics("baseline", out_dir),
+        "structural_artifacts": {
+            "direct_strided": collect_ir_metrics(
+                "direct_strided",
+                out_dir / "direct-strided",
+                "dependent_matmul_strided",
+            )
+        },
     }
     result["dependent"]["mlir_opt"] = measure_mlir_opt(
         [
@@ -205,6 +213,15 @@ def main():
     print(
         "baseline_descriptor_ops="
         f"{result['baseline']['llvm_dialect_insertvalue'] + result['baseline']['llvm_dialect_extractvalue']}"
+    )
+    direct_strided = result["structural_artifacts"]["direct_strided"]
+    print(
+        "direct_strided_llvm_dialect_lines="
+        f"{direct_strided['llvm_dialect_lines']}"
+    )
+    print(
+        "direct_strided_descriptor_ops="
+        f"{direct_strided['llvm_dialect_insertvalue'] + direct_strided['llvm_dialect_extractvalue']}"
     )
     if not args.skip_run:
         print(f"dependent_median_ns={result['dependent']['run']['median_ns']}")
