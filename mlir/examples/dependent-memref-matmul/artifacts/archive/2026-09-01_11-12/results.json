@@ -1,0 +1,97 @@
+{
+  "baseline": {
+    "llvm_dialect_extractvalue": 12,
+    "llvm_dialect_gep": 6,
+    "llvm_dialect_insertvalue": 21,
+    "llvm_dialect_lines": 90,
+    "llvm_dialect_load": 2,
+    "llvm_dialect_store": 1,
+    "llvm_dialect_struct_type": 64,
+    "llvm_ir_extractvalue": 12,
+    "llvm_ir_insertvalue": 21,
+    "llvm_ir_lines": 102,
+    "llvm_opt": {
+      "wall_ms": 12.548
+    },
+    "llvm_opt_ir_extractvalue": 0,
+    "llvm_opt_ir_insertvalue": 7,
+    "llvm_opt_ir_lines": 97,
+    "llvm_opt_ir_struct_type": 9,
+    "mlir_opt": {
+      "timing_file": "mlir/examples/dependent-memref-matmul/artifacts/archive/2026-09-01_11-12/baseline.mlir-timing.txt",
+      "wall_ms": 13.421
+    }
+  },
+  "delta": {
+    "llvm_dialect_extractvalue": 12,
+    "llvm_dialect_insertvalue": 21,
+    "llvm_dialect_lines": 42,
+    "llvm_ir_lines": 39,
+    "llvm_opt_ir_extractvalue": 0,
+    "llvm_opt_ir_insertvalue": 7,
+    "llvm_opt_ir_lines": 25
+  },
+  "dependent": {
+    "llvm_dialect_extractvalue": 0,
+    "llvm_dialect_gep": 3,
+    "llvm_dialect_insertvalue": 0,
+    "llvm_dialect_lines": 48,
+    "llvm_dialect_load": 2,
+    "llvm_dialect_store": 1,
+    "llvm_dialect_struct_type": 0,
+    "llvm_ir_extractvalue": 0,
+    "llvm_ir_insertvalue": 0,
+    "llvm_ir_lines": 63,
+    "llvm_opt": {
+      "wall_ms": 15.694
+    },
+    "llvm_opt_ir_extractvalue": 0,
+    "llvm_opt_ir_insertvalue": 0,
+    "llvm_opt_ir_lines": 72,
+    "llvm_opt_ir_struct_type": 0,
+    "mlir_opt": {
+      "timing_file": "mlir/examples/dependent-memref-matmul/artifacts/archive/2026-09-01_11-12/dependent.mlir-timing.txt",
+      "wall_ms": 13.759
+    }
+  },
+  "problem": {
+    "k": 32,
+    "m": 32,
+    "n": 32,
+    "repeats": 1
+  },
+  "structural_artifacts": {
+    "baseline_strided": {
+      "llvm_dialect_extractvalue": 15,
+      "llvm_dialect_gep": 3,
+      "llvm_dialect_insertvalue": 30,
+      "llvm_dialect_lines": 105,
+      "llvm_dialect_load": 2,
+      "llvm_dialect_store": 1,
+      "llvm_dialect_struct_type": 81,
+      "llvm_ir_extractvalue": 15,
+      "llvm_ir_insertvalue": 30,
+      "llvm_ir_lines": 109,
+      "llvm_opt_ir_extractvalue": 0,
+      "llvm_opt_ir_insertvalue": 0,
+      "llvm_opt_ir_lines": 85,
+      "llvm_opt_ir_struct_type": 0
+    },
+    "direct_strided": {
+      "llvm_dialect_extractvalue": 0,
+      "llvm_dialect_gep": 3,
+      "llvm_dialect_insertvalue": 0,
+      "llvm_dialect_lines": 51,
+      "llvm_dialect_load": 2,
+      "llvm_dialect_store": 1,
+      "llvm_dialect_struct_type": 0,
+      "llvm_ir_extractvalue": 0,
+      "llvm_ir_insertvalue": 0,
+      "llvm_ir_lines": 64,
+      "llvm_opt_ir_extractvalue": 0,
+      "llvm_opt_ir_insertvalue": 0,
+      "llvm_opt_ir_lines": 85,
+      "llvm_opt_ir_struct_type": 0
+    }
+  }
+}
