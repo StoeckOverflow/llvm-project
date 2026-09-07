@@ -1,0 +1,64 @@
+{
+  "routes": {
+    "baseline": {
+      "llvm_dialect_extractvalue": 20,
+      "llvm_dialect_insertvalue": 37,
+      "llvm_dialect_lines": 162,
+      "llvm_ir_extractvalue": 20,
+      "llvm_ir_insertvalue": 37,
+      "llvm_ir_lines": 194,
+      "llvm_opt_ir_extractvalue": 0,
+      "llvm_opt_ir_insertvalue": 11,
+      "llvm_opt_ir_lines": 273,
+      "mlir_opt": {
+        "timing_file": "mlir/examples/dependent-memref-conv2d/artifacts/archive/2026-09-07_14-39/baseline/baseline_conv2d_kernel.mlir-timing.txt",
+        "wall_ms": 12.366
+      }
+    },
+    "baseline_strided": {
+      "llvm_dialect_extractvalue": 26,
+      "llvm_dialect_insertvalue": 52,
+      "llvm_dialect_lines": 192,
+      "llvm_ir_extractvalue": 26,
+      "llvm_ir_insertvalue": 52,
+      "llvm_ir_lines": 217,
+      "llvm_opt_ir_extractvalue": 0,
+      "llvm_opt_ir_insertvalue": 0,
+      "llvm_opt_ir_lines": 141,
+      "mlir_opt": {
+        "timing_file": "mlir/examples/dependent-memref-conv2d/artifacts/archive/2026-09-07_14-39/baseline-strided/baseline_conv2d_strided.mlir-timing.txt",
+        "wall_ms": 13.936
+      }
+    },
+    "dependent": {
+      "llvm_dialect_extractvalue": 0,
+      "llvm_dialect_insertvalue": 0,
+      "llvm_dialect_lines": 104,
+      "llvm_ir_extractvalue": 0,
+      "llvm_ir_insertvalue": 0,
+      "llvm_ir_lines": 139,
+      "llvm_opt_ir_extractvalue": 0,
+      "llvm_opt_ir_insertvalue": 0,
+      "llvm_opt_ir_lines": 142,
+      "mlir_opt": {
+        "timing_file": "mlir/examples/dependent-memref-conv2d/artifacts/archive/2026-09-07_14-39/dependent/dependent_conv2d_kernel.mlir-timing.txt",
+        "wall_ms": 11.021
+      }
+    },
+    "direct_strided": {
+      "llvm_dialect_extractvalue": 0,
+      "llvm_dialect_insertvalue": 0,
+      "llvm_dialect_lines": 99,
+      "llvm_ir_extractvalue": 0,
+      "llvm_ir_insertvalue": 0,
+      "llvm_ir_lines": 130,
+      "llvm_opt_ir_extractvalue": 0,
+      "llvm_opt_ir_insertvalue": 0,
+      "llvm_opt_ir_lines": 257,
+      "mlir_opt": {
+        "timing_file": "mlir/examples/dependent-memref-conv2d/artifacts/archive/2026-09-07_14-39/direct-strided/dependent_conv2d_strided.mlir-timing.txt",
+        "wall_ms": 13.144
+      }
+    }
+  }
+}
