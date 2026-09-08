@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/DependentMemRef/IR/DependentMemRef.h"
 #include "mlir/Dialect/DependentTensor/IR/DependentTensor.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -1301,6 +1302,79 @@ struct TestDependentTensorCorruptGenericPropertyUsePass
   }
 };
 
+struct TestDependentMemRefCorruptGenericPropertyUsePass
+    : public PassWrapper<TestDependentMemRefCorruptGenericPropertyUsePass,
+                         OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(
+      TestDependentMemRefCorruptGenericPropertyUsePass)
+
+  StringRef getArgument() const final {
+    return "test-dependent-memref-corrupt-generic-property-uses";
+  }
+  StringRef getDescription() const final {
+    return "Corrupt dependent_memref property SSA uses so the generic verifier "
+           "checks them";
+  }
+
+  void runOnOperation() override {
+    ModuleOp module = getOperation();
+    corruptDominance(module);
+    corruptIsolatedCapture(module);
+  }
+
+  static dependent_memref::AllocOp findFirstAlloc(func::FuncOp func) {
+    dependent_memref::AllocOp allocOp;
+    func.walk([&](dependent_memref::AllocOp op) {
+      if (!allocOp)
+        allocOp = op;
+    });
+    return allocOp;
+  }
+
+  static void setFirstPropertyValue(Operation *op, Value replacement) {
+    bool replaced = false;
+    walkPropertyOperands(op, [&](PropertyOperand &propertyOperand) {
+      if (!replaced) {
+        propertyOperand.set(replacement);
+        replaced = true;
+      }
+    });
+    if (replaced)
+      reattachPropertyOperands(op);
+  }
+
+  static void corruptDominance(ModuleOp module) {
+    auto func = module.lookupSymbol<func::FuncOp>(
+        "generic_memref_property_dominance_verifier");
+    if (!func)
+      return;
+    dependent_memref::AllocOp allocOp = findFirstAlloc(func);
+    if (!allocOp)
+      return;
+
+    Value lateIndex;
+    for (Operation &op : func.getBody().front())
+      for (Value result : op.getResults())
+        if (result.getType().isIndex())
+          lateIndex = result;
+    if (lateIndex)
+      setFirstPropertyValue(allocOp, lateIndex);
+  }
+
+  static void corruptIsolatedCapture(ModuleOp module) {
+    auto source = module.lookupSymbol<func::FuncOp>(
+        "generic_memref_property_isolated_capture_verifier_source");
+    auto victim = module.lookupSymbol<func::FuncOp>(
+        "generic_memref_property_isolated_capture_verifier_victim");
+    if (!source || !victim || source.getNumArguments() == 0)
+      return;
+    dependent_memref::AllocOp allocOp = findFirstAlloc(victim);
+    if (!allocOp)
+      return;
+    setFirstPropertyValue(allocOp, source.getArgument(0));
+  }
+};
+
 struct TestDependentTensorCorruptPropertyOperandAttachmentPass
     : public PassWrapper<
           TestDependentTensorCorruptPropertyOperandAttachmentPass,
@@ -1368,6 +1442,7 @@ void registerDependentTensorTestPasses() {
   PassRegistration<TestDependentTensorEraseLiveEntryBlockPass>();
   PassRegistration<TestDependentTensorCorruptRefinementsPass>();
   PassRegistration<TestDependentTensorCorruptGenericPropertyUsePass>();
+  PassRegistration<TestDependentMemRefCorruptGenericPropertyUsePass>();
   PassRegistration<TestDependentTensorCorruptPropertyOperandAttachmentPass>();
 }
 } // namespace test

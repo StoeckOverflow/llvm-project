@@ -49,8 +49,12 @@ void printTensorSpec(OpAsmPrinter &printer, ValueRange dims, Type elementType);
 
 struct PendingTypeRef {
   SMLoc loc;
+  bool isMemRef = false;
   SmallVector<OpAsmParser::UnresolvedOperand, 4> dims;
   Type elementType;
+  int64_t offset = 0;
+  bool hasExplicitLayout = false;
+  SmallVector<OpAsmParser::UnresolvedOperand, 4> strides;
 };
 
 struct PendingLoopTypeRef {
@@ -113,7 +117,7 @@ void inferMissingLoopTypeRefs(
 
 bool isTypeRefVisibleFrom(Operation *op, const DependentTensorTypeRef &typeRef);
 void printTypeRef(OpAsmPrinter &printer, const DependentTensorTypeRef &typeRef,
-                  Type elementType);
+                  Type valueType);
 void printLoopTypeRefs(OpAsmPrinter &printer,
                        Block::BlockArgListType regionIterArgs,
                        TypeRange resultTypes,

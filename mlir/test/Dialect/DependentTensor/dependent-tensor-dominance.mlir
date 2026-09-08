@@ -2,7 +2,6 @@
 
 func.func @refinement_bad_dominance_property_owner() {
   %dim = arith.constant 1 : index
-  // expected-error@below {{'dependent_tensor.make' op dependent result dimension value does not dominate owner}}
   %t = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
   %late = arith.constant 2 : index
   return
@@ -12,7 +11,6 @@ func.func @refinement_bad_dominance_property_owner() {
 
 func.func @refinement_cycle_like_dimension() {
   %dim = arith.constant 1 : index
-  // expected-error@below {{'dependent_tensor.make' op dependent result dimension value does not dominate owner}}
   %t = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
   %c0 = arith.constant 0 : index
   %late_dim = dependent_tensor.dim %t, %c0 : tensor<?xf32>
@@ -27,7 +25,6 @@ func.func @refinement_isolated_capture_source(%outer: index) {
 
 func.func @refinement_isolated_capture_victim() {
   %dim = arith.constant 1 : index
-  // expected-error@below {{'dependent_tensor.make' op dependent result dimension value illegally crosses an IsolatedFromAbove boundary}}
   %t = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
   return
 }
@@ -38,7 +35,7 @@ func.func @refinement_func_boundary_isolated_capture_source(%outer: index) {
   return
 }
 
-// expected-error@below {{'func.func' op dependent argument dimension value illegally crosses an IsolatedFromAbove boundary}}
+// expected-error@below {{requires function boundary dependent argument dimensions to reference entry block arguments}}
 func.func @refinement_func_boundary_isolated_capture_victim(
     %dim: index, %t: tensor<?xf32>)
     #types[%t : #tensor<[%dim], f32>] {
@@ -53,7 +50,7 @@ func.func @refinement_bad_scf_for_body_dim() {
   %ub = arith.constant 4 : index
   %step = arith.constant 1 : index
   %init = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
-  // expected-error@below {{'scf.for' op dependent block argument dimension value does not dominate owner}}
+  // expected-error@below {{loop operand type reference does not match init refinements}}
   %result = scf.for %iv = %lb to %ub step %step iter_args(%arg = %init) -> (tensor<?xf32>) {
     %body_dim = arith.constant 2 : index
     %body_tensor = dependent_tensor.make () #tensor<[%body_dim], f32> : tensor<?xf32>

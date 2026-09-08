@@ -4,8 +4,8 @@ func.func @basic(%n : index, %m : index, %s0 : index, %s1 : index, %i : index, %
   %0 = dependent_memref.alloc #memref<[%n, %m], f32, offset: 0, strides: [%s0, %s1]> : memref<?x?xf32>
   %d0 = dependent_memref.dim %0, %i, #memref<[%n, %m], f32, offset: 0, strides: [%s0, %s1]> : memref<?x?xf32>
   %d1 = dependent_memref.dim_exact %0 axis(1 : i32) #memref<[%n, %m], f32, offset: 0, strides: [%s0, %s1]> : memref<?x?xf32>
-  %old = dependent_memref.load %0[%i, %j] #memref<[%n, %m], f32, offset: 0, strides: [%s0, %s1]> : memref<?x?xf32> -> f32
-  dependent_memref.store %v, %0[%i, %j] #memref<[%n, %m], f32, offset: 0, strides: [%s0, %s1]> : memref<?x?xf32>, f32
+  %old = dependent_memref.load %0[%i, %j] #memref<[%n, %m], f32, offset: 0, strides: [%s0, %s1]> : memref<?x?xf32>
+  dependent_memref.store %v, %0[%i, %j] #memref<[%n, %m], f32, offset: 0, strides: [%s0, %s1]> : memref<?x?xf32>
   %1 = dependent_memref.cast %0, #memref<[%n, %m], f32, offset: 0, strides: [%s0, %s1]> : memref<?x?xf32> to memref<?x?xf32>
   %2 = dependent_memref.reinterpret_cast %1, #memref<[%n, %m], f32> : memref<?x?xf32> to memref<?x?xf32>
   dependent_memref.dealloc %2 : memref<?x?xf32>

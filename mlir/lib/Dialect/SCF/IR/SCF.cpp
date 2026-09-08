@@ -809,7 +809,11 @@ void ForOp::walkPropertySSAUses(
        getProperties().dependentTensorLoopTypeRefs) {
     for (PropertyOperand &operand : ref.operandTypeRef.dimValues)
       callback(operand);
+    for (PropertyOperand &operand : ref.operandTypeRef.strideValues)
+      callback(operand);
     for (PropertyOperand &operand : ref.resultTypeRef.dimValues)
+      callback(operand);
+    for (PropertyOperand &operand : ref.resultTypeRef.strideValues)
       callback(operand);
   }
 }

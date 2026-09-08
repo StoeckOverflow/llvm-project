@@ -1,4 +1,5 @@
 add_mlir_dialect_library(MLIRDependentMemRefTransforms
+  DependentMemRefPasses.cpp
   DependentTensorToDependentMemRef.cpp
   DependentMemRefToLLVM.cpp
 

@@ -32,7 +32,10 @@ inline bool areEqualDependentTensorDimValues(ArrayRef<PropertyOperand> lhs,
 
 struct DependentTensorTypeRef {
   int64_t rank = 0;
+  int64_t offset = 0;
+  bool hasExplicitLayout = false;
   SmallVector<PropertyOperand, 4> dimValues;
+  SmallVector<PropertyOperand, 4> strideValues;
 
   void appendDimValuesTo(SmallVectorImpl<Value> &values) const {
     for (const PropertyOperand &operand : dimValues)
@@ -50,10 +53,25 @@ struct DependentTensorTypeRef {
     for (Value value : values)
       dimValues.emplace_back(value);
   }
+  SmallVector<Value, 4> getStrideValues() const {
+    SmallVector<Value, 4> values;
+    values.reserve(strideValues.size());
+    for (const PropertyOperand &operand : strideValues)
+      values.push_back(operand.get());
+    return values;
+  }
+  void assignStrideValues(ValueRange values) {
+    strideValues.clear();
+    strideValues.reserve(values.size());
+    for (Value value : values)
+      strideValues.emplace_back(value);
+  }
 
   bool operator==(const DependentTensorTypeRef &other) const {
-    return rank == other.rank &&
-           areEqualDependentTensorDimValues(dimValues, other.dimValues);
+    return rank == other.rank && offset == other.offset &&
+           hasExplicitLayout == other.hasExplicitLayout &&
+           areEqualDependentTensorDimValues(dimValues, other.dimValues) &&
+           areEqualDependentTensorDimValues(strideValues, other.strideValues);
   }
 };
 

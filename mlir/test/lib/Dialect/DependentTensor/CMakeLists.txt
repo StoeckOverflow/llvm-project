@@ -6,6 +6,7 @@ add_mlir_library(MLIRDependentTensorTestPasses
   )
 mlir_target_link_libraries(MLIRDependentTensorTestPasses PUBLIC
   MLIRArithDialect
+  MLIRDependentMemRefDialect
   MLIRDependentTensorDialect
   MLIRDependentTensorTransforms
   MLIRFuncDialect

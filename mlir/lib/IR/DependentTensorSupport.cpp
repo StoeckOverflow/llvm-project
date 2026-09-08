@@ -17,8 +17,10 @@ hashDependentTensorDimValues(ArrayRef<PropertyOperand> operands) {
 }
 
 llvm::hash_code mlir::hash_value(const DependentTensorTypeRef &refinement) {
-  return llvm::hash_combine(refinement.rank,
-                            hashDependentTensorDimValues(refinement.dimValues));
+  return llvm::hash_combine(
+      refinement.rank, refinement.offset, refinement.hasExplicitLayout,
+      hashDependentTensorDimValues(refinement.dimValues),
+      hashDependentTensorDimValues(refinement.strideValues));
 }
 
 llvm::hash_code
@@ -331,8 +333,44 @@ static ParseResult
 parsePendingTypeRef(OpAsmParser &parser,
                     dependent_tensor::PendingTypeRef &typeRef) {
   typeRef.loc = parser.getCurrentLocation();
-  return dependent_tensor::parseTensorSpec(parser, typeRef.dims,
-                                           typeRef.elementType);
+  if (succeeded(parser.parseOptionalHashKeyword("tensor"))) {
+    typeRef.isMemRef = false;
+    return dependent_tensor::parseTensorSpecBody(parser, typeRef.dims,
+                                                 typeRef.elementType);
+  }
+
+  if (parser.parseHashKeyword("memref") || parser.parseLess())
+    return failure();
+  typeRef.isMemRef = true;
+  if (parser.parseCommaSeparatedList(OpAsmParser::Delimiter::Square,
+                                     [&]() -> ParseResult {
+                                       OpAsmParser::UnresolvedOperand dim;
+                                       if (parser.parseOperand(dim))
+                                         return failure();
+                                       typeRef.dims.push_back(dim);
+                                       return success();
+                                     }))
+    return failure();
+  if (parser.parseComma() || parser.parseType(typeRef.elementType))
+    return failure();
+
+  if (succeeded(parser.parseOptionalComma())) {
+    typeRef.hasExplicitLayout = true;
+    if (parser.parseKeyword("offset") || parser.parseColon() ||
+        parser.parseInteger(typeRef.offset) || parser.parseComma() ||
+        parser.parseKeyword("strides") || parser.parseColon())
+      return failure();
+    if (parser.parseCommaSeparatedList(OpAsmParser::Delimiter::Square,
+                                       [&]() -> ParseResult {
+                                         OpAsmParser::UnresolvedOperand stride;
+                                         if (parser.parseOperand(stride))
+                                           return failure();
+                                         typeRef.strides.push_back(stride);
+                                         return success();
+                                       }))
+      return failure();
+  }
+  return parser.parseGreater();
 }
 
 ParseResult mlir::dependent_tensor::parseOptionalLoopTypeRefs(
@@ -410,24 +448,63 @@ ParseResult mlir::dependent_tensor::parseOptionalLoopTypeRefs(
 ParseResult mlir::dependent_tensor::resolvePendingTypeRef(
     OpAsmParser &parser, const PendingTypeRef &in, Type valueType,
     StringRef kind, DependentTensorTypeRef &out) {
-  auto rankedType = dyn_cast<RankedTensorType>(valueType);
-  if (!rankedType)
+  Type elementType;
+  int64_t logicalRank = 0;
+  if (in.isMemRef) {
+    auto memrefType = dyn_cast<MemRefType>(valueType);
+    if (!memrefType)
+      return parser.emitError(in.loc)
+             << "dependent memref loop " << kind << " requires memref";
+    bool flatCarrier = memrefType.getRank() == 0 && !in.dims.empty();
+    logicalRank = flatCarrier ? static_cast<int64_t>(in.dims.size())
+                              : memrefType.getRank();
+    elementType = memrefType.getElementType();
+  } else {
+    auto rankedType = dyn_cast<RankedTensorType>(valueType);
+    if (!rankedType)
+      return parser.emitError(in.loc)
+             << "dependent tensor loop " << kind << " requires ranked tensor";
+    logicalRank = rankedType.getRank();
+    elementType = rankedType.getElementType();
+    if (in.hasExplicitLayout)
+      return parser.emitError(in.loc)
+             << "dependent tensor loop " << kind << " cannot have layout";
+  }
+
+  if (static_cast<int64_t>(in.dims.size()) != logicalRank)
+    return parser.emitError(in.loc) << (in.isMemRef ? "dependent memref loop "
+                                                    : "dependent tensor loop ")
+                                    << kind << " rank mismatch";
+  if (in.elementType != elementType)
     return parser.emitError(in.loc)
-           << "dependent tensor loop " << kind << " requires ranked tensor";
-  if (in.dims.size() != static_cast<size_t>(rankedType.getRank()))
-    return parser.emitError(in.loc)
-           << "dependent tensor loop " << kind << " rank mismatch";
-  if (in.elementType != rankedType.getElementType())
-    return parser.emitError(in.loc) << "dependent tensor loop " << kind
-                                    << " element type must match value type";
+           << (in.isMemRef ? "dependent memref loop "
+                           : "dependent tensor loop ")
+           << kind << " element type must match value type";
+  if (in.hasExplicitLayout &&
+      static_cast<int64_t>(in.strides.size()) != logicalRank)
+    return parser.emitError(in.loc) << "dependent memref loop " << kind
+                                    << " stride count must match rank";
 
   SmallVector<Type> dimTypes(in.dims.size(),
                              parser.getBuilder().getIndexType());
   SmallVector<Value> resolvedDims;
   if (parser.resolveOperands(in.dims, dimTypes, in.loc, resolvedDims))
     return failure();
-  out.rank = rankedType.getRank();
+
+  SmallVector<Value> resolvedStrides;
+  if (in.hasExplicitLayout) {
+    SmallVector<Type> strideTypes(in.strides.size(),
+                                  parser.getBuilder().getIndexType());
+    if (parser.resolveOperands(in.strides, strideTypes, in.loc,
+                               resolvedStrides))
+      return failure();
+  }
+
+  out.rank = logicalRank;
+  out.offset = in.offset;
+  out.hasExplicitLayout = in.hasExplicitLayout;
   out.assignDimValues(resolvedDims);
+  out.assignStrideValues(resolvedStrides);
   return success();
 }
 
@@ -590,7 +667,7 @@ ParseResult mlir::dependent_tensor::populateLoopTypeRefsFromInits(
 
 bool mlir::dependent_tensor::isTypeRefVisibleFrom(
     Operation *op, const DependentTensorTypeRef &typeRef) {
-  for (const PropertyOperand &operand : typeRef.dimValues) {
+  auto isVisible = [&](const PropertyOperand &operand) {
     Value dim = operand.get();
     if (!dim)
       return false;
@@ -605,16 +682,35 @@ bool mlir::dependent_tensor::isTypeRefVisibleFrom(
                                 : nullptr)
       if (region->getParentOp() == op)
         return false;
-  }
+    return true;
+  };
+  for (const PropertyOperand &operand : typeRef.dimValues)
+    if (!isVisible(operand))
+      return false;
+  for (const PropertyOperand &operand : typeRef.strideValues)
+    if (!isVisible(operand))
+      return false;
   return true;
 }
 
 void mlir::dependent_tensor::printTypeRef(OpAsmPrinter &printer,
                                           const DependentTensorTypeRef &typeRef,
-                                          Type elementType) {
+                                          Type valueType) {
   SmallVector<Value, 4> dimValues;
   typeRef.appendDimValuesTo(dimValues);
-  printTensorSpec(printer, dimValues, elementType);
+  if (auto memrefType = dyn_cast<MemRefType>(valueType)) {
+    DependentMemRefValueRefinement memrefRef;
+    memrefRef.rank = typeRef.rank;
+    memrefRef.offset = typeRef.offset;
+    memrefRef.hasExplicitLayout = typeRef.hasExplicitLayout;
+    memrefRef.assignDimValues(dimValues);
+    memrefRef.assignStrideValues(typeRef.getStrideValues());
+    dependent_memref::printMemRefSpec(printer, memrefRef,
+                                      memrefType.getElementType());
+    return;
+  }
+  auto tensorType = cast<RankedTensorType>(valueType);
+  printTensorSpec(printer, dimValues, tensorType.getElementType());
 }
 
 void mlir::dependent_tensor::printLoopTypeRefs(
@@ -627,13 +723,11 @@ void mlir::dependent_tensor::printLoopTypeRefs(
     BlockArgument arg = regionIterArgs[ref.valueIndex];
     printer.printOperand(arg);
     printer << " : ";
-    auto type = cast<RankedTensorType>(arg.getType());
-    printTypeRef(printer, ref.operandTypeRef, type.getElementType());
+    printTypeRef(printer, ref.operandTypeRef, arg.getType());
   });
   printer << "] -> ";
   auto printResultRef = [&](const DependentTensorLoopTypeRef &ref) {
-    auto resultType = cast<RankedTensorType>(resultTypes[ref.valueIndex]);
-    printTypeRef(printer, ref.resultTypeRef, resultType.getElementType());
+    printTypeRef(printer, ref.resultTypeRef, resultTypes[ref.valueIndex]);
   };
   if (typeRefs.size() == 1) {
     printResultRef(typeRefs.front());
