@@ -10,8 +10,6 @@
 #include "mlir/Dialect/DependentTensor/IR/DependentTensor.h"
 #include "mlir/Dialect/DependentTensor/Transforms/Passes.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/IR/Dominance.h"
-#include "mlir/IR/PropertySSAUseSupport.h"
 #include "llvm/ADT/DenseSet.h"
 
 namespace mlir {
@@ -54,7 +52,7 @@ convertToTensorRefinement(const DependentTypeValueRefinement &stored) {
 static FailureOr<TensorValueRefinement>
 buildInfoFromTypeRef(RankedTensorType type,
                      const DependentTensorTypeRef &stored) {
-  if (stored.rank != type.getRank() ||
+  if (stored.hasExplicitLayout || stored.rank != type.getRank() ||
       stored.dimValues.size() != static_cast<size_t>(type.getRank()))
     return failure();
   TensorValueRefinement info{type, {}};
@@ -70,13 +68,14 @@ buildInfoFromTypeRef(RankedTensorType type,
 
 static LogicalResult
 verifyStoredTensorTypeRef(Operation *owner, StringRef kind, Type type,
-                          const DependentTensorTypeRef &stored,
-                          DominanceInfo &dominance,
-                          Operation *dominanceUseSite = nullptr) {
+                          const DependentTensorTypeRef &stored) {
   auto rankedType = dyn_cast<RankedTensorType>(type);
   if (!rankedType)
     return owner->emitOpError() << "requires ranked tensor type for dependent "
                                 << kind << " type refs";
+  if (stored.hasExplicitLayout)
+    return owner->emitOpError()
+           << "has layout on dependent tensor " << kind << " type refs";
   if (stored.rank != rankedType.getRank())
     return owner->emitOpError()
            << "requires dependent " << kind << " rank to match tensor rank";
@@ -96,14 +95,6 @@ verifyStoredTensorTypeRef(Operation *owner, StringRef kind, Type type,
     if (!dimValue.getType().isIndex())
       return owner->emitOpError() << "requires index-typed dependent " << kind
                                   << " dimension values";
-    if (crossesPropertySSAUseIsolatedFromAboveBoundary(owner, dimValue))
-      return owner->emitOpError() << "dependent " << kind
-                                  << " dimension value illegally crosses an "
-                                     "IsolatedFromAbove boundary";
-    Operation *useSite = dominanceUseSite ? dominanceUseSite : owner;
-    if (!dominance.dominates(dimValue, useSite))
-      return owner->emitOpError() << "dependent " << kind
-                                  << " dimension value does not dominate owner";
   }
   return success();
 }
@@ -129,8 +120,7 @@ verifyConcreteValueMatchesTypeRef(Operation *owner, StringRef message,
 static LogicalResult
 verifyStoredTensorRefinement(Operation *owner, StringRef kind, Type type,
                              const DependentTensorValueRefinement &stored,
-                             unsigned expectedIndex, DominanceInfo &dominance,
-                             Operation *dominanceUseSite = nullptr,
+                             unsigned expectedIndex,
                              func::FuncOp funcBoundaryOwner = nullptr) {
   auto rankedType = dyn_cast<RankedTensorType>(type);
   if (!rankedType)
@@ -157,10 +147,6 @@ verifyStoredTensorRefinement(Operation *owner, StringRef kind, Type type,
     if (!dimValue.getType().isIndex())
       return owner->emitOpError() << "requires index-typed dependent " << kind
                                   << " dimension values";
-    if (crossesPropertySSAUseIsolatedFromAboveBoundary(owner, dimValue))
-      return owner->emitOpError() << "dependent " << kind
-                                  << " dimension value illegally crosses an "
-                                     "IsolatedFromAbove boundary";
     if (funcBoundaryOwner) {
       auto arg = dyn_cast<BlockArgument>(dimValue);
       if (!arg || funcBoundaryOwner.isExternal() ||
@@ -170,10 +156,6 @@ verifyStoredTensorRefinement(Operation *owner, StringRef kind, Type type,
                << " dimensions to reference entry block arguments";
       continue;
     }
-    Operation *useSite = dominanceUseSite ? dominanceUseSite : owner;
-    if (!dominance.dominates(dimValue, useSite))
-      return owner->emitOpError() << "dependent " << kind
-                                  << " dimension value does not dominate owner";
   }
   return success();
 }
@@ -187,8 +169,7 @@ findStoredRefinement(ArrayRef<DependentTypeValueRefinement> refinements,
   return nullptr;
 }
 
-static LogicalResult verifyFuncBoundaryProperties(func::FuncOp func,
-                                                  DominanceInfo &dominance) {
+static LogicalResult verifyFuncBoundaryProperties(func::FuncOp func) {
   llvm::SmallDenseSet<unsigned> seenArgRefinements;
   for (const DependentTypeValueRefinement &stored :
        func.getProperties().dependentTypeArgRefinements) {
@@ -207,8 +188,7 @@ static LogicalResult verifyFuncBoundaryProperties(func::FuncOp func,
         convertToTensorRefinement(stored);
     if (failed(verifyStoredTensorRefinement(
             func, "argument", func.getArgument(stored.valueIndex).getType(),
-            tensorRef, stored.valueIndex, dominance,
-            /*dominanceUseSite=*/nullptr, func)))
+            tensorRef, stored.valueIndex, func)))
       return failure();
   }
   llvm::SmallDenseSet<unsigned> seenResultRefinements;
@@ -228,14 +208,13 @@ static LogicalResult verifyFuncBoundaryProperties(func::FuncOp func,
         convertToTensorRefinement(stored);
     if (failed(verifyStoredTensorRefinement(
             func, "result", func.getResultTypes()[stored.valueIndex], tensorRef,
-            stored.valueIndex, dominance, /*dominanceUseSite=*/nullptr, func)))
+            stored.valueIndex, func)))
       return failure();
   }
   return success();
 }
 
-static LogicalResult verifyInterfaceProperties(Operation *op,
-                                               DominanceInfo &dominance) {
+static LogicalResult verifyInterfaceProperties(Operation *op) {
   auto iface = dyn_cast<DependentTensorPropertyOpInterface>(op);
   if (!iface)
     return success();
@@ -248,8 +227,7 @@ static LogicalResult verifyInterfaceProperties(Operation *op,
     if (failed(stored))
       continue;
     if (failed(verifyStoredTensorRefinement(op, "result", result.getType(),
-                                            *stored, result.getResultNumber(),
-                                            dominance)))
+                                            *stored, result.getResultNumber())))
       return failure();
   }
 
@@ -261,9 +239,9 @@ static LogicalResult verifyInterfaceProperties(Operation *op,
                 regionNumber, blockNumber, arg.getArgNumber());
         if (failed(stored))
           continue;
-        if (failed(verifyStoredTensorRefinement(
-                op, "block argument", arg.getType(), *stored,
-                arg.getArgNumber(), dominance, op)))
+        if (failed(verifyStoredTensorRefinement(op, "block argument",
+                                                arg.getType(), *stored,
+                                                arg.getArgNumber())))
           return failure();
       }
     }
@@ -359,10 +337,11 @@ static LogicalResult verifyCallRefinements(func::CallOp call) {
   return success();
 }
 
-static LogicalResult verifyLoopRefinements(
-    Operation *owner, ArrayRef<DependentTensorLoopTypeRef> loopTypeRefs,
-    ValueRange initOperands, TypeRange resultTypes, ValueRange yieldedValues,
-    Operation *yieldUseSite, DominanceInfo &dominance) {
+static LogicalResult
+verifyLoopRefinements(Operation *owner,
+                      ArrayRef<DependentTensorLoopTypeRef> loopTypeRefs,
+                      ValueRange initOperands, TypeRange resultTypes,
+                      ValueRange yieldedValues, Operation *yieldUseSite) {
   llvm::SmallDenseSet<unsigned> seenLoopRefs;
   for (const DependentTensorLoopTypeRef &ref : loopTypeRefs) {
     if (!seenLoopRefs.insert(ref.valueIndex).second)
@@ -375,15 +354,15 @@ static LogicalResult verifyLoopRefinements(
              << "has dependent tensor loop type refs out of range";
     if (failed(verifyStoredTensorTypeRef(owner, "loop operand",
                                          initOperands[ref.valueIndex].getType(),
-                                         ref.operandTypeRef, dominance, owner)))
+                                         ref.operandTypeRef)))
       return failure();
     if (failed(verifyStoredTensorTypeRef(owner, "loop result",
                                          resultTypes[ref.valueIndex],
-                                         ref.resultTypeRef, dominance, owner)))
+                                         ref.resultTypeRef)))
       return failure();
     if (failed(verifyStoredTensorTypeRef(
             owner, "loop yield", yieldedValues[ref.valueIndex].getType(),
-            ref.resultTypeRef, dominance, yieldUseSite)))
+            ref.resultTypeRef)))
       return failure();
     if (failed(verifyConcreteValueMatchesTypeRef(
             owner,
@@ -399,22 +378,20 @@ static LogicalResult verifyLoopRefinements(
   return success();
 }
 
-static LogicalResult verifyScfForRefinements(scf::ForOp forOp,
-                                             DominanceInfo &dominance) {
+static LogicalResult verifyScfForRefinements(scf::ForOp forOp) {
   auto yield = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
   return verifyLoopRefinements(
       forOp.getOperation(), forOp.getProperties().dependentTensorLoopTypeRefs,
       forOp.getInitArgs(), forOp.getResultTypes(), yield.getResults(),
-      yield.getOperation(), dominance);
+      yield.getOperation());
 }
 
-static LogicalResult verifyAffineForRefinements(affine::AffineForOp forOp,
-                                                DominanceInfo &dominance) {
+static LogicalResult verifyAffineForRefinements(affine::AffineForOp forOp) {
   auto yield = cast<affine::AffineYieldOp>(forOp.getBody()->getTerminator());
   return verifyLoopRefinements(
       forOp.getOperation(), forOp.getProperties().dependentTensorLoopTypeRefs,
       forOp.getInits(), forOp.getResultTypes(), yield.getOperands(),
-      yield.getOperation(), dominance);
+      yield.getOperation());
 }
 
 struct VerifyDependentTensorRefinementsPass
@@ -426,9 +403,8 @@ struct VerifyDependentTensorRefinementsPass
 
   void runOnOperation() override {
     ModuleOp module = getOperation();
-    DominanceInfo dominance(module);
     WalkResult propertyWalk = module.walk([&](Operation *op) {
-      if (failed(verifyInterfaceProperties(op, dominance)))
+      if (failed(verifyInterfaceProperties(op)))
         return WalkResult::interrupt();
       return WalkResult::advance();
     });
@@ -436,7 +412,7 @@ struct VerifyDependentTensorRefinementsPass
       return signalPassFailure();
 
     for (func::FuncOp func : module.getOps<func::FuncOp>()) {
-      if (failed(verifyFuncBoundaryProperties(func, dominance)))
+      if (failed(verifyFuncBoundaryProperties(func)))
         return signalPassFailure();
       for (func::ReturnOp ret : func.getOps<func::ReturnOp>())
         if (failed(verifyReturnRefinements(func, ret)))
@@ -452,7 +428,7 @@ struct VerifyDependentTensorRefinementsPass
       return signalPassFailure();
 
     WalkResult scfWalk = module.walk([&](scf::ForOp forOp) {
-      if (failed(verifyScfForRefinements(forOp, dominance)))
+      if (failed(verifyScfForRefinements(forOp)))
         return WalkResult::interrupt();
       return WalkResult::advance();
     });
@@ -460,7 +436,7 @@ struct VerifyDependentTensorRefinementsPass
       return signalPassFailure();
 
     WalkResult affineWalk = module.walk([&](affine::AffineForOp forOp) {
-      if (failed(verifyAffineForRefinements(forOp, dominance)))
+      if (failed(verifyAffineForRefinements(forOp)))
         return WalkResult::interrupt();
       return WalkResult::advance();
     });
