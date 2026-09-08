@@ -18,9 +18,9 @@ func.func @dependent_conv2d_strided(
     %y_stride0 : index,
     %y_stride1 : index,
     %y_stride2 : index,
-    %X : memref<f32>,
-    %K : memref<f32>,
-    %Y : memref<f32>)
+    %X : memref<?x?x?x?x?x?xf32>,
+    %K : memref<?x?x?x?xf32>,
+    %Y : memref<?x?x?x?xf32>)
     #types[
       %X : #memref<[%n, %cin, %oh, %ow, %kh, %kw], f32, offset: 0, strides: [%x_stride0, %x_stride1, %x_stride2, %unit_stride, %x_stride2, %unit_stride]>,
       %K : #memref<[%cout, %cin, %kh, %kw], f32, offset: 0, strides: [%k_stride0, %k_stride1, %k_stride2, %unit_stride]>,
@@ -39,10 +39,10 @@ func.func @dependent_conv2d_strided(
               %sum_kw = scf.for %kw_idx = %c0 to %kw step %c1 iter_args(%acc_kw = %acc_kh) -> (f32) {
                 %x = dependent_memref.load %X[%n_idx, %ci, %oh_idx, %ow_idx, %kh_idx, %kw_idx]
                     #memref<[%n, %cin, %oh, %ow, %kh, %kw], f32, offset: 0, strides: [%x_stride0, %x_stride1, %x_stride2, %unit_stride, %x_stride2, %unit_stride]>
-                    : memref<f32> -> f32
+                    : memref<?x?x?x?x?x?xf32>
                 %k = dependent_memref.load %K[%co, %ci, %kh_idx, %kw_idx]
                     #memref<[%cout, %cin, %kh, %kw], f32, offset: 0, strides: [%k_stride0, %k_stride1, %k_stride2, %unit_stride]>
-                    : memref<f32> -> f32
+                    : memref<?x?x?x?xf32>
                 %mul = arith.mulf %x, %k : f32
                 %next = arith.addf %acc_kw, %mul : f32
                 scf.yield %next : f32
@@ -53,7 +53,7 @@ func.func @dependent_conv2d_strided(
           }
           dependent_memref.store %sum_ci, %Y[%n_idx, %co, %oh_idx, %ow_idx]
               #memref<[%n, %cout, %oh, %ow], f32, offset: 0, strides: [%y_stride0, %y_stride1, %y_stride2, %unit_stride]>
-              : memref<f32>, f32
+              : memref<?x?x?x?xf32>
         }
       }
     }

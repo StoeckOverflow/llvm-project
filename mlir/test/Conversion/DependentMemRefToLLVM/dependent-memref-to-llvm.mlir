@@ -3,8 +3,8 @@
 func.func @load_store(%n : index, %m : index, %s0 : index, %s1 : index, %A : memref<?x?xf32>, %C : memref<?x?xf32>) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
-  %a = dependent_memref.load %A[%c0, %c1] #memref<[%n, %m], f32, offset: 0, strides: [%s0, %s1]> : memref<?x?xf32> -> f32
-  dependent_memref.store %a, %C[%c1, %c0] #memref<[%n, %m], f32, offset: 0, strides: [%s0, %s1]> : memref<?x?xf32>, f32
+  %a = dependent_memref.load %A[%c0, %c1] #memref<[%n, %m], f32, offset: 0, strides: [%s0, %s1]> : memref<?x?xf32>
+  dependent_memref.store %a, %C[%c1, %c0] #memref<[%n, %m], f32, offset: 0, strides: [%s0, %s1]> : memref<?x?xf32>
   return
 }
 

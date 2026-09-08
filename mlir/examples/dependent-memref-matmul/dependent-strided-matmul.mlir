@@ -3,9 +3,9 @@ func.func @dependent_matmul_strided(
     %as0 : index, %as1 : index,
     %bs0 : index, %bs1 : index,
     %cs0 : index, %cs1 : index,
-    %A : memref<f32>,
-    %B : memref<f32>,
-    %C : memref<f32>)
+    %A : memref<?x?xf32>,
+    %B : memref<?x?xf32>,
+    %C : memref<?x?xf32>)
     #types[
       %A : #memref<[%n, %k], f32, offset: 0, strides: [%as0, %as1]>,
       %B : #memref<[%k, %m], f32, offset: 0, strides: [%bs0, %bs1]>,
@@ -21,17 +21,17 @@ func.func @dependent_matmul_strided(
           iter_args(%acc = %zero) -> (f32) {
         %a = dependent_memref.load %A[%i, %p]
             #memref<[%n, %k], f32, offset: 0, strides: [%as0, %as1]>
-            : memref<f32> -> f32
+            : memref<?x?xf32>
         %b = dependent_memref.load %B[%p, %j]
             #memref<[%k, %m], f32, offset: 0, strides: [%bs0, %bs1]>
-            : memref<f32> -> f32
+            : memref<?x?xf32>
         %mul = arith.mulf %a, %b : f32
         %next = arith.addf %acc, %mul : f32
         scf.yield %next : f32
       }
       dependent_memref.store %sum, %C[%i, %j]
           #memref<[%n, %m], f32, offset: 0, strides: [%cs0, %cs1]>
-          : memref<f32>, f32
+          : memref<?x?xf32>
     }
   }
   return

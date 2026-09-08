@@ -21,13 +21,13 @@ func.func @matmul_strided_typed(%n : index, %m : index, %k : index,
   scf.for %i = %c0 to %n step %c1 {
     scf.for %j = %c0 to %m step %c1 {
       %sum = scf.for %p = %c0 to %k step %c1 iter_args(%acc = %zero) -> (f32) {
-        %a = dependent_memref.load %A[%i, %p] #memref<[%n, %k], f32, offset: 0, strides: [%as0, %as1]> : memref<?x?xf32> -> f32
-        %b = dependent_memref.load %B[%p, %j] #memref<[%k, %m], f32, offset: 0, strides: [%bs0, %bs1]> : memref<?x?xf32> -> f32
+        %a = dependent_memref.load %A[%i, %p] #memref<[%n, %k], f32, offset: 0, strides: [%as0, %as1]> : memref<?x?xf32>
+        %b = dependent_memref.load %B[%p, %j] #memref<[%k, %m], f32, offset: 0, strides: [%bs0, %bs1]> : memref<?x?xf32>
         %mul = arith.mulf %a, %b : f32
         %next = arith.addf %acc, %mul : f32
         scf.yield %next : f32
       }
-      dependent_memref.store %sum, %C[%i, %j] #memref<[%n, %m], f32, offset: 0, strides: [%cs0, %cs1]> : memref<?x?xf32>, f32
+      dependent_memref.store %sum, %C[%i, %j] #memref<[%n, %m], f32, offset: 0, strides: [%cs0, %cs1]> : memref<?x?xf32>
     }
   }
   return

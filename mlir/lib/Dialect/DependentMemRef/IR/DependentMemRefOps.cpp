@@ -341,11 +341,12 @@ OpFoldResult DimExactOp::fold(FoldAdaptor adaptor) {
 ParseResult LoadOp::parse(OpAsmParser &parser, OperationState &result) {
   OpAsmParser::UnresolvedOperand source;
   SmallVector<OpAsmParser::UnresolvedOperand> indices;
-  Type sourceType, resultType;
+  Type sourceType;
   auto &props = result.getOrAddProperties<LoadOp::Properties>();
   if (parseSourceRefinedOp(parser, result, source, &indices, sourceType,
-                           &resultType, props.source_refinement))
+                           nullptr, props.source_refinement))
     return failure();
+  auto memrefType = cast<MemRefType>(sourceType);
   if (parser.resolveOperand(source, sourceType, result.operands))
     return failure();
   SmallVector<Type> indexTypes(indices.size(),
@@ -353,7 +354,7 @@ ParseResult LoadOp::parse(OpAsmParser &parser, OperationState &result) {
   if (parser.resolveOperands(indices, indexTypes, parser.getCurrentLocation(),
                              result.operands))
     return failure();
-  result.addTypes(resultType);
+  result.addTypes(memrefType.getElementType());
   return success();
 }
 
@@ -366,8 +367,6 @@ void LoadOp::print(OpAsmPrinter &p) {
   printMemRefSpec(p, getProperties().source_refinement, type.getElementType());
   p << " : ";
   p.printType(type);
-  p << " -> ";
-  p.printType(getResult().getType());
 }
 
 LogicalResult LoadOp::verify() {
@@ -390,15 +389,16 @@ void LoadOp::walkPropertySSAUses(function_ref<void(PropertyOperand &)> cb) {
 ParseResult StoreOp::parse(OpAsmParser &parser, OperationState &result) {
   OpAsmParser::UnresolvedOperand value, source;
   SmallVector<OpAsmParser::UnresolvedOperand> indices;
-  Type valueType, sourceType;
+  Type sourceType;
   if (parser.parseOperand(value) || parser.parseComma())
     return failure();
   auto &props = result.getOrAddProperties<StoreOp::Properties>();
   if (parseSourceRefinedOp(parser, result, source, &indices, sourceType,
-                           nullptr, props.source_refinement) ||
-      parser.parseComma() || parser.parseType(valueType))
+                           nullptr, props.source_refinement))
     return failure();
-  if (parser.resolveOperand(value, valueType, result.operands) ||
+  auto memrefType = cast<MemRefType>(sourceType);
+  if (parser.resolveOperand(value, memrefType.getElementType(),
+                            result.operands) ||
       parser.resolveOperand(source, sourceType, result.operands))
     return failure();
   SmallVector<Type> indexTypes(indices.size(),
@@ -420,8 +420,6 @@ void StoreOp::print(OpAsmPrinter &p) {
   printMemRefSpec(p, getProperties().source_refinement, type.getElementType());
   p << " : ";
   p.printType(type);
-  p << ", ";
-  p.printType(getValue().getType());
 }
 
 LogicalResult StoreOp::verify() {
