@@ -41,16 +41,46 @@ def run_median_ns(result, key):
     return as_float(run_info.get("median_ns"))
 
 
+def timing_total_ms(result, key, phase):
+    timing = result[key].get(phase, {})
+    return as_float(timing.get("pass_timing_total_ms"))
+
+
+def summarize_route(route):
+    return {
+        "mlir_opt_wall_ms": route.get("mlir_opt", {}).get("wall_ms"),
+        "mlir_pass_timing_total_ms": as_float(
+            route.get("mlir_opt", {}).get("pass_timing_total_ms")
+        ),
+        "llvm_opt_wall_ms": route.get("llvm_opt", {}).get("wall_ms"),
+        "llvm_pass_timing_total_ms": as_float(
+            route.get("llvm_opt", {}).get("pass_timing_total_ms")
+        ),
+        "llvm_dialect_lines": route["llvm_dialect_lines"],
+        "llvm_ir_lines": route["llvm_ir_lines"],
+        "llvm_opt_ir_lines": route["llvm_opt_ir_lines"],
+        "descriptor_ops": route["llvm_dialect_insertvalue"]
+        + route["llvm_dialect_extractvalue"],
+        "opt_descriptor_ops": route["llvm_opt_ir_insertvalue"]
+        + route["llvm_opt_ir_extractvalue"],
+    }
+
+
 def summarize_size(size, result):
     dependent_ns = run_median_ns(result, "dependent")
     baseline_ns = run_median_ns(result, "baseline")
+    structural = result.get("structural_artifacts", {})
+    memref_baseline = summarize_route(structural["baseline_strided"])
+    dependent_memref = summarize_route(structural["direct_strided"])
     return {
         "size": size,
         "problem": result["problem"],
         "dependent": {
             "median_ns": dependent_ns,
             "mlir_opt_wall_ms": result["dependent"]["mlir_opt"]["wall_ms"],
+            "mlir_pass_timing_total_ms": timing_total_ms(result, "dependent", "mlir_opt"),
             "llvm_opt_wall_ms": result["dependent"]["llvm_opt"]["wall_ms"],
+            "llvm_pass_timing_total_ms": timing_total_ms(result, "dependent", "llvm_opt"),
             "llvm_dialect_lines": result["dependent"]["llvm_dialect_lines"],
             "llvm_ir_lines": result["dependent"]["llvm_ir_lines"],
             "llvm_opt_ir_lines": result["dependent"]["llvm_opt_ir_lines"],
@@ -62,7 +92,9 @@ def summarize_size(size, result):
         "baseline": {
             "median_ns": baseline_ns,
             "mlir_opt_wall_ms": result["baseline"]["mlir_opt"]["wall_ms"],
+            "mlir_pass_timing_total_ms": timing_total_ms(result, "baseline", "mlir_opt"),
             "llvm_opt_wall_ms": result["baseline"]["llvm_opt"]["wall_ms"],
+            "llvm_pass_timing_total_ms": timing_total_ms(result, "baseline", "llvm_opt"),
             "llvm_dialect_lines": result["baseline"]["llvm_dialect_lines"],
             "llvm_ir_lines": result["baseline"]["llvm_ir_lines"],
             "llvm_opt_ir_lines": result["baseline"]["llvm_opt_ir_lines"],
@@ -71,6 +103,8 @@ def summarize_size(size, result):
             "opt_descriptor_ops": result["baseline"]["llvm_opt_ir_insertvalue"]
             + result["baseline"]["llvm_opt_ir_extractvalue"],
         },
+        "dependent_memref": dependent_memref,
+        "memref_baseline": memref_baseline,
         "ratios": {
             "runtime_baseline_over_dependent": ratio(baseline_ns, dependent_ns),
             "mlir_opt_baseline_over_dependent": ratio(
@@ -80,6 +114,28 @@ def summarize_size(size, result):
             "llvm_opt_baseline_over_dependent": ratio(
                 result["baseline"]["llvm_opt"]["wall_ms"],
                 result["dependent"]["llvm_opt"]["wall_ms"],
+            ),
+            "mlir_pass_timing_baseline_over_dependent": ratio(
+                timing_total_ms(result, "baseline", "mlir_opt"),
+                timing_total_ms(result, "dependent", "mlir_opt"),
+            ),
+            "llvm_pass_timing_baseline_over_dependent": ratio(
+                timing_total_ms(result, "baseline", "llvm_opt"),
+                timing_total_ms(result, "dependent", "llvm_opt"),
+            ),
+            "memref_mlir_pass_baseline_over_dependent": ratio(
+                memref_baseline["mlir_pass_timing_total_ms"],
+                dependent_memref["mlir_pass_timing_total_ms"],
+            ),
+            "memref_llvm_pass_baseline_over_dependent": ratio(
+                memref_baseline["llvm_pass_timing_total_ms"],
+                dependent_memref["llvm_pass_timing_total_ms"],
+            ),
+            "memref_compile_pass_baseline_over_dependent": ratio(
+                as_float(memref_baseline["mlir_pass_timing_total_ms"])
+                + as_float(memref_baseline["llvm_pass_timing_total_ms"]),
+                as_float(dependent_memref["mlir_pass_timing_total_ms"])
+                + as_float(dependent_memref["llvm_pass_timing_total_ms"]),
             ),
         },
     }
@@ -101,33 +157,35 @@ def write_markdown(summary, path):
         f"Repeats: `{summary['repeats']}`",
         f"Sizes: `{', '.join(str(size) for size in summary['sizes'])}`",
         "",
-        "| size | dep ns | base ns | base/dep | dep MLIR ms | base MLIR ms | dep opt lines | base opt lines | dep desc | base desc | base opt desc |",
-        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| size | dep-memref MLIR pass ms | std-memref MLIR pass ms | dep-memref LLVM pass ms | std-memref LLVM pass ms | std/dep compile pass | dep-memref LLVM lines | std-memref LLVM lines | dep-memref desc | std-memref desc | tensor dep ns | tensor base ns |",
+        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for entry in summary["runs"]:
         lines.append(
-            "| {size} | {dep_ns} | {base_ns} | {runtime_ratio} | {dep_mlir} | "
-            "{base_mlir} | {dep_lines} | {base_lines} | {dep_desc} | "
-            "{base_desc} | {base_opt_desc} |".format(
+            "| {size} | {dep_mlir_pass} | {base_mlir_pass} | {dep_llvm_pass} | "
+            "{base_llvm_pass} | {compile_ratio} | {dep_lines} | {base_lines} | "
+            "{dep_desc} | {base_desc} | {dep_ns} | {base_ns} |".format(
                 size=entry["size"],
+                dep_mlir_pass=fmt(entry["dependent_memref"]["mlir_pass_timing_total_ms"]),
+                base_mlir_pass=fmt(entry["memref_baseline"]["mlir_pass_timing_total_ms"]),
+                dep_llvm_pass=fmt(entry["dependent_memref"]["llvm_pass_timing_total_ms"]),
+                base_llvm_pass=fmt(entry["memref_baseline"]["llvm_pass_timing_total_ms"]),
+                compile_ratio=fmt(entry["ratios"]["memref_compile_pass_baseline_over_dependent"]),
+                dep_lines=entry["dependent_memref"]["llvm_opt_ir_lines"],
+                base_lines=entry["memref_baseline"]["llvm_opt_ir_lines"],
+                dep_desc=entry["dependent_memref"]["descriptor_ops"],
+                base_desc=entry["memref_baseline"]["descriptor_ops"],
                 dep_ns=fmt(entry["dependent"]["median_ns"], 0),
                 base_ns=fmt(entry["baseline"]["median_ns"], 0),
-                runtime_ratio=fmt(entry["ratios"]["runtime_baseline_over_dependent"]),
-                dep_mlir=fmt(entry["dependent"]["mlir_opt_wall_ms"]),
-                base_mlir=fmt(entry["baseline"]["mlir_opt_wall_ms"]),
-                dep_lines=entry["dependent"]["llvm_opt_ir_lines"],
-                base_lines=entry["baseline"]["llvm_opt_ir_lines"],
-                dep_desc=entry["dependent"]["descriptor_ops"],
-                base_desc=entry["baseline"]["descriptor_ops"],
-                base_opt_desc=entry["baseline"]["opt_descriptor_ops"],
             )
         )
     lines.extend(
         [
             "",
-            "`base/dep` above is `baseline median ns / dependent median ns`; values",
-            "larger than 1 mean the dependent executable was faster for that run.",
-            "Descriptor counts are textual counts in the generated IR artifacts.",
+            "The primary table compares the pure memref route: standard strided memref lowering versus dependent memref lowering.",
+            "Tensor-route runtime columns are included only as smoke-check context.",
+            "Descriptor counts are textual counts in the generated LLVM-dialect MLIR artifacts.",
+            "Pass timing columns come from MLIR/LLVM internal timing instrumentation and exclude process overhead.",
             "",
         ]
     )

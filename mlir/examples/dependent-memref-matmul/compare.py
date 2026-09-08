@@ -17,7 +17,36 @@ def run(command):
     return result.stdout
 
 
-def measure_wall(command, timing_path=None):
+def extract_mlir_timing(stderr):
+    try:
+        timing = json.loads(stderr)
+    except json.JSONDecodeError:
+        return {}
+    total = next((entry for entry in timing if entry.get("name") == "Total"), None)
+    payload = {"pass_timing": timing}
+    if total and "wall" in total and "duration" in total["wall"]:
+        payload["pass_timing_total_ms"] = round(total["wall"]["duration"] * 1000.0, 3)
+    return payload
+
+
+def extract_llvm_pass_timing(stderr):
+    lines = stderr.splitlines()
+    in_pass_report = False
+    for line in lines:
+        if "Pass execution timing report" in line:
+            in_pass_report = True
+            continue
+        if in_pass_report and "Total Execution Time:" in line:
+            fields = line.split()
+            try:
+                seconds = float(fields[3])
+            except (IndexError, ValueError):
+                return {}
+            return {"pass_timing_total_ms": round(seconds * 1000.0, 3)}
+    return {}
+
+
+def measure_wall(command, timing_path=None, parse_timing=None):
     start = time.perf_counter()
     result = subprocess.run(
         command, check=True, text=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
@@ -27,11 +56,27 @@ def measure_wall(command, timing_path=None):
     if timing_path is not None:
         timing_path.write_text(result.stderr)
         payload["timing_file"] = str(timing_path)
+    if parse_timing is not None:
+        payload.update(parse_timing(result.stderr))
     return payload
 
 
 def measure_mlir_opt(command, timing_path):
-    return measure_wall([*command, "--mlir-timing"], timing_path)
+    return measure_wall(
+        [
+            *command,
+            "-mlir-disable-threading",
+            "-mlir-timing",
+            "-mlir-timing-display=list",
+            "-mlir-output-format=json",
+        ],
+        timing_path,
+        extract_mlir_timing,
+    )
+
+
+def measure_llvm_opt(command, timing_path):
+    return measure_wall([*command, "-time-passes"], timing_path, extract_llvm_pass_timing)
 
 
 def parse_key_values(output):
@@ -159,7 +204,7 @@ def main():
         ],
         out_dir / "baseline.mlir-timing.txt",
     )
-    result["dependent"]["llvm_opt"] = measure_wall(
+    result["dependent"]["llvm_opt"] = measure_llvm_opt(
         [
             str(llvm_opt),
             "-O3",
@@ -167,9 +212,10 @@ def main():
             str(out_dir / "dependent.ll"),
             "-o",
             str(out_dir / "dependent.opt.ll"),
-        ]
+        ],
+        out_dir / "dependent.opt-timing.txt",
     )
-    result["baseline"]["llvm_opt"] = measure_wall(
+    result["baseline"]["llvm_opt"] = measure_llvm_opt(
         [
             str(llvm_opt),
             "-O3",
@@ -177,7 +223,48 @@ def main():
             str(out_dir / "baseline.ll"),
             "-o",
             str(out_dir / "baseline.opt.ll"),
-        ]
+        ],
+        out_dir / "baseline.opt-timing.txt",
+    )
+
+    result["structural_artifacts"]["baseline_strided"]["mlir_opt"] = measure_mlir_opt(
+        [
+            str(mlir_opt),
+            str(script_dir / "baseline-strided-matmul.mlir"),
+            "-pass-pipeline=builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),finalize-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)",
+        ],
+        out_dir / "baseline-strided" / "baseline_matmul_strided.mlir-timing.txt",
+    )
+    result["structural_artifacts"]["direct_strided"]["mlir_opt"] = measure_mlir_opt(
+        [
+            str(mlir_opt),
+            str(script_dir / "dependent-strided-matmul.mlir"),
+            "-lower-dependent-memref-to-llvm",
+            "-reconcile-unrealized-casts",
+        ],
+        out_dir / "direct-strided" / "dependent_matmul_strided.mlir-timing.txt",
+    )
+    result["structural_artifacts"]["baseline_strided"]["llvm_opt"] = measure_llvm_opt(
+        [
+            str(llvm_opt),
+            "-O3",
+            "-S",
+            str(out_dir / "baseline-strided" / "baseline_matmul_strided.ll"),
+            "-o",
+            str(out_dir / "baseline-strided" / "baseline_matmul_strided.opt.ll"),
+        ],
+        out_dir / "baseline-strided" / "baseline_matmul_strided.opt-timing.txt",
+    )
+    result["structural_artifacts"]["direct_strided"]["llvm_opt"] = measure_llvm_opt(
+        [
+            str(llvm_opt),
+            "-O3",
+            "-S",
+            str(out_dir / "direct-strided" / "dependent_matmul_strided.ll"),
+            "-o",
+            str(out_dir / "direct-strided" / "dependent_matmul_strided.opt.ll"),
+        ],
+        out_dir / "direct-strided" / "dependent_matmul_strided.opt-timing.txt",
     )
 
     if not args.skip_run:

@@ -59,6 +59,25 @@ def runtime_ms(summary, key):
     return [None if v is None else v / 1.0e6 for v in series(summary, [key, "median_ns"])]
 
 
+def has_route(summary, key):
+    return bool(summary.get("runs")) and key in summary["runs"][0]
+
+
+def dependent_memref_key(summary):
+    return "dependent_memref" if has_route(summary, "dependent_memref") else "dependent"
+
+
+def baseline_memref_key(summary):
+    return "memref_baseline" if has_route(summary, "memref_baseline") else "baseline"
+
+
+def timing_ms(summary, key, phase):
+    pass_values = series(summary, [key, f"{phase}_pass_timing_total_ms"])
+    if has_values(pass_values):
+        return pass_values
+    return series(summary, [key, f"{phase}_wall_ms"])
+
+
 def save_figure(fig, output_stem, formats):
     written = []
     for fmt in formats:
@@ -75,12 +94,12 @@ def plot_performance_stacked(plt, summary, output_dir, formats):
     positions = list(range(len(x_values)))
     width = 0.36
 
-    dep_mlir = series(summary, ["dependent", "mlir_opt_wall_ms"])
-    dep_llvm = series(summary, ["dependent", "llvm_opt_wall_ms"])
-    dep_run = runtime_ms(summary, "dependent")
-    base_mlir = series(summary, ["baseline", "mlir_opt_wall_ms"])
-    base_llvm = series(summary, ["baseline", "llvm_opt_wall_ms"])
-    base_run = runtime_ms(summary, "baseline")
+    dep_key = dependent_memref_key(summary)
+    base_key = baseline_memref_key(summary)
+    dep_mlir = timing_ms(summary, dep_key, "mlir")
+    dep_llvm = timing_ms(summary, dep_key, "llvm")
+    base_mlir = timing_ms(summary, base_key, "mlir")
+    base_llvm = timing_ms(summary, base_key, "llvm")
 
     fig, ax = plt.subplots(figsize=(9.2, 6.4))
     fig.subplots_adjust(top=0.74)
@@ -94,55 +113,30 @@ def plot_performance_stacked(plt, summary, output_dir, formats):
     }
     dep_mlir_z = zero_none(dep_mlir)
     dep_llvm_z = zero_none(dep_llvm)
-    dep_run_z = zero_none(dep_run)
     base_mlir_z = zero_none(base_mlir)
     base_llvm_z = zero_none(base_llvm)
-    base_run_z = zero_none(base_run)
 
     ax.bar(dep_x, dep_mlir_z, width, color=colors["mlir"], edgecolor="black", linewidth=0.4, label="MLIR lowering")
     ax.bar(dep_x, dep_llvm_z, width, bottom=dep_mlir_z, color=colors["llvm"], edgecolor="black", linewidth=0.4, label="LLVM opt -O3")
-    ax.bar(
-        dep_x,
-        dep_run_z,
-        width,
-        bottom=[a + b for a, b in zip(dep_mlir_z, dep_llvm_z)],
-        color=colors["run"],
-        edgecolor="black",
-        linewidth=0.4,
-        label="kernel execution",
-    )
-
     ax.bar(base_x, base_mlir_z, width, color=colors["mlir"], edgecolor="black", linewidth=0.4, hatch="//")
     ax.bar(base_x, base_llvm_z, width, bottom=base_mlir_z, color=colors["llvm"], edgecolor="black", linewidth=0.4, hatch="//")
-    ax.bar(
-        base_x,
-        base_run_z,
-        width,
-        bottom=[a + b for a, b in zip(base_mlir_z, base_llvm_z)],
-        color=colors["run"],
-        edgecolor="black",
-        linewidth=0.4,
-        hatch="//",
-    )
-
-    fig.suptitle("Matmul Cost: Lowering, LLVM Optimization, Execution", y=0.98)
+    fig.suptitle("Matmul MemRef Lowering Compile Time", y=0.98)
     ax.set_xlabel("matrix size")
     ax.set_ylabel("time (ms)")
     ax.set_xticks(positions, [str(size) for size in x_values])
     ax.grid(True, axis="y", linestyle=":", linewidth=0.7)
 
     phase_handles = [
-        Patch(facecolor=colors["mlir"], edgecolor="black", linewidth=0.4, label="MLIR lowering"),
-        Patch(facecolor=colors["llvm"], edgecolor="black", linewidth=0.4, label="LLVM opt -O3"),
-        Patch(facecolor=colors["run"], edgecolor="black", linewidth=0.4, label="kernel execution"),
+        Patch(facecolor=colors["mlir"], edgecolor="black", linewidth=0.4, label="MLIR passes"),
+        Patch(facecolor=colors["llvm"], edgecolor="black", linewidth=0.4, label="LLVM opt passes"),
     ]
     approach_handles = [
-        Patch(facecolor="white", edgecolor="black", linewidth=0.7, label="dependent: left, solid"),
-        Patch(facecolor="white", edgecolor="black", linewidth=0.7, hatch="//", label="baseline: right, dashed"),
+        Patch(facecolor="white", edgecolor="black", linewidth=0.7, label="dependent memref: left, solid"),
+        Patch(facecolor="white", edgecolor="black", linewidth=0.7, hatch="//", label="standard memref: right, dashed"),
     ]
     fig.legend(
         handles=phase_handles, loc="upper center", bbox_to_anchor=(0.5, 0.925),
-        ncol=3, frameon=False
+        ncol=2, frameon=False
     )
     fig.legend(
         handles=approach_handles, loc="upper center", bbox_to_anchor=(0.5, 0.865),
@@ -155,13 +149,13 @@ def plot_llvm_line_count(plt, summary, output_dir, formats):
     x_values = sizes(summary)
     positions = list(range(len(x_values)))
     width = 0.36
-    dep_lines = series(summary, ["dependent", "llvm_opt_ir_lines"])
-    base_lines = series(summary, ["baseline", "llvm_opt_ir_lines"])
+    dep_lines = series(summary, [dependent_memref_key(summary), "llvm_opt_ir_lines"])
+    base_lines = series(summary, [baseline_memref_key(summary), "llvm_opt_ir_lines"])
 
     fig, ax = plt.subplots(figsize=(8.8, 5.0), constrained_layout=True)
-    ax.bar([pos - width / 2 for pos in positions], zero_none(dep_lines), width, label="dependent", color="#4C78A8")
-    ax.bar([pos + width / 2 for pos in positions], zero_none(base_lines), width, label="baseline", color="#F58518")
-    ax.set_title("Optimized LLVM IR Line Count", pad=18)
+    ax.bar([pos - width / 2 for pos in positions], zero_none(dep_lines), width, label="dependent memref", color="#4C78A8")
+    ax.bar([pos + width / 2 for pos in positions], zero_none(base_lines), width, label="standard memref", color="#F58518")
+    ax.set_title("Optimized LLVM IR Line Count for MemRef Routes", pad=18)
     ax.set_xlabel("matrix size")
     ax.set_ylabel("line count after opt -O3")
     ax.set_xticks(positions, [str(size) for size in x_values])
@@ -213,6 +207,8 @@ def plot_grouped_bars(plt, x_values, named_series, title, ylabel, output_stem, f
 
 def plot_debug_figures(plt, summary, output_dir, formats):
     x_values = sizes(summary)
+    dep_key = dependent_memref_key(summary)
+    base_key = baseline_memref_key(summary)
     written = []
     written += plot_lines(
         plt,
@@ -227,12 +223,36 @@ def plot_debug_figures(plt, summary, output_dir, formats):
         plt,
         x_values,
         [
+            ("dependent memref", timing_ms(summary, dep_key, "mlir")),
+            ("standard memref", timing_ms(summary, base_key, "mlir")),
+        ],
+        "MLIR Pass Time",
+        "internal pass time (ms)",
+        output_dir / "debug-mlir-pass-time",
+        formats,
+    )
+    written += plot_lines(
+        plt,
+        x_values,
+        [
+            ("dependent memref", timing_ms(summary, dep_key, "llvm")),
+            ("standard memref", timing_ms(summary, base_key, "llvm")),
+        ],
+        "LLVM opt -O3 Pass Time",
+        "internal pass time (ms)",
+        output_dir / "debug-llvm-pass-time",
+        formats,
+    )
+    written += plot_lines(
+        plt,
+        x_values,
+        [
             ("dependent", series(summary, ["dependent", "mlir_opt_wall_ms"])),
             ("baseline", series(summary, ["baseline", "mlir_opt_wall_ms"])),
         ],
-        "MLIR Lowering Time",
+        "MLIR Lowering Wall Time",
         "wall time (ms)",
-        output_dir / "debug-mlir-lowering-time",
+        output_dir / "debug-mlir-lowering-wall-time",
         formats,
     )
     written += plot_lines(
@@ -242,19 +262,19 @@ def plot_debug_figures(plt, summary, output_dir, formats):
             ("dependent", series(summary, ["dependent", "llvm_opt_wall_ms"])),
             ("baseline", series(summary, ["baseline", "llvm_opt_wall_ms"])),
         ],
-        "LLVM opt -O3 Time",
+        "LLVM opt -O3 Wall Time",
         "wall time (ms)",
-        output_dir / "debug-llvm-opt-time",
+        output_dir / "debug-llvm-opt-wall-time",
         formats,
     )
     written += plot_lines(
         plt,
         x_values,
         [
-            ("dependent raw LLVM IR", series(summary, ["dependent", "llvm_ir_lines"])),
-            ("baseline raw LLVM IR", series(summary, ["baseline", "llvm_ir_lines"])),
-            ("dependent opt LLVM IR", series(summary, ["dependent", "llvm_opt_ir_lines"])),
-            ("baseline opt LLVM IR", series(summary, ["baseline", "llvm_opt_ir_lines"])),
+            ("dependent memref raw LLVM IR", series(summary, [dep_key, "llvm_ir_lines"])),
+            ("standard memref raw LLVM IR", series(summary, [base_key, "llvm_ir_lines"])),
+            ("dependent memref opt LLVM IR", series(summary, [dep_key, "llvm_opt_ir_lines"])),
+            ("standard memref opt LLVM IR", series(summary, [base_key, "llvm_opt_ir_lines"])),
         ],
         "Generated LLVM IR Size",
         "line count",
@@ -265,10 +285,10 @@ def plot_debug_figures(plt, summary, output_dir, formats):
         plt,
         x_values,
         [
-            ("dependent raw", series(summary, ["dependent", "descriptor_ops"])),
-            ("baseline raw", series(summary, ["baseline", "descriptor_ops"])),
-            ("dependent opt", series(summary, ["dependent", "opt_descriptor_ops"])),
-            ("baseline opt", series(summary, ["baseline", "opt_descriptor_ops"])),
+            ("dependent memref raw", series(summary, [dep_key, "descriptor_ops"])),
+            ("standard memref raw", series(summary, [base_key, "descriptor_ops"])),
+            ("dependent memref opt", series(summary, [dep_key, "opt_descriptor_ops"])),
+            ("standard memref opt", series(summary, [base_key, "opt_descriptor_ops"])),
         ],
         "Descriptor Operation Counts",
         "textual op count",

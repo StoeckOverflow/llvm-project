@@ -18,14 +18,28 @@ baseline-strided
   flat memref buffers -> memref.reinterpret_cast views -> standard memref descriptors -> LLVM
 
 direct-strided
-  flat memref buffers + #memref refinements -> descriptor-free LLVM
+  ranked memref carriers + #memref refinements -> descriptor-free LLVM
 ```
 
 Run from the repository root:
 
 ```sh
-mlir/examples/dependent-memref-conv2d/compare.py   --out mlir/examples/dependent-memref-conv2d/artifacts/archive/2026-09-07_14-39
+mlir/examples/dependent-memref-conv2d/compare.py \
+  --out mlir/examples/dependent-memref-conv2d/artifacts/archive/2026-09-08_timing-instrumentation
 ```
 
 The primary structural metrics are generated LLVM-dialect MLIR line count,
-`llvm.insertvalue` count, and `llvm.extractvalue` count.
+`llvm.insertvalue` count, and `llvm.extractvalue` count. Each route also records
+compile-time measurements:
+
+```text
+mlir_opt.wall_ms                  process wall time around mlir-opt
+mlir_opt.pass_timing_total_ms     MLIR internal pass timing total
+llvm_opt.wall_ms                  process wall time around LLVM opt -O3
+llvm_opt.pass_timing_total_ms     LLVM internal pass timing total
+```
+
+The `*.mlir-timing.txt` files contain MLIR pass timing JSON from
+`-mlir-disable-threading -mlir-timing -mlir-timing-display=list
+-mlir-output-format=json`. The `*.opt-timing.txt` files contain LLVM
+`-time-passes` reports.

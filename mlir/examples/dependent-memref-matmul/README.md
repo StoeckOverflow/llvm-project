@@ -87,22 +87,23 @@ artifacts/benchmarks/plots/
   llvm-line-count.png
 ```
 
-`performance-stacked` shows, for each matrix size, one dependent bar and one
-baseline bar. Each bar stacks three costs in milliseconds:
+`performance-stacked` shows, for each matrix size, one dependent-memref bar
+and one standard-memref bar. Each bar stacks two internal compiler timing costs
+in milliseconds:
 
 ```text
-MLIR lowering      time spent in mlir-opt lowering to the LLVM dialect
-LLVM opt -O3       time spent in LLVM opt -O3 on the emitted LLVM IR
-kernel execution   median time for one generated matmul kernel call
+MLIR passes        MLIR pass-manager timing for lowering to the LLVM dialect
+LLVM opt passes    LLVM opt -O3 pass timing on the emitted LLVM IR
 ```
 
-The first two segments are compile-time costs; the last segment is runtime. The
-stacked bar is therefore a "compile once, execute once" view, useful for seeing
-where each path spends time. For pure runtime claims, compare only the kernel
-execution segment or the `run.median_ns` values in `summary.json`.
+This default figure uses the pure memref structural routes: `direct-strided/`
+for dependent memrefs and `baseline-strided/` for standard strided memrefs. It
+therefore excludes tensor bufferization and kernel runtime. Tensor-route runtime
+is still collected by `run-benchmarks.py` and can be plotted with
+`--debug-plots` as smoke-check context.
 
-`llvm-line-count` compares only the optimized LLVM IR line count for dependent
-versus baseline.
+`llvm-line-count` compares the optimized LLVM IR line count for the same pure
+memref routes.
 
 Use `--formats pdf` or `--formats svg png` to choose output formats. Add
 `--debug-plots` to also generate the more detailed diagnostic plots for runtime,
@@ -164,10 +165,18 @@ construction.
 Timing fields are intentionally split:
 
 ```text
-mlir_opt.wall_ms   time spent in the MLIR lowering pipeline
-llvm_opt.wall_ms   time spent in common LLVM opt -O3
-run.median_ns      median kernel execution time from the C harness
+mlir_opt.wall_ms                  process wall time around mlir-opt
+mlir_opt.pass_timing_total_ms     MLIR internal pass timing total
+llvm_opt.wall_ms                  process wall time around LLVM opt -O3
+llvm_opt.pass_timing_total_ms     LLVM internal pass timing total
+run.median_ns                     median kernel execution time from the C harness
 ```
+
+The `*.mlir-timing.txt` files contain MLIR pass timing JSON from
+`-mlir-disable-threading -mlir-timing -mlir-timing-display=list
+-mlir-output-format=json`. The `*.opt-timing.txt` files contain LLVM
+`-time-passes` reports. Use the internal pass timing totals for paper-facing
+compile-time comparisons and the wall fields as process-level sanity checks.
 
 Small matrix runtimes are only smoke checks. Use larger matrices and more
 repeats for performance claims.

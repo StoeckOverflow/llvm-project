@@ -16,14 +16,62 @@ def run(command, **kwargs):
     return subprocess.run(command, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
 
 
-def measure_wall(command, timing_path=None):
+def extract_mlir_timing(stderr):
+    try:
+        timing = json.loads(stderr)
+    except json.JSONDecodeError:
+        return {}
+    total = next((entry for entry in timing if entry.get("name") == "Total"), None)
+    payload = {"pass_timing": timing}
+    if total and "wall" in total and "duration" in total["wall"]:
+        payload["pass_timing_total_ms"] = round(total["wall"]["duration"] * 1000.0, 3)
+    return payload
+
+
+def extract_llvm_pass_timing(stderr):
+    in_pass_report = False
+    for line in stderr.splitlines():
+        if "Pass execution timing report" in line:
+            in_pass_report = True
+            continue
+        if in_pass_report and "Total Execution Time:" in line:
+            fields = line.split()
+            try:
+                seconds = float(fields[3])
+            except (IndexError, ValueError):
+                return {}
+            return {"pass_timing_total_ms": round(seconds * 1000.0, 3)}
+    return {}
+
+
+def measure_wall(command, timing_path=None, parse_timing=None):
     start = time.perf_counter()
     result = subprocess.run(command, check=True, text=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     payload = {"wall_ms": round((time.perf_counter() - start) * 1000.0, 3)}
     if timing_path is not None:
         timing_path.write_text(result.stderr)
         payload["timing_file"] = str(timing_path)
+    if parse_timing is not None:
+        payload.update(parse_timing(result.stderr))
     return payload
+
+
+def measure_mlir_opt(command, timing_path):
+    return measure_wall(
+        [
+            *command,
+            "-mlir-disable-threading",
+            "-mlir-timing",
+            "-mlir-timing-display=list",
+            "-mlir-output-format=json",
+        ],
+        timing_path,
+        extract_mlir_timing,
+    )
+
+
+def measure_llvm_opt(command, timing_path):
+    return measure_wall([*command, "-time-passes"], timing_path, extract_llvm_pass_timing)
 
 
 def line_count(path):
@@ -63,8 +111,21 @@ def emit_route(mlir_opt, mlir_translate, llvm_opt, source, out_dir, stem, pipeli
     llvm_ir = run(lower_cmd).stdout
     translated = subprocess.run([str(mlir_translate), "-mlir-to-llvmir"], input=llvm_ir, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
     (out_dir / f"{stem}.ll").write_text(translated)
-    subprocess.run([str(llvm_opt), "-O3", "-S", str(out_dir / f"{stem}.ll"), "-o", str(out_dir / f"{stem}.opt.ll")], check=True)
-    return collect_metrics(out_dir, stem)
+    metrics = {
+        "llvm_opt": measure_llvm_opt(
+            [
+                str(llvm_opt),
+                "-O3",
+                "-S",
+                str(out_dir / f"{stem}.ll"),
+                "-o",
+                str(out_dir / f"{stem}.opt.ll"),
+            ],
+            out_dir / f"{stem}.opt-timing.txt",
+        )
+    }
+    metrics.update(collect_metrics(out_dir, stem))
+    return metrics
 
 
 def main():
@@ -93,11 +154,11 @@ def main():
         timing_path = route_dir / f"{stem}.mlir-timing.txt"
         source = script_dir / source_name
         if pipeline.startswith("-"):
-            timing_cmd = [str(mlir_opt), str(source), *pipeline.split(), "--mlir-timing"]
+            timing_cmd = [str(mlir_opt), str(source), *pipeline.split()]
         else:
-            timing_cmd = [str(mlir_opt), str(source), f"-pass-pipeline={pipeline}", "--mlir-timing"]
+            timing_cmd = [str(mlir_opt), str(source), f"-pass-pipeline={pipeline}"]
         metrics = emit_route(mlir_opt, mlir_translate, llvm_opt, source, route_dir, stem, pipeline)
-        metrics["mlir_opt"] = measure_wall(timing_cmd, timing_path)
+        metrics["mlir_opt"] = measure_mlir_opt(timing_cmd, timing_path)
         result["routes"][name] = metrics
 
     report_path = out_dir / "results.json"
