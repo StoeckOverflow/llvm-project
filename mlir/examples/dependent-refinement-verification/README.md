@@ -8,8 +8,9 @@ loop-nest shape:
   dynamic-strided views, then ordinary `memref.load` / `memref.store`, lowered
   through MLIR's native memref-to-LLVM pipeline.
 - `memref`: ranked memref carriers with function-boundary `#types` and
-  per-operation `#memref` refinements, lowered through the dependent memref
-  verifier and dependent memref-to-LLVM pipeline.
+  per-operation `#memref` refinements, checked by normal MLIR verification and
+  dependent op verifiers, then lowered through the dependent memref-to-LLVM
+  pipeline.
 
 Each generated MLIR file contains exactly one `func.func`. The dependent kernels
 intentionally do not attach loop-carried `#types`; this matches the paper kernel
@@ -54,7 +55,7 @@ Then run the benchmark:
 ```bash
 python3 generate.py \
   --out artifacts/runs/latest/generated_kernels \
-  --ranks 1 2 4 8 16 24 32
+  --ranks 2 4 8 16 32 64
 
 python3 run-benchmarks.py \
   --generated artifacts/runs/latest/generated_kernels \
@@ -137,37 +138,39 @@ including the route-specific `mlir-opt` binary and full pass pipeline.
 Use this layout for a dated artifact run:
 
 ```text
-artifacts/archive/2026-09-09_full-mlir-lowering-compile-time/
+artifacts/archive/2026-09-09_18-09/
 ```
 
 Produce it with:
 
 ```bash
 python3 generate.py \
-  --out artifacts/archive/2026-09-09_full-mlir-lowering-compile-time/generated_kernels \
-  --ranks 1 2 4 8 16 24 32
+  --out artifacts/archive/2026-09-09_18-09/generated_kernels \
+  --ranks 2 4 8 16 32 64
 
 python3 run-benchmarks.py \
-  --generated artifacts/archive/2026-09-09_full-mlir-lowering-compile-time/generated_kernels \
-  --out artifacts/archive/2026-09-09_full-mlir-lowering-compile-time \
+  --generated artifacts/archive/2026-09-09_18-09/generated_kernels \
+  --out artifacts/archive/2026-09-09_18-09 \
   --baseline-mlir-opt ../../../../llvm-project-main/build_mlir_baseline/bin/mlir-opt \
   --dependent-mlir-opt ../../../build/bin/mlir-opt \
   --warmups 50 \
   --repetitions 1000
 
 python3 plot.py \
-  --input artifacts/archive/2026-09-09_full-mlir-lowering-compile-time/summary.csv \
-  --out artifacts/archive/2026-09-09_full-mlir-lowering-compile-time/plots
+  --input artifacts/archive/2026-09-09_18-09/summary.csv \
+  --out artifacts/archive/2026-09-09_18-09/plots
 ```
 
 The resulting artifact should contain:
 
 ```text
-artifacts/archive/2026-09-09_full-mlir-lowering-compile-time/generated_kernels/manifest.csv
-artifacts/archive/2026-09-09_full-mlir-lowering-compile-time/results.csv
-artifacts/archive/2026-09-09_full-mlir-lowering-compile-time/summary.csv
-artifacts/archive/2026-09-09_full-mlir-lowering-compile-time/lowered_kernels/
-artifacts/archive/2026-09-09_full-mlir-lowering-compile-time/mlir_timing_outputs/
-artifacts/archive/2026-09-09_full-mlir-lowering-compile-time/plots/mlir-lowering-compile-time-vs-dimensions.pdf
-artifacts/archive/2026-09-09_full-mlir-lowering-compile-time/plots/mlir-lowering-compile-time-vs-dimensions.png
+artifacts/archive/2026-09-09_18-09/generated_kernels/manifest.csv
+artifacts/archive/2026-09-09_18-09/results.csv
+artifacts/archive/2026-09-09_18-09/summary.csv
+artifacts/archive/2026-09-09_18-09/lowered_kernels/
+artifacts/archive/2026-09-09_18-09/mlir_timing_outputs/
+artifacts/archive/2026-09-09_18-09/plots/mlir-lowering-compile-time-vs-dimensions.pdf
+artifacts/archive/2026-09-09_18-09/plots/mlir-lowering-compile-time-vs-dimensions.png
+artifacts/archive/2026-09-09_18-09/pass-timing-interpretation.md
+artifacts/archive/2026-09-09_18-09/dependent-verification-coverage.md
 ```

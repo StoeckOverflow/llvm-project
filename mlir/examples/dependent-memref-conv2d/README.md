@@ -27,7 +27,7 @@ prototype build:
 
 ```sh
 mlir/examples/dependent-memref-conv2d/compare.py \
-  --out mlir/examples/dependent-memref-conv2d/artifacts/archive/2026-09-08_timing-instrumentation \
+  --out mlir/examples/dependent-memref-conv2d/artifacts/archive/2026-09-09_18-09 \
   --baseline-mlir-opt ../llvm-project-main/build_mlir_baseline/bin/mlir-opt \
   --dependent-mlir-opt build/bin/mlir-opt
 ```
