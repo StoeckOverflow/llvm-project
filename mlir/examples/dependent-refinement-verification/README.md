@@ -33,7 +33,7 @@ Run from `mlir/examples/dependent-refinement-verification`:
 ```bash
 python3 generate.py \
   --out artifacts/generated \
-  --ranks 1 2 3 4 5 6 8
+  --ranks 1 2 4 8 16 24 32
 
 python3 run-benchmarks.py \
   --generated artifacts/generated \
@@ -54,8 +54,8 @@ verification-compile-time-vs-dimensions.png
 ```
 
 The figure has two point/line series, `baseline memref` and `dependent memref`,
-with memref dimensions on the x-axis and median full verifier-enabled MLIR
-compile time on the y-axis.
+with memref dimensions on the x-axis and median full MLIR compile time
+on the y-axis.
 
 ## Timing Method
 
@@ -63,15 +63,26 @@ For each generated file, the runner first performs shuffled warmup executions
 that are not recorded. It then shuffles all measured route/rank/repetition jobs
 so baseline and dependent runs are interleaved.
 
-Each measured execution uses the full verifier-enabled MLIR timing command and
+Each measured execution uses the route-specific MLIR timing command and
 writes the transformed IR to `/dev/null` to avoid per-repetition filesystem
 output noise. The benchmark parses this timing output in memory; it does not
 archive one timing file per repetition.
 
-To manually inspect MLIR's raw timing report for any generated input, run:
+To manually inspect MLIR's raw timing report for a baseline input, run:
 
 ```bash
-build/bin/mlir-opt <input.mlir> \
+build/bin/mlir-opt <baseline-input.mlir> \
+  -pass-pipeline='builtin.module()' \
+  -mlir-disable-threading \
+  -mlir-timing \
+  -mlir-timing-display=list \
+  -o /dev/null
+```
+
+For a dependent input, run:
+
+```bash
+build/bin/mlir-opt <dependent-input.mlir> \
   -pass-pipeline='builtin.module(verify-dependent-memref-refinements)' \
   -mlir-disable-threading \
   -mlir-timing \
@@ -79,7 +90,7 @@ build/bin/mlir-opt <input.mlir> \
   -o /dev/null
 ```
 
-The CSV summary reports the MLIR timing `Total` entry and the verifier pass entry:
+The CSV summary reports the MLIR timing `Total` entry and, for the dependent route, the verifier pass entry:
 
 ```text
 median_total_ms
@@ -106,7 +117,7 @@ Produce it with:
 ```bash
 python3 generate.py \
   --out artifacts/archive/2026-09-09_verification-compile-time-single-kernel/generated \
-  --ranks 1 2 3 4 5 6 8
+  --ranks 1 2 4 8 16 24 32
 
 python3 run-benchmarks.py \
   --generated artifacts/archive/2026-09-09_verification-compile-time-single-kernel/generated \

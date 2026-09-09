@@ -196,7 +196,7 @@ def generate(out: Path, ranks):
             ("memref", memref_path, memref_text),
         ]:
             row = {"route": route, **metrics_for(route, rank, kernels, text)}
-            row["path"] = str(path)
+            row["path"] = str(path.resolve())
             rows.append(row)
     with (out / "manifest.csv").open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=rows[0].keys())
@@ -207,7 +207,7 @@ def generate(out: Path, ranks):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, default=Path("artifacts/generated"))
-    ap.add_argument("--ranks", type=int, nargs="+", default=[1, 2, 3, 4, 5, 6, 8])
+    ap.add_argument("--ranks", type=int, nargs="+", default=[1, 2, 4, 8, 16, 24, 32])
     args = ap.parse_args()
     generate(args.out, args.ranks)
 

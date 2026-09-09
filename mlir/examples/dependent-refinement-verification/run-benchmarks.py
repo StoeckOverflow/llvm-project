@@ -11,7 +11,8 @@ from pathlib import Path
 
 TIMING_RE = re.compile(r"^\s*([0-9.]+) \(\s*[0-9.]+%\)\s+(.+?)\s*$")
 TOTAL_RE = re.compile(r"Total Execution Time:\s+([0-9.]+) seconds")
-VERIFY_PIPELINE = "builtin.module(verify-dependent-memref-refinements)"
+BASELINE_PIPELINE = "builtin.module()"
+DEPENDENT_PIPELINE = "builtin.module(verify-dependent-memref-refinements)"
 PASS_NAME = "VerifyDependentMemRefRefinementsPass"
 
 
@@ -66,11 +67,17 @@ def read_manifest(path: Path):
     return rows
 
 
-def run_mlir_opt(mlir_opt: Path, input_path: Path, output_path: Path):
+def pipeline_for_route(route: str) -> str:
+    if route == "baseline_memref":
+        return BASELINE_PIPELINE
+    return DEPENDENT_PIPELINE
+
+
+def run_mlir_opt(mlir_opt: Path, input_path: Path, output_path: Path, pipeline: str):
     cmd = [
         str(mlir_opt),
         str(input_path),
-        f"-pass-pipeline={VERIFY_PIPELINE}",
+        f"-pass-pipeline={pipeline}",
         "-mlir-disable-threading",
         "-mlir-timing",
         "-mlir-timing-display=list",
@@ -90,10 +97,11 @@ def write_verified_output(mlir_opt: Path, row, out: Path):
     input_path = Path(row["path"])
     verified_path = out / "verified" / f"{route}-rank-{rank}.mlir"
     verified_path.parent.mkdir(parents=True, exist_ok=True)
+    pipeline = pipeline_for_route(route)
     cmd = [
         str(mlir_opt),
         str(input_path),
-        f"-pass-pipeline={VERIFY_PIPELINE}",
+        f"-pass-pipeline={pipeline}",
         "-o",
         str(verified_path),
     ]
@@ -107,7 +115,7 @@ def write_verified_output(mlir_opt: Path, row, out: Path):
 def run_measured(mlir_opt: Path, row, repetition: int, out: Path):
     route = row["route"]
     rank = row["rank"]
-    metrics = run_mlir_opt(mlir_opt, Path(row["path"]), Path(os.devnull))
+    metrics = run_mlir_opt(mlir_opt, Path(row["path"]), Path(os.devnull), pipeline_for_route(route))
     return {
         **row,
         "repetition": repetition,
@@ -184,6 +192,9 @@ def main():
     ap.add_argument("--warmups", type=int, default=50)
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
+    args.generated = args.generated.resolve()
+    args.out = args.out.resolve()
+    args.mlir_opt = args.mlir_opt.resolve()
 
     manifest = args.generated / "manifest.csv"
     rows = read_manifest(manifest)
@@ -195,7 +206,7 @@ def main():
     for index, row in enumerate(warmup_jobs, 1):
         if index == 1 or index % 100 == 0 or index == len(warmup_jobs):
             print(f"warmup {index}/{len(warmup_jobs)}")
-        run_mlir_opt(args.mlir_opt, Path(row["path"]), Path(os.devnull))
+        run_mlir_opt(args.mlir_opt, Path(row["path"]), Path(os.devnull), pipeline_for_route(row["route"]))
 
     jobs = [(row, rep) for row in rows for rep in range(args.repetitions)]
     rng.shuffle(jobs)
