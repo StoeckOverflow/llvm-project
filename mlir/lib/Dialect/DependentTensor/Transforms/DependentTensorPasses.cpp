@@ -50,71 +50,53 @@ convertToTensorRefinement(const DependentTypeValueRefinement &stored) {
 }
 
 static FailureOr<TensorValueRefinement>
-buildInfoFromTypeRef(RankedTensorType type,
-                     const DependentTensorTypeRef &stored) {
-  if (stored.hasExplicitLayout || stored.rank != type.getRank() ||
-      stored.dimValues.size() != static_cast<size_t>(type.getRank()))
+verifyAndBuildTensorTypeRef(Operation *owner, StringRef kind, Type type,
+                            const DependentTensorTypeRef &stored) {
+  auto rankedType = dyn_cast<RankedTensorType>(type);
+  if (!rankedType) {
+    owner->emitOpError() << "requires ranked tensor type for dependent " << kind
+                         << " type refs";
     return failure();
-  TensorValueRefinement info{type, {}};
+  }
+  if (stored.hasExplicitLayout) {
+    owner->emitOpError() << "has layout on dependent tensor " << kind
+                         << " type refs";
+    return failure();
+  }
+  if (stored.rank != rankedType.getRank()) {
+    owner->emitOpError() << "requires dependent " << kind
+                         << " rank to match tensor rank";
+    return failure();
+  }
+  if (stored.dimValues.size() != static_cast<size_t>(rankedType.getRank())) {
+    owner->emitOpError() << "requires one dependent dimension value per "
+                         << kind << " tensor dimension";
+    return failure();
+  }
+
+  TensorValueRefinement info{rankedType, {}};
   info.dimValues.reserve(stored.dimValues.size());
-  for (const PropertyOperand &operand : stored.dimValues) {
+  for (auto [dim, operand] : llvm::enumerate(stored.dimValues)) {
     Value dimValue = operand.get();
-    if (!dimValue || !dimValue.getType().isIndex())
+    if (!rankedType.isDynamicDim(dim)) {
+      owner->emitOpError()
+          << "requires dependent " << kind
+          << " dimensions to correspond to dynamic tensor dimensions";
       return failure();
+    }
+    if (!dimValue) {
+      owner->emitOpError() << "has null dependent " << kind
+                           << " dimension value";
+      return failure();
+    }
+    if (!dimValue.getType().isIndex()) {
+      owner->emitOpError() << "requires index-typed dependent " << kind
+                           << " dimension values";
+      return failure();
+    }
     info.dimValues.push_back(dimValue);
   }
   return info;
-}
-
-static LogicalResult
-verifyStoredTensorTypeRef(Operation *owner, StringRef kind, Type type,
-                          const DependentTensorTypeRef &stored) {
-  auto rankedType = dyn_cast<RankedTensorType>(type);
-  if (!rankedType)
-    return owner->emitOpError() << "requires ranked tensor type for dependent "
-                                << kind << " type refs";
-  if (stored.hasExplicitLayout)
-    return owner->emitOpError()
-           << "has layout on dependent tensor " << kind << " type refs";
-  if (stored.rank != rankedType.getRank())
-    return owner->emitOpError()
-           << "requires dependent " << kind << " rank to match tensor rank";
-  if (stored.dimValues.size() != static_cast<size_t>(rankedType.getRank()))
-    return owner->emitOpError() << "requires one dependent dimension value per "
-                                << kind << " tensor dimension";
-
-  for (auto [dim, operand] : llvm::enumerate(stored.dimValues)) {
-    Value dimValue = operand.get();
-    if (!rankedType.isDynamicDim(dim))
-      return owner->emitOpError()
-             << "requires dependent " << kind
-             << " dimensions to correspond to dynamic tensor dimensions";
-    if (!dimValue)
-      return owner->emitOpError()
-             << "has null dependent " << kind << " dimension value";
-    if (!dimValue.getType().isIndex())
-      return owner->emitOpError() << "requires index-typed dependent " << kind
-                                  << " dimension values";
-  }
-  return success();
-}
-
-static LogicalResult
-verifyConcreteValueMatchesTypeRef(Operation *owner, StringRef message,
-                                  Value value,
-                                  const DependentTensorTypeRef &typeRef) {
-  FailureOr<TensorValueRefinement> actual = getValueRefinement(value);
-  if (failed(actual))
-    return success();
-  auto rankedType = dyn_cast<RankedTensorType>(value.getType());
-  if (!rankedType)
-    return owner->emitOpError()
-           << "requires ranked tensor type for dependent " << message;
-  FailureOr<TensorValueRefinement> expected =
-      buildInfoFromTypeRef(rankedType, typeRef);
-  if (failed(expected) || !haveEqualRefinements(*actual, *expected))
-    return owner->emitOpError() << message;
-  return success();
 }
 
 static LogicalResult
@@ -352,28 +334,30 @@ verifyLoopRefinements(Operation *owner,
         ref.valueIndex >= yieldedValues.size())
       return owner->emitOpError()
              << "has dependent tensor loop type refs out of range";
-    if (failed(verifyStoredTensorTypeRef(owner, "loop operand",
-                                         initOperands[ref.valueIndex].getType(),
-                                         ref.operandTypeRef)))
+    FailureOr<TensorValueRefinement> operandExpected =
+        verifyAndBuildTensorTypeRef(owner, "loop operand",
+                                    initOperands[ref.valueIndex].getType(),
+                                    ref.operandTypeRef);
+    if (failed(operandExpected))
       return failure();
-    if (failed(verifyStoredTensorTypeRef(owner, "loop result",
-                                         resultTypes[ref.valueIndex],
-                                         ref.resultTypeRef)))
+    FailureOr<TensorValueRefinement> resultExpected =
+        verifyAndBuildTensorTypeRef(owner, "loop result",
+                                    resultTypes[ref.valueIndex],
+                                    ref.resultTypeRef);
+    if (failed(resultExpected))
       return failure();
-    if (failed(verifyStoredTensorTypeRef(
-            owner, "loop yield", yieldedValues[ref.valueIndex].getType(),
-            ref.resultTypeRef)))
-      return failure();
-    if (failed(verifyConcreteValueMatchesTypeRef(
-            owner,
-            "loop operand type reference does not match init refinements",
-            initOperands[ref.valueIndex], ref.operandTypeRef)))
-      return failure();
-    if (failed(verifyConcreteValueMatchesTypeRef(
-            owner,
-            "loop result type reference does not match yielded refinements",
-            yieldedValues[ref.valueIndex], ref.resultTypeRef)))
-      return failure();
+    FailureOr<TensorValueRefinement> actualInit =
+        getValueRefinement(initOperands[ref.valueIndex]);
+    if (succeeded(actualInit) &&
+        !haveEqualRefinements(*actualInit, *operandExpected))
+      return owner->emitOpError()
+             << "loop operand type reference does not match init refinements";
+    FailureOr<TensorValueRefinement> actualYield =
+        getValueRefinement(yieldedValues[ref.valueIndex]);
+    if (succeeded(actualYield) &&
+        !haveEqualRefinements(*actualYield, *resultExpected))
+      return owner->emitOpError()
+             << "loop result type reference does not match yielded refinements";
   }
   return success();
 }

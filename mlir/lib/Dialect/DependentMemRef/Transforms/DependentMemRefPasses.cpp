@@ -66,6 +66,72 @@ decodeStoredRefinementForType(MemRefType type,
   return info;
 }
 
+static FailureOr<MemRefValueRefinement>
+verifyAndBuildMemRefTypeRef(Operation *owner, StringRef kind, Type type,
+                            const DependentTensorTypeRef &stored) {
+  auto memrefType = dyn_cast<MemRefType>(type);
+  if (!memrefType) {
+    owner->emitOpError() << "requires memref type for dependent " << kind
+                         << " type refs";
+    return failure();
+  }
+  if (stored.rank != memrefType.getRank()) {
+    owner->emitOpError() << "requires dependent " << kind
+                         << " rank to match memref rank";
+    return failure();
+  }
+  if (stored.dimValues.size() != static_cast<size_t>(memrefType.getRank())) {
+    owner->emitOpError() << "requires one dependent dimension value per "
+                         << kind << " memref dimension";
+    return failure();
+  }
+  if (stored.hasExplicitLayout &&
+      stored.strideValues.size() != static_cast<size_t>(stored.rank)) {
+    owner->emitOpError() << "requires one dependent stride value per " << kind
+                         << " memref dimension";
+    return failure();
+  }
+
+  MemRefValueRefinement info{
+      memrefType, {}, stored.offset, {}, stored.hasExplicitLayout};
+  info.dimValues.reserve(stored.dimValues.size());
+  for (auto [dim, operand] : llvm::enumerate(stored.dimValues)) {
+    Value dimValue = operand.get();
+    if (!memrefType.isDynamicDim(dim)) {
+      owner->emitOpError()
+          << "requires dependent " << kind
+          << " dimensions to correspond to dynamic memref dims";
+      return failure();
+    }
+    if (!dimValue) {
+      owner->emitOpError() << "has null dependent " << kind
+                           << " dimension value";
+      return failure();
+    }
+    if (!dimValue.getType().isIndex()) {
+      owner->emitOpError() << "requires index-typed dependent " << kind
+                           << " dimension values";
+      return failure();
+    }
+    info.dimValues.push_back(dimValue);
+  }
+  info.strideValues.reserve(stored.strideValues.size());
+  for (const PropertyOperand &operand : stored.strideValues) {
+    Value strideValue = operand.get();
+    if (!strideValue) {
+      owner->emitOpError() << "has null dependent " << kind << " stride value";
+      return failure();
+    }
+    if (!strideValue.getType().isIndex()) {
+      owner->emitOpError() << "requires index-typed dependent " << kind
+                           << " stride values";
+      return failure();
+    }
+    info.strideValues.push_back(strideValue);
+  }
+  return info;
+}
+
 static LogicalResult
 verifyStoredMemRefRefinement(Operation *owner, StringRef kind, Type type,
                              const DependentMemRefValueRefinement &stored,
@@ -126,49 +192,6 @@ verifyStoredMemRefRefinement(Operation *owner, StringRef kind, Type type,
                << "requires function boundary dependent " << kind
                << " strides to reference entry block arguments";
     }
-  }
-  return success();
-}
-
-static LogicalResult
-verifyStoredMemRefTypeRef(Operation *owner, StringRef kind, Type type,
-                          const DependentTensorTypeRef &stored) {
-  auto memrefType = dyn_cast<MemRefType>(type);
-  if (!memrefType)
-    return owner->emitOpError()
-           << "requires memref type for dependent " << kind << " type refs";
-  if (stored.rank != memrefType.getRank())
-    return owner->emitOpError()
-           << "requires dependent " << kind << " rank to match memref rank";
-  if (stored.dimValues.size() != static_cast<size_t>(memrefType.getRank()))
-    return owner->emitOpError() << "requires one dependent dimension value per "
-                                << kind << " memref dimension";
-  if (stored.hasExplicitLayout &&
-      stored.strideValues.size() != static_cast<size_t>(stored.rank))
-    return owner->emitOpError() << "requires one dependent stride value per "
-                                << kind << " memref dimension";
-
-  for (auto [dim, operand] : llvm::enumerate(stored.dimValues)) {
-    Value dimValue = operand.get();
-    if (!memrefType.isDynamicDim(dim))
-      return owner->emitOpError()
-             << "requires dependent " << kind
-             << " dimensions to correspond to dynamic memref dims";
-    if (!dimValue)
-      return owner->emitOpError()
-             << "has null dependent " << kind << " dimension value";
-    if (!dimValue.getType().isIndex())
-      return owner->emitOpError() << "requires index-typed dependent " << kind
-                                  << " dimension values";
-  }
-  for (const PropertyOperand &operand : stored.strideValues) {
-    Value strideValue = operand.get();
-    if (!strideValue)
-      return owner->emitOpError()
-             << "has null dependent " << kind << " stride value";
-    if (!strideValue.getType().isIndex())
-      return owner->emitOpError()
-             << "requires index-typed dependent " << kind << " stride values";
   }
   return success();
 }
@@ -382,24 +405,6 @@ static FailureOr<MemRefValueRefinement> getValueRefinement(Value value) {
   return failure();
 }
 
-static LogicalResult
-verifyConcreteValueMatchesTypeRef(Operation *owner, StringRef message,
-                                  Value value,
-                                  const DependentTensorTypeRef &typeRef) {
-  FailureOr<MemRefValueRefinement> actual = getValueRefinement(value);
-  if (failed(actual))
-    return success();
-  auto memrefType = dyn_cast<MemRefType>(value.getType());
-  if (!memrefType)
-    return owner->emitOpError()
-           << "requires memref type for dependent " << message;
-  FailureOr<MemRefValueRefinement> expected = decodeStoredRefinementForType(
-      memrefType, convertToMemRefRefinement(/*valueIndex=*/0, typeRef));
-  if (failed(expected) || !haveEqualRefinements(*actual, *expected))
-    return owner->emitOpError() << message;
-  return success();
-}
-
 static LogicalResult verifyReturnRefinements(func::FuncOp func,
                                              func::ReturnOp ret) {
   for (auto [i, operand] : llvm::enumerate(ret.getOperands())) {
@@ -501,28 +506,30 @@ static LogicalResult verifyLoopRefinements(
         !isa<MemRefType>(initOperands[ref.valueIndex].getType()) &&
         !isa<MemRefType>(yieldedValues[ref.valueIndex].getType()))
       continue;
-    if (failed(verifyStoredMemRefTypeRef(owner, "loop operand",
-                                         initOperands[ref.valueIndex].getType(),
-                                         ref.operandTypeRef)))
+    FailureOr<MemRefValueRefinement> operandExpected =
+        verifyAndBuildMemRefTypeRef(owner, "loop operand",
+                                    initOperands[ref.valueIndex].getType(),
+                                    ref.operandTypeRef);
+    if (failed(operandExpected))
       return failure();
-    if (failed(verifyStoredMemRefTypeRef(owner, "loop result",
-                                         resultTypes[ref.valueIndex],
-                                         ref.resultTypeRef)))
+    FailureOr<MemRefValueRefinement> resultExpected =
+        verifyAndBuildMemRefTypeRef(owner, "loop result",
+                                    resultTypes[ref.valueIndex],
+                                    ref.resultTypeRef);
+    if (failed(resultExpected))
       return failure();
-    if (failed(verifyStoredMemRefTypeRef(
-            owner, "loop yield", yieldedValues[ref.valueIndex].getType(),
-            ref.resultTypeRef)))
-      return failure();
-    if (failed(verifyConcreteValueMatchesTypeRef(
-            owner,
-            "loop operand type reference does not match init refinements",
-            initOperands[ref.valueIndex], ref.operandTypeRef)))
-      return failure();
-    if (failed(verifyConcreteValueMatchesTypeRef(
-            owner,
-            "loop result type reference does not match yielded refinements",
-            yieldedValues[ref.valueIndex], ref.resultTypeRef)))
-      return failure();
+    FailureOr<MemRefValueRefinement> actualInit =
+        getValueRefinement(initOperands[ref.valueIndex]);
+    if (succeeded(actualInit) &&
+        !haveEqualRefinements(*actualInit, *operandExpected))
+      return owner->emitOpError()
+             << "loop operand type reference does not match init refinements";
+    FailureOr<MemRefValueRefinement> actualYield =
+        getValueRefinement(yieldedValues[ref.valueIndex]);
+    if (succeeded(actualYield) &&
+        !haveEqualRefinements(*actualYield, *resultExpected))
+      return owner->emitOpError()
+             << "loop result type reference does not match yielded refinements";
   }
   return success();
 }
