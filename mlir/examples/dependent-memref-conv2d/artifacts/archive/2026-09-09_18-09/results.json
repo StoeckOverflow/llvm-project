@@ -1,0 +1,431 @@
+{
+  "routes": {
+    "baseline": {
+      "llvm_dialect_extractvalue": 20,
+      "llvm_dialect_insertvalue": 37,
+      "llvm_dialect_lines": 162,
+      "llvm_ir_extractvalue": 20,
+      "llvm_ir_insertvalue": 37,
+      "llvm_ir_lines": 194,
+      "llvm_opt": {
+        "pass_timing_total_ms": 19.7,
+        "timing_file": "artifacts/archive/2026-09-09_18-09/baseline/baseline_conv2d_kernel.opt-timing.txt",
+        "wall_ms": 27.903
+      },
+      "llvm_opt_ir_extractvalue": 0,
+      "llvm_opt_ir_insertvalue": 11,
+      "llvm_opt_ir_lines": 273,
+      "mlir_opt": {
+        "pass_timing": [
+          {
+            "name": "root",
+            "wall": {
+              "duration": 0.0034,
+              "percentage": 100.0
+            }
+          },
+          {
+            "name": "Parser",
+            "wall": {
+              "duration": 0.0013,
+              "percentage": 38.4
+            }
+          },
+          {
+            "name": "Pipeline Collection : ['func.func']",
+            "wall": {
+              "duration": 0.0004,
+              "percentage": 12.6
+            }
+          },
+          {
+            "name": "'func.func' Pipeline",
+            "wall": {
+              "duration": 0.0004,
+              "percentage": 12.4
+            }
+          },
+          {
+            "name": "OneShotBufferizePass",
+            "wall": {
+              "duration": 0.0003,
+              "percentage": 8.2
+            }
+          },
+          {
+            "name": "ArithToLLVMConversionPass",
+            "wall": {
+              "duration": 0.0003,
+              "percentage": 8.0
+            }
+          },
+          {
+            "name": "Output",
+            "wall": {
+              "duration": 0.0002,
+              "percentage": 7.0
+            }
+          },
+          {
+            "name": "FinalizeMemRefToLLVMConversionPass",
+            "wall": {
+              "duration": 0.0002,
+              "percentage": 5.8
+            }
+          },
+          {
+            "name": "ConvertFuncToLLVMPass",
+            "wall": {
+              "duration": 0.0002,
+              "percentage": 5.3
+            }
+          },
+          {
+            "name": "ConvertControlFlowToLLVMPass",
+            "wall": {
+              "duration": 0.0002,
+              "percentage": 4.5
+            }
+          },
+          {
+            "name": "SCFToControlFlowPass",
+            "wall": {
+              "duration": 0.0001,
+              "percentage": 4.3
+            }
+          },
+          {
+            "name": "ReconcileUnrealizedCastsPass",
+            "wall": {
+              "duration": 0.0001,
+              "percentage": 1.7
+            }
+          },
+          {
+            "name": "(A) DataLayoutAnalysis",
+            "wall": {
+              "duration": 0.0,
+              "percentage": 0.3
+            }
+          },
+          {
+            "name": "Rest",
+            "wall": {
+              "duration": 0.0006,
+              "percentage": 16.4
+            }
+          },
+          {
+            "name": "Total",
+            "wall": {
+              "duration": 0.0034,
+              "percentage": 100.0
+            }
+          }
+        ],
+        "pass_timing_total_ms": 3.4,
+        "timing_file": "artifacts/archive/2026-09-09_18-09/baseline/baseline_conv2d_kernel.mlir-timing.txt",
+        "wall_ms": 12.029
+      },
+      "mlir_opt_path": "/home/stoeckoverflow/llvm-project-main/build_mlir_baseline/bin/mlir-opt",
+      "mlir_pipeline": "builtin.module(one-shot-bufferize{bufferize-function-boundaries},func.func(convert-scf-to-cf,convert-arith-to-llvm),finalize-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)"
+    },
+    "baseline_strided": {
+      "llvm_dialect_extractvalue": 26,
+      "llvm_dialect_insertvalue": 52,
+      "llvm_dialect_lines": 192,
+      "llvm_ir_extractvalue": 26,
+      "llvm_ir_insertvalue": 52,
+      "llvm_ir_lines": 217,
+      "llvm_opt": {
+        "pass_timing_total_ms": 24.2,
+        "timing_file": "artifacts/archive/2026-09-09_18-09/baseline-strided/baseline_conv2d_strided.opt-timing.txt",
+        "wall_ms": 31.977
+      },
+      "llvm_opt_ir_extractvalue": 0,
+      "llvm_opt_ir_insertvalue": 0,
+      "llvm_opt_ir_lines": 141,
+      "mlir_opt": {
+        "pass_timing": [
+          {
+            "name": "root",
+            "wall": {
+              "duration": 0.0033,
+              "percentage": 100.0
+            }
+          },
+          {
+            "name": "Parser",
+            "wall": {
+              "duration": 0.001,
+              "percentage": 29.4
+            }
+          },
+          {
+            "name": "Pipeline Collection : ['func.func']",
+            "wall": {
+              "duration": 0.0006,
+              "percentage": 17.9
+            }
+          },
+          {
+            "name": "'func.func' Pipeline",
+            "wall": {
+              "duration": 0.0006,
+              "percentage": 17.5
+            }
+          },
+          {
+            "name": "ArithToLLVMConversionPass",
+            "wall": {
+              "duration": 0.0004,
+              "percentage": 11.9
+            }
+          },
+          {
+            "name": "FinalizeMemRefToLLVMConversionPass",
+            "wall": {
+              "duration": 0.0003,
+              "percentage": 9.8
+            }
+          },
+          {
+            "name": "Output",
+            "wall": {
+              "duration": 0.0003,
+              "percentage": 8.9
+            }
+          },
+          {
+            "name": "ConvertFuncToLLVMPass",
+            "wall": {
+              "duration": 0.0002,
+              "percentage": 6.6
+            }
+          },
+          {
+            "name": "ConvertControlFlowToLLVMPass",
+            "wall": {
+              "duration": 0.0002,
+              "percentage": 6.0
+            }
+          },
+          {
+            "name": "SCFToControlFlowPass",
+            "wall": {
+              "duration": 0.0002,
+              "percentage": 5.5
+            }
+          },
+          {
+            "name": "ReconcileUnrealizedCastsPass",
+            "wall": {
+              "duration": 0.0001,
+              "percentage": 2.5
+            }
+          },
+          {
+            "name": "(A) DataLayoutAnalysis",
+            "wall": {
+              "duration": 0.0,
+              "percentage": 0.4
+            }
+          },
+          {
+            "name": "Rest",
+            "wall": {
+              "duration": 0.0006,
+              "percentage": 19.0
+            }
+          },
+          {
+            "name": "Total",
+            "wall": {
+              "duration": 0.0033,
+              "percentage": 100.0
+            }
+          }
+        ],
+        "pass_timing_total_ms": 3.3,
+        "timing_file": "artifacts/archive/2026-09-09_18-09/baseline-strided/baseline_conv2d_strided.mlir-timing.txt",
+        "wall_ms": 13.09
+      },
+      "mlir_opt_path": "/home/stoeckoverflow/llvm-project-main/build_mlir_baseline/bin/mlir-opt",
+      "mlir_pipeline": "builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),finalize-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)"
+    },
+    "dependent": {
+      "llvm_dialect_extractvalue": 0,
+      "llvm_dialect_insertvalue": 0,
+      "llvm_dialect_lines": 104,
+      "llvm_ir_extractvalue": 0,
+      "llvm_ir_insertvalue": 0,
+      "llvm_ir_lines": 139,
+      "llvm_opt": {
+        "pass_timing_total_ms": 24.7,
+        "timing_file": "artifacts/archive/2026-09-09_18-09/dependent/dependent_conv2d_kernel.opt-timing.txt",
+        "wall_ms": 32.368
+      },
+      "llvm_opt_ir_extractvalue": 0,
+      "llvm_opt_ir_insertvalue": 0,
+      "llvm_opt_ir_lines": 142,
+      "mlir_opt": {
+        "pass_timing": [
+          {
+            "name": "root",
+            "wall": {
+              "duration": 0.0028,
+              "percentage": 100.0
+            }
+          },
+          {
+            "name": "Parser",
+            "wall": {
+              "duration": 0.0008,
+              "percentage": 28.1
+            }
+          },
+          {
+            "name": "LowerDependentMemRefToLLVMPass",
+            "wall": {
+              "duration": 0.0007,
+              "percentage": 26.5
+            }
+          },
+          {
+            "name": "ConvertDependentTensorToDependentMemRefPass",
+            "wall": {
+              "duration": 0.0003,
+              "percentage": 9.7
+            }
+          },
+          {
+            "name": "Output",
+            "wall": {
+              "duration": 0.0002,
+              "percentage": 6.2
+            }
+          },
+          {
+            "name": "ReconcileUnrealizedCastsPass",
+            "wall": {
+              "duration": 0.0,
+              "percentage": 1.5
+            }
+          },
+          {
+            "name": "Pipeline Collection : ['func.func']",
+            "wall": {
+              "duration": 0.0,
+              "percentage": 0.2
+            }
+          },
+          {
+            "name": "Rest",
+            "wall": {
+              "duration": 0.0008,
+              "percentage": 27.7
+            }
+          },
+          {
+            "name": "Total",
+            "wall": {
+              "duration": 0.0028,
+              "percentage": 100.0
+            }
+          }
+        ],
+        "pass_timing_total_ms": 2.8,
+        "timing_file": "artifacts/archive/2026-09-09_18-09/dependent/dependent_conv2d_kernel.mlir-timing.txt",
+        "wall_ms": 12.056
+      },
+      "mlir_opt_path": "/home/stoeckoverflow/llvm-project/build/bin/mlir-opt",
+      "mlir_pipeline": "builtin.module(convert-dependent-tensor-to-dependent-memref,lower-dependent-memref-to-llvm,func.func(convert-scf-to-cf,convert-arith-to-llvm),reconcile-unrealized-casts)"
+    },
+    "direct_strided": {
+      "llvm_dialect_extractvalue": 0,
+      "llvm_dialect_insertvalue": 0,
+      "llvm_dialect_lines": 99,
+      "llvm_ir_extractvalue": 0,
+      "llvm_ir_insertvalue": 0,
+      "llvm_ir_lines": 130,
+      "llvm_opt": {
+        "pass_timing_total_ms": 21.6,
+        "timing_file": "artifacts/archive/2026-09-09_18-09/direct-strided/dependent_conv2d_strided.opt-timing.txt",
+        "wall_ms": 33.233
+      },
+      "llvm_opt_ir_extractvalue": 0,
+      "llvm_opt_ir_insertvalue": 0,
+      "llvm_opt_ir_lines": 257,
+      "mlir_opt": {
+        "pass_timing": [
+          {
+            "name": "root",
+            "wall": {
+              "duration": 0.0026,
+              "percentage": 100.0
+            }
+          },
+          {
+            "name": "Parser",
+            "wall": {
+              "duration": 0.0008,
+              "percentage": 30.7
+            }
+          },
+          {
+            "name": "LowerDependentMemRefToLLVMPass",
+            "wall": {
+              "duration": 0.0008,
+              "percentage": 30.0
+            }
+          },
+          {
+            "name": "Output",
+            "wall": {
+              "duration": 0.0002,
+              "percentage": 7.1
+            }
+          },
+          {
+            "name": "ReconcileUnrealizedCastsPass",
+            "wall": {
+              "duration": 0.0,
+              "percentage": 1.6
+            }
+          },
+          {
+            "name": "Pipeline Collection : ['func.func']",
+            "wall": {
+              "duration": 0.0,
+              "percentage": 0.2
+            }
+          },
+          {
+            "name": "Rest",
+            "wall": {
+              "duration": 0.0008,
+              "percentage": 30.3
+            }
+          },
+          {
+            "name": "Total",
+            "wall": {
+              "duration": 0.0026,
+              "percentage": 100.0
+            }
+          }
+        ],
+        "pass_timing_total_ms": 2.6,
+        "timing_file": "artifacts/archive/2026-09-09_18-09/direct-strided/dependent_conv2d_strided.mlir-timing.txt",
+        "wall_ms": 12.458
+      },
+      "mlir_opt_path": "/home/stoeckoverflow/llvm-project/build/bin/mlir-opt",
+      "mlir_pipeline": "builtin.module(lower-dependent-memref-to-llvm,func.func(convert-scf-to-cf,convert-arith-to-llvm),reconcile-unrealized-casts)"
+    }
+  },
+  "toolchains": {
+    "baseline_mlir_opt": "/home/stoeckoverflow/llvm-project-main/build_mlir_baseline/bin/mlir-opt",
+    "dependent_mlir_opt": "/home/stoeckoverflow/llvm-project/build/bin/mlir-opt",
+    "single_binary_smoke": false
+  }
+}

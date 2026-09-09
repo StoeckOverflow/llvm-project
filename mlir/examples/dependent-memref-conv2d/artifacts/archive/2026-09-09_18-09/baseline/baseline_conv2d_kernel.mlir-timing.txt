@@ -1,0 +1,17 @@
+[
+{"wall": {"duration":   0.0034, "percentage": 100.0}, "name": "root"},
+{"wall": {"duration":   0.0013, "percentage":  38.4}, "name": "Parser"},
+{"wall": {"duration":   0.0004, "percentage":  12.6}, "name": "Pipeline Collection : ['func.func']"},
+{"wall": {"duration":   0.0004, "percentage":  12.4}, "name": "'func.func' Pipeline"},
+{"wall": {"duration":   0.0003, "percentage":   8.2}, "name": "OneShotBufferizePass"},
+{"wall": {"duration":   0.0003, "percentage":   8.0}, "name": "ArithToLLVMConversionPass"},
+{"wall": {"duration":   0.0002, "percentage":   7.0}, "name": "Output"},
+{"wall": {"duration":   0.0002, "percentage":   5.8}, "name": "FinalizeMemRefToLLVMConversionPass"},
+{"wall": {"duration":   0.0002, "percentage":   5.3}, "name": "ConvertFuncToLLVMPass"},
+{"wall": {"duration":   0.0002, "percentage":   4.5}, "name": "ConvertControlFlowToLLVMPass"},
+{"wall": {"duration":   0.0001, "percentage":   4.3}, "name": "SCFToControlFlowPass"},
+{"wall": {"duration":   0.0001, "percentage":   1.7}, "name": "ReconcileUnrealizedCastsPass"},
+{"wall": {"duration":   0.0000, "percentage":   0.3}, "name": "(A) DataLayoutAnalysis"},
+{"wall": {"duration":   0.0006, "percentage":  16.4}, "name": "Rest"},
+{"wall": {"duration":   0.0034, "percentage": 100.0}, "name": "Total"}
+]

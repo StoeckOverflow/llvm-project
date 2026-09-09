@@ -1,0 +1,144 @@
+===-------------------------------------------------------------------------===
+                        Analysis execution timing report
+===-------------------------------------------------------------------------===
+  Total Execution Time: 0.0003 seconds (0.0003 wall clock)
+
+   ---User Time---   --User+System--   ---Wall Time---  --- Name ---
+   0.0000 ( 14.6%)   0.0000 ( 14.6%)   0.0000 ( 15.2%)  MemorySSAAnalysis
+   0.0000 ( 13.9%)   0.0000 ( 13.9%)   0.0000 ( 13.7%)  LoopAnalysis
+   0.0000 ( 12.4%)   0.0000 ( 12.4%)   0.0000 ( 12.4%)  VerifierAnalysis
+   0.0000 ( 10.6%)   0.0000 ( 10.6%)   0.0000 ( 10.6%)  LazyCallGraphAnalysis
+   0.0000 (  9.5%)   0.0000 (  9.5%)   0.0000 (  9.8%)  ScalarEvolutionAnalysis
+   0.0000 (  9.1%)   0.0000 (  9.1%)   0.0000 (  8.4%)  DominatorTreeAnalysis
+   0.0000 (  5.5%)   0.0000 (  5.5%)   0.0000 (  6.2%)  AAManager
+   0.0000 (  2.6%)   0.0000 (  2.6%)   0.0000 (  2.6%)  PostDominatorTreeAnalysis
+   0.0000 (  2.6%)   0.0000 (  2.6%)   0.0000 (  2.3%)  GlobalsAA
+   0.0000 (  2.2%)   0.0000 (  2.2%)   0.0000 (  2.1%)  LazyValueAnalysis
+   0.0000 (  2.2%)   0.0000 (  2.2%)   0.0000 (  1.9%)  LoopAccessAnalysis
+   0.0000 (  2.2%)   0.0000 (  2.2%)   0.0000 (  1.8%)  CallGraphAnalysis
+   0.0000 (  1.5%)   0.0000 (  1.5%)   0.0000 (  1.8%)  LastRunTrackingAnalysis
+   0.0000 (  1.1%)   0.0000 (  1.1%)   0.0000 (  1.6%)  ShouldRunExtraSimpleLoopUnswitch
+   0.0000 (  1.8%)   0.0000 (  1.8%)   0.0000 (  1.5%)  BasicAA
+   0.0000 (  1.8%)   0.0000 (  1.8%)   0.0000 (  1.3%)  InnerAnalysisManagerProxy<AnalysisManager<Loop, LoopStandardAnalysisResults&>, Function>
+   0.0000 (  0.7%)   0.0000 (  0.7%)   0.0000 (  0.9%)  DemandedBitsAnalysis
+   0.0000 (  1.1%)   0.0000 (  1.1%)   0.0000 (  0.7%)  MemoryDependenceAnalysis
+   0.0000 (  0.7%)   0.0000 (  0.7%)   0.0000 (  0.6%)  FunctionAnalysisManagerCGSCCProxy
+   0.0000 (  0.4%)   0.0000 (  0.4%)   0.0000 (  0.5%)  ProfileSummaryAnalysis
+   0.0000 (  0.4%)   0.0000 (  0.4%)   0.0000 (  0.4%)  TargetIRAnalysis
+   0.0000 (  0.4%)   0.0000 (  0.4%)   0.0000 (  0.4%)  OuterAnalysisManagerProxy<AnalysisManager<Module>, LazyCallGraph::SCC, LazyCallGraph&>
+   0.0000 (  0.4%)   0.0000 (  0.4%)   0.0000 (  0.4%)  OuterAnalysisManagerProxy<AnalysisManager<Module>, Function>
+   0.0000 (  0.4%)   0.0000 (  0.4%)   0.0000 (  0.4%)  TargetLibraryAnalysis
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.4%)  AssumptionAnalysis
+   0.0000 (  0.7%)   0.0000 (  0.7%)   0.0000 (  0.4%)  InnerAnalysisManagerProxy<AnalysisManager<LazyCallGraph::SCC, LazyCallGraph&>, Module>
+   0.0000 (  0.4%)   0.0000 (  0.4%)   0.0000 (  0.4%)  ScopedNoAliasAA
+   0.0000 (  0.4%)   0.0000 (  0.4%)   0.0000 (  0.3%)  OptimizationRemarkEmitterAnalysis
+   0.0000 (  0.4%)   0.0000 (  0.4%)   0.0000 (  0.3%)  TypeBasedAA
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.3%)  ShouldNotRunFunctionPassesAnalysis
+   0.0000 (  0.4%)   0.0000 (  0.4%)   0.0000 (  0.3%)  InnerAnalysisManagerProxy<AnalysisManager<Function>, Module>
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.2%)  InlineAdvisorAnalysis
+   0.0003 (100.0%)   0.0003 (100.0%)   0.0003 (100.0%)  Total
+
+===-------------------------------------------------------------------------===
+                          Pass execution timing report
+===-------------------------------------------------------------------------===
+  Total Execution Time: 0.0057 seconds (0.0057 wall clock)
+
+   ---User Time---   --System Time--   --User+System--   ---Wall Time---  --- Name ---
+   0.0010 ( 17.5%)   0.0000 (  0.0%)   0.0010 ( 17.5%)   0.0010 ( 17.5%)  InstCombinePass
+   0.0007 ( 12.8%)   0.0000 (  0.0%)   0.0007 ( 12.8%)   0.0007 ( 12.8%)  IndVarSimplifyPass
+   0.0004 (  6.3%)   0.0000 (  0.0%)   0.0004 (  6.3%)   0.0004 (  6.3%)  SimpleLoopUnswitchPass
+   0.0003 (  5.9%)   0.0000 (  0.0%)   0.0003 (  5.9%)   0.0003 (  5.9%)  LoopIdiomRecognizePass
+   0.0003 (  5.5%)   0.0000 (  0.0%)   0.0003 (  5.5%)   0.0003 (  5.5%)  SLPVectorizerPass
+   0.0003 (  4.4%)   0.0000 ( 25.0%)   0.0003 (  4.4%)   0.0003 (  4.5%)  LICMPass
+   0.0002 (  4.2%)   0.0000 (  0.0%)   0.0002 (  4.2%)   0.0002 (  4.2%)  SimplifyCFGPass
+   0.0002 (  3.9%)   0.0000 ( 75.0%)   0.0002 (  4.0%)   0.0002 (  3.9%)  LoopRotatePass
+   0.0002 (  3.1%)   0.0000 (  0.0%)   0.0002 (  3.1%)   0.0002 (  3.2%)  LoopDeletionPass
+   0.0002 (  2.8%)   0.0000 (  0.0%)   0.0002 (  2.8%)   0.0002 (  2.8%)  EarlyCSEPass
+   0.0002 (  2.8%)   0.0000 (  0.0%)   0.0002 (  2.8%)   0.0002 (  2.8%)  GVNPass
+   0.0002 (  2.7%)   0.0000 (  0.0%)   0.0002 (  2.7%)   0.0002 (  2.7%)  CorrelatedValuePropagationPass
+   0.0001 (  2.6%)   0.0000 (  0.0%)   0.0001 (  2.6%)   0.0001 (  2.5%)  LoopSimplifyCFGPass
+   0.0001 (  2.5%)   0.0000 (  0.0%)   0.0001 (  2.5%)   0.0001 (  2.5%)  IPSCCPPass
+   0.0001 (  2.2%)   0.0000 (  0.0%)   0.0001 (  2.2%)   0.0001 (  2.2%)  LoopUnrollPass
+   0.0001 (  2.0%)   0.0000 (  0.0%)   0.0001 (  2.0%)   0.0001 (  2.0%)  LoopInstSimplifyPass
+   0.0001 (  1.5%)   0.0000 (  0.0%)   0.0001 (  1.5%)   0.0001 (  1.5%)  PrintModulePass
+   0.0001 (  1.4%)   0.0000 (  0.0%)   0.0001 (  1.4%)   0.0001 (  1.4%)  LoopSimplifyPass
+   0.0001 (  1.4%)   0.0000 (  0.0%)   0.0001 (  1.4%)   0.0001 (  1.4%)  LoopVectorizePass
+   0.0001 (  1.3%)   0.0000 (  0.0%)   0.0001 (  1.3%)   0.0001 (  1.3%)  SCCPPass
+   0.0001 (  1.2%)   0.0000 (  0.0%)   0.0001 (  1.2%)   0.0001 (  1.2%)  ConstraintEliminationPass
+   0.0001 (  1.1%)   0.0000 (  0.0%)   0.0001 (  1.1%)   0.0001 (  1.1%)  JumpThreadingPass
+   0.0001 (  1.1%)   0.0000 (  0.0%)   0.0001 (  1.1%)   0.0001 (  1.1%)  LoopFullUnrollPass
+   0.0001 (  1.0%)   0.0000 (  0.0%)   0.0001 (  1.0%)   0.0001 (  1.0%)  PostOrderFunctionAttrsPass
+   0.0001 (  0.9%)   0.0000 (  0.0%)   0.0001 (  0.9%)   0.0001 (  0.9%)  LCSSAPass
+   0.0000 (  0.6%)   0.0000 (  0.0%)   0.0000 (  0.6%)   0.0000 (  0.6%)  VerifierPass
+   0.0000 (  0.6%)   0.0000 (  0.0%)   0.0000 (  0.6%)   0.0000 (  0.6%)  ReassociatePass
+   0.0000 (  0.6%)   0.0000 (  0.0%)   0.0000 (  0.6%)   0.0000 (  0.6%)  DSEPass
+   0.0000 (  0.5%)   0.0000 (  0.0%)   0.0000 (  0.5%)   0.0000 (  0.5%)  ADCEPass
+   0.0000 (  0.3%)   0.0000 (  0.0%)   0.0000 (  0.3%)   0.0000 (  0.3%)  CalledValuePropagationPass
+   0.0000 (  0.3%)   0.0000 (  0.0%)   0.0000 (  0.3%)   0.0000 (  0.3%)  GlobalOptPass
+   0.0000 (  0.3%)   0.0000 (  0.0%)   0.0000 (  0.3%)   0.0000 (  0.3%)  InstSimplifyPass
+   0.0000 (  0.3%)   0.0000 (  0.0%)   0.0000 (  0.3%)   0.0000 (  0.3%)  SROAPass
+   0.0000 (  0.3%)   0.0000 (  0.0%)   0.0000 (  0.3%)   0.0000 (  0.3%)  BDCEPass
+   0.0000 (  0.3%)   0.0000 (  0.0%)   0.0000 (  0.3%)   0.0000 (  0.3%)  OpenMPOptPass
+   0.0000 (  0.3%)   0.0000 (  0.0%)   0.0000 (  0.3%)   0.0000 (  0.3%)  CoroEarlyPass
+   0.0000 (  0.3%)   0.0000 (  0.0%)   0.0000 (  0.3%)   0.0000 (  0.3%)  CGProfilePass
+   0.0000 (  0.2%)   0.0000 (  0.0%)   0.0000 (  0.2%)   0.0000 (  0.2%)  VectorCombinePass
+   0.0000 (  0.2%)   0.0000 (  0.0%)   0.0000 (  0.2%)   0.0000 (  0.2%)  MemCpyOptPass
+   0.0000 (  0.2%)   0.0000 (  0.0%)   0.0000 (  0.2%)   0.0000 (  0.2%)  RequireAnalysisPass<GlobalsAA, Module>
+   0.0000 (  0.2%)   0.0000 (  0.0%)   0.0000 (  0.2%)   0.0000 (  0.2%)  InferAlignmentPass
+   0.0000 (  0.2%)   0.0000 (  0.0%)   0.0000 (  0.2%)   0.0000 (  0.2%)  AggressiveInstCombinePass
+   0.0000 (  0.2%)   0.0000 (  0.0%)   0.0000 (  0.2%)   0.0000 (  0.2%)  TailCallElimPass
+   0.0000 (  0.2%)   0.0000 (  0.0%)   0.0000 (  0.2%)   0.0000 (  0.2%)  LoopDistributePass
+   0.0000 (  0.1%)   0.0000 (  0.0%)   0.0000 (  0.1%)   0.0000 (  0.1%)  RecomputeGlobalsAAPass
+   0.0000 (  0.1%)   0.0000 (  0.0%)   0.0000 (  0.1%)   0.0000 (  0.1%)  LoopLoadEliminationPass
+   0.0000 (  0.1%)   0.0000 (  0.0%)   0.0000 (  0.1%)   0.0000 (  0.1%)  GlobalDCEPass
+   0.0000 (  0.1%)   0.0000 (  0.0%)   0.0000 (  0.1%)   0.0000 (  0.1%)  EntryExitInstrumenterPass
+   0.0000 (  0.1%)   0.0000 (  0.0%)   0.0000 (  0.1%)   0.0000 (  0.1%)  InferFunctionAttrsPass
+   0.0000 (  0.1%)   0.0000 (  0.0%)   0.0000 (  0.1%)   0.0000 (  0.1%)  InjectTLIMappings
+   0.0000 (  0.1%)   0.0000 (  0.0%)   0.0000 (  0.1%)   0.0000 (  0.1%)  LibCallsShrinkWrapPass
+   0.0000 (  0.1%)   0.0000 (  0.0%)   0.0000 (  0.1%)   0.0000 (  0.1%)  AlwaysInlinerPass
+   0.0000 (  0.1%)   0.0000 (  0.0%)   0.0000 (  0.1%)   0.0000 (  0.1%)  LowerConstantIntrinsicsPass
+   0.0000 (  0.1%)   0.0000 (  0.0%)   0.0000 (  0.1%)   0.0000 (  0.1%)  DeadArgumentEliminationPass
+   0.0000 (  0.1%)   0.0000 (  0.0%)   0.0000 (  0.1%)   0.0000 (  0.1%)  Float2IntPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  WarnMissedTransformationsPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  InlinerPass
+   0.0000 (  0.1%)   0.0000 (  0.0%)   0.0000 (  0.1%)   0.0000 (  0.0%)  MemProfRemoveInfo
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  DivRemPairsPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  RequireAnalysisPass<ShouldNotRunFunctionPassesAnalysis, Function>
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  AllocTokenPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  LowerExpectIntrinsicPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  InvalidateAnalysisPass<ShouldNotRunFunctionPassesAnalysis>
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  DropUnnecessaryAssumesPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  InvalidateAnalysisPass<AAManager>
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  CallSiteSplittingPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  CoroAnnotationElidePass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  ConstantMergePass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  CoroCleanupPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  AnnotationRemarksPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  Annotation2MetadataPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  ArgumentPromotionPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  ReversePostOrderFunctionAttrsPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  MergedLoadStoreMotionPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  MoveAutoInitPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  PromotePass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  RequireAnalysisPass<ProfileSummaryAnalysis, Module>
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  ForceFunctionAttrsPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  AlignmentFromAssumptionsPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  OpenMPOptCGSCCPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  RelLookupTableConverterPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  LoopSinkPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  ControlHeightReductionPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  EliminateAvailableExternallyPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  CoroElidePass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  SpeculativeExecutionPass
+   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)   0.0000 (  0.0%)  CoroSplitPass
+   0.0057 (100.0%)   0.0000 (100.0%)   0.0057 (100.0%)   0.0057 (100.0%)  Total
+
+===-------------------------------------------------------------------------===
+                                LLVM IR Parsing
+===-------------------------------------------------------------------------===
+  Total Execution Time: 0.0003 seconds (0.0003 wall clock)
+
+   ---User Time---   --User+System--   ---Wall Time---  --- Name ---
+   0.0003 (100.0%)   0.0003 (100.0%)   0.0003 (100.0%)  Parse IR
+   0.0003 (100.0%)   0.0003 (100.0%)   0.0003 (100.0%)  Total
+

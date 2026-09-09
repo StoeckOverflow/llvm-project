@@ -1,0 +1,10 @@
+[
+{"wall": {"duration":   0.0026, "percentage": 100.0}, "name": "root"},
+{"wall": {"duration":   0.0008, "percentage":  30.7}, "name": "Parser"},
+{"wall": {"duration":   0.0008, "percentage":  30.0}, "name": "LowerDependentMemRefToLLVMPass"},
+{"wall": {"duration":   0.0002, "percentage":   7.1}, "name": "Output"},
+{"wall": {"duration":   0.0000, "percentage":   1.6}, "name": "ReconcileUnrealizedCastsPass"},
+{"wall": {"duration":   0.0000, "percentage":   0.2}, "name": "Pipeline Collection : ['func.func']"},
+{"wall": {"duration":   0.0008, "percentage":  30.3}, "name": "Rest"},
+{"wall": {"duration":   0.0026, "percentage": 100.0}, "name": "Total"}
+]
