@@ -146,6 +146,11 @@ findStoredRefinement(ArrayRef<DependentTypeValueRefinement> refinements,
   return nullptr;
 }
 
+// Verify func.func #types metadata such as
+//   #types[%A : #tensor<[%n, %m], f32>]
+// The referenced value index must name the described argument/result, and all
+// symbolic dims must be entry block args. This stays out of FuncOp's verifier
+// so Func does not need to interpret dependent_tensor #tensor specs.
 static LogicalResult verifyFuncBoundaryProperties(func::FuncOp func) {
   llvm::SmallDenseSet<unsigned> seenArgRefinements;
   for (const DependentTypeValueRefinement &stored :
@@ -181,6 +186,9 @@ static LogicalResult verifyFuncBoundaryProperties(func::FuncOp func) {
   return success();
 }
 
+// Verify that returned tensors satisfy the enclosing function's declared
+// result #types. Example: returning %A to -> #tensor<[%n, %m], f32> requires
+// %A to carry that same refinement.
 static LogicalResult verifyReturnRefinements(func::FuncOp func,
                                              func::ReturnOp ret) {
   for (auto [i, operand] : llvm::enumerate(ret.getOperands())) {
@@ -208,6 +216,8 @@ static LogicalResult verifyReturnRefinements(func::FuncOp func,
   return success();
 }
 
+// Verify that call operands/results match the callee's #types contract after
+// substituting callee entry block args with the actual call operands.
 static LogicalResult verifyCallRefinements(func::CallOp call) {
   auto callee = SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(
       call, call.getCalleeAttr());
@@ -267,6 +277,9 @@ static LogicalResult verifyCallRefinements(func::CallOp call) {
   return success();
 }
 
+// Verify loop-carried refinements across the whole loop boundary: the init
+// operand, region block argument, yielded value, and loop result must describe
+// the same dependent tensor.
 static LogicalResult
 verifyLoopRefinements(Operation *owner,
                       ArrayRef<DependentTensorLoopTypeRef> loopTypeRefs,
