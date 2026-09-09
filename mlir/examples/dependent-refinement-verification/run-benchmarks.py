@@ -13,7 +13,7 @@ from pathlib import Path
 TIMING_RE = re.compile(r"^\s*([0-9.]+) \(\s*[0-9.]+%\)\s+(.+?)\s*$")
 TOTAL_RE = re.compile(r"Total Execution Time:\s+([0-9.]+) seconds")
 BASELINE_PIPELINE = "builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),finalize-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)"
-DEPENDENT_PIPELINE = "builtin.module(verify-dependent-memref-refinements,func.func(convert-scf-to-cf,convert-arith-to-llvm),lower-dependent-memref-to-llvm,reconcile-unrealized-casts)"
+DEPENDENT_PIPELINE = "builtin.module(verify-dependent-memref-refinements,func.func(convert-scf-to-cf,convert-arith-to-llvm),lower-dependent-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)"
 
 
 def repo_root() -> Path:

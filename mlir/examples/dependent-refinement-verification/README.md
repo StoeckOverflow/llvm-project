@@ -85,7 +85,7 @@ For a dependent input, run:
 
 ```bash
 build/bin/mlir-opt <dependent-input.mlir> \
-  -pass-pipeline='builtin.module(verify-dependent-memref-refinements,func.func(convert-scf-to-cf,convert-arith-to-llvm),lower-dependent-memref-to-llvm,reconcile-unrealized-casts)' \
+  -pass-pipeline='builtin.module(verify-dependent-memref-refinements,func.func(convert-scf-to-cf,convert-arith-to-llvm),lower-dependent-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)' \
   -mlir-disable-threading \
   -mlir-timing \
   -mlir-timing-display=list \
