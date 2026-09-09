@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -split-input-file -verify-dependent-tensor-refinements -verify-diagnostics | FileCheck %s
+// RUN: mlir-opt %s -split-input-file -verify-diagnostics | FileCheck %s
 
 func.func @basic_primitives(%m : index, %n : index, %i : index, %j : index,
                             %v : f32) -> tensor<?x?xf32>

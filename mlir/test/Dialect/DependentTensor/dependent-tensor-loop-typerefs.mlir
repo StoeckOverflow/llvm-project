@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -split-input-file -verify-dependent-tensor-refinements -verify-diagnostics | FileCheck %s
+// RUN: mlir-opt %s -split-input-file -verify-diagnostics | FileCheck %s
 
 func.func @split_scf_loop_type_refs(%m : index) -> tensor<?xf32>
     #types[] -> #tensor<[%m], f32> {

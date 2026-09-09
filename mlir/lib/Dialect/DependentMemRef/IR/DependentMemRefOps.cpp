@@ -98,6 +98,18 @@ void AllocOp::walkPropertySSAUses(function_ref<void(PropertyOperand &)> cb) {
   walkRefinement(getProperties().result_refinement, cb);
 }
 
+void AllocOp::walkDependentTensorPropertyUses(
+    function_ref<void(PropertyOperand &)> cb) {
+  walkPropertySSAUses(cb);
+}
+
+FailureOr<DependentTypeValueRefinement>
+AllocOp::getDependentTensorResultRefinement(unsigned resultNumber) {
+  if (resultNumber != 0)
+    return failure();
+  return getProperties().result_refinement;
+}
+
 ParseResult ReinterpretCastOp::parse(OpAsmParser &parser,
                                      OperationState &result) {
   OpAsmParser::UnresolvedOperand source;
@@ -149,6 +161,18 @@ void ReinterpretCastOp::walkPropertySSAUses(
   walkRefinement(getProperties().result_refinement, cb);
 }
 
+void ReinterpretCastOp::walkDependentTensorPropertyUses(
+    function_ref<void(PropertyOperand &)> cb) {
+  walkPropertySSAUses(cb);
+}
+
+FailureOr<DependentTypeValueRefinement>
+ReinterpretCastOp::getDependentTensorResultRefinement(unsigned resultNumber) {
+  if (resultNumber != 0)
+    return failure();
+  return getProperties().result_refinement;
+}
+
 ParseResult CastOp::parse(OpAsmParser &parser, OperationState &result) {
   OpAsmParser::UnresolvedOperand source;
   PendingMemRefSpec spec;
@@ -196,6 +220,18 @@ LogicalResult CastOp::verify() {
 
 void CastOp::walkPropertySSAUses(function_ref<void(PropertyOperand &)> cb) {
   walkRefinement(getProperties().result_refinement, cb);
+}
+
+void CastOp::walkDependentTensorPropertyUses(
+    function_ref<void(PropertyOperand &)> cb) {
+  walkPropertySSAUses(cb);
+}
+
+FailureOr<DependentTypeValueRefinement>
+CastOp::getDependentTensorResultRefinement(unsigned resultNumber) {
+  if (resultNumber != 0)
+    return failure();
+  return getProperties().result_refinement;
 }
 
 static ParseResult

@@ -171,11 +171,11 @@ func.func @dialect_conversion_property_ref() {
 
 // -----
 
-func.func @erase_scf_for_result_refinement() -> tensor<?xf32> {
+func.func @erase_scf_for_result_refinement(%n : index) -> tensor<?xf32>
+    #types[] -> #tensor<[%n], f32> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %m = arith.constant 4 : index
-  %n = arith.constant 8 : index
   %lhs = dependent_tensor.make () #tensor<[%m], f32> : tensor<?xf32>
   %rhs = dependent_tensor.make () #tensor<[%n], f32> : tensor<?xf32>
   %r0, %r1 = scf.for %i = %c0 to %c0 step %c1
@@ -188,7 +188,7 @@ func.func @erase_scf_for_result_refinement() -> tensor<?xf32> {
 }
 
 // ERASE-RESULT-LABEL: func.func @erase_scf_for_result_refinement
-// ERASE-RESULT: %[[N:.*]] = arith.constant 8 : index
+// ERASE-RESULT-SAME: (%[[N:arg[0-9]+]]: index) -> tensor<?xf32>
 // ERASE-RESULT: %[[RHS:.*]] = dependent_tensor.make () #tensor<[%[[N]]], f32> : tensor<?xf32>
 // ERASE-RESULT: %[[R:.*]] = scf.for {{.*}} iter_args(%[[ARG:.*]] = %[[RHS]]) -> (tensor<?xf32>) #types[%[[ARG]] : #tensor<[%[[N]]], f32>] -> #tensor<[%[[N]]], f32> {
 // ERASE-RESULT:   scf.yield %[[ARG]] : tensor<?xf32>

@@ -23,7 +23,6 @@
 #include "mlir/Dialect/Bufferization/Pipelines/Passes.h"
 #include "mlir/Dialect/Bufferization/Transforms/Passes.h"
 #include "mlir/Dialect/DependentMemRef/Transforms/Passes.h"
-#include "mlir/Dialect/DependentTensor/Transforms/Passes.h"
 #include "mlir/Dialect/EmitC/Transforms/Passes.h"
 #include "mlir/Dialect/Func/Transforms/Passes.h"
 #include "mlir/Dialect/GPU/Pipelines/Passes.h"
@@ -72,7 +71,6 @@ void mlir::registerAllPasses() {
   registerAsyncPasses();
   arith::registerArithPasses();
   bufferization::registerBufferizationPasses();
-  dependent_tensor::registerDependentTensorPasses();
   dependent_memref::registerDependentMemRefPasses();
   func::registerFuncPasses();
   registerGPUPasses();

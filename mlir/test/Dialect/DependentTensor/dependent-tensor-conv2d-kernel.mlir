@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -split-input-file -verify-dependent-tensor-refinements -verify-diagnostics | FileCheck %s
+// RUN: mlir-opt %s -split-input-file -verify-diagnostics | FileCheck %s
 
 func.func @dependent_conv2d_kernel(
     %n : index,
@@ -175,12 +175,12 @@ func.func @dependent_conv2d_kernel_loop_result_metadata_mismatch(
     #types[%X : #tensor<[%n, %cin, %oh, %ow, %kh, %kw], f32>, %K : #tensor<[%cout, %cin, %kh, %kw], f32>, %Y : #tensor<[%n, %cout, %oh, %ow], f32>] -> #tensor<[%n, %cout, %oh, %ow], f32> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
+  // expected-error@+1 {{loop result type reference does not match yielded refinements}}
   %Y_final = scf.for %n_idx = %c0 to %n step %c1 iter_args(%Yn = %Y)
       -> (tensor<?x?x?x?xf32>)
       #types[%Yn : #tensor<[%n, %cout, %oh, %ow], f32>] -> #tensor<[%n, %cout, %ow, %oh], f32>
  {
     scf.yield %Yn : tensor<?x?x?x?xf32>
   }
-  // expected-error@+1 {{'func.return' op returned value does not match function result dependency metadata}}
   return %Y_final : tensor<?x?x?x?xf32>
 }

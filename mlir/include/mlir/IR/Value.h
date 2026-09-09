@@ -442,6 +442,14 @@ public:
   /// Returns true if this property operand contains the given value.
   bool is(Value other) const { return value == other; }
 
+  /// Property operands compare by the SSA value embedded in the property.
+  bool operator==(const PropertyOperand &other) const {
+    return value == other.value;
+  }
+  bool operator!=(const PropertyOperand &other) const {
+    return !(*this == other);
+  }
+
   /// Drop this property operand and clear the underlying value.
   void drop() {
     detail::IROperandBase::drop();

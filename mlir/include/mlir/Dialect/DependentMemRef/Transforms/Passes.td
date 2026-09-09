@@ -5,14 +5,6 @@
 
 include "mlir/Pass/PassBase.td"
 
-def VerifyDependentMemRefRefinementsPass
-    : Pass<"verify-dependent-memref-refinements", "ModuleOp"> {
-  let summary = "Verify dependent_memref metadata across functions and operations";
-  let dependentDialects = ["::mlir::dependent_memref::DependentMemRefDialect",
-                           "::mlir::func::FuncDialect",
-                           "::mlir::memref::MemRefDialect"];
-}
-
 def ConvertDependentTensorToDependentMemRefPass
     : Pass<"convert-dependent-tensor-to-dependent-memref", "ModuleOp"> {
   let summary = "Lower the executable dependent_tensor subset to dependent_memref";

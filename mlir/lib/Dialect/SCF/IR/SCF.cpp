@@ -30,6 +30,7 @@
 #include "mlir/Interfaces/ValueBoundsOpInterface.h"
 #include "mlir/Transforms/InliningUtils.h"
 #include "mlir/Transforms/RegionUtils.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Casting.h"
@@ -74,6 +75,114 @@ static FailureOr<DependentTensorTypeRef> getTypeRefFromValue(Value value) {
   if (failed(refinement))
     return failure();
   return getTypeRefFromValueRefinement(*refinement);
+}
+
+static bool haveEqualTypeRefs(const DependentTensorTypeRef &lhs,
+                              const DependentTensorTypeRef &rhs) {
+  return lhs.rank == rhs.rank && lhs.offset == rhs.offset &&
+         lhs.hasExplicitLayout == rhs.hasExplicitLayout &&
+         lhs.dimValues == rhs.dimValues && lhs.strideValues == rhs.strideValues;
+}
+
+static bool isDependentLoopValueType(Type type) {
+  return isa<RankedTensorType, MemRefType>(type);
+}
+
+static LogicalResult verifyLoopTypeRef(Operation *owner, StringRef kind,
+                                       Type type,
+                                       const DependentTensorTypeRef &typeRef) {
+  if (auto tensorType = dyn_cast<RankedTensorType>(type)) {
+    if (typeRef.rank != tensorType.getRank() || typeRef.hasExplicitLayout ||
+        !typeRef.strideValues.empty())
+      return owner->emitOpError()
+             << "has invalid dependent " << kind << " tensor type ref";
+    if (typeRef.dimValues.size() != static_cast<size_t>(typeRef.rank))
+      return owner->emitOpError()
+             << "requires one dependent dimension value per " << kind
+             << " tensor dimension";
+    for (auto [dim, operand] : llvm::enumerate(typeRef.dimValues)) {
+      Value value = operand.get();
+      if (!tensorType.isDynamicDim(dim) || !value || !value.getType().isIndex())
+        return owner->emitOpError()
+               << "requires index-typed dependent " << kind
+               << " dimensions to correspond to dynamic tensor dims";
+    }
+    return success();
+  }
+
+  auto memrefType = dyn_cast<MemRefType>(type);
+  if (!memrefType)
+    return owner->emitOpError()
+           << "requires tensor or memref type for dependent " << kind
+           << " type ref";
+  bool flatCarrier = memrefType.getRank() == 0 && typeRef.rank > 0;
+  if (!flatCarrier && typeRef.rank != memrefType.getRank())
+    return owner->emitOpError()
+           << "requires dependent " << kind << " rank to match memref rank";
+  if (typeRef.dimValues.size() != static_cast<size_t>(typeRef.rank))
+    return owner->emitOpError() << "requires one dependent dimension value per "
+                                << kind << " memref dimension";
+  if (typeRef.hasExplicitLayout &&
+      typeRef.strideValues.size() != static_cast<size_t>(typeRef.rank))
+    return owner->emitOpError() << "requires one dependent stride value per "
+                                << kind << " memref dimension";
+  for (auto [dim, operand] : llvm::enumerate(typeRef.dimValues)) {
+    Value value = operand.get();
+    if (!flatCarrier && !memrefType.isDynamicDim(dim))
+      return owner->emitOpError()
+             << "requires dependent " << kind
+             << " dimensions to correspond to dynamic memref dims";
+    if (!value || !value.getType().isIndex())
+      return owner->emitOpError()
+             << "requires index-typed dependent " << kind << " dimensions";
+  }
+  for (const PropertyOperand &operand : typeRef.strideValues) {
+    Value value = operand.get();
+    if (!value || !value.getType().isIndex())
+      return owner->emitOpError()
+             << "requires index-typed dependent " << kind << " strides";
+  }
+  return success();
+}
+
+static LogicalResult verifyLoopRefinements(
+    Operation *owner, ArrayRef<DependentTensorLoopTypeRef> loopTypeRefs,
+    ValueRange initOperands, TypeRange resultTypes, ValueRange yieldedValues) {
+  llvm::SmallDenseSet<unsigned> seenLoopRefs;
+  for (const DependentTensorLoopTypeRef &ref : loopTypeRefs) {
+    if (!seenLoopRefs.insert(ref.valueIndex).second)
+      return owner->emitOpError() << "has duplicate dependent loop type refs";
+    if (ref.valueIndex >= resultTypes.size() ||
+        ref.valueIndex >= initOperands.size() ||
+        ref.valueIndex >= yieldedValues.size())
+      return owner->emitOpError()
+             << "has dependent loop type refs out of range";
+    if (!isDependentLoopValueType(resultTypes[ref.valueIndex]) &&
+        !isDependentLoopValueType(initOperands[ref.valueIndex].getType()) &&
+        !isDependentLoopValueType(yieldedValues[ref.valueIndex].getType()))
+      continue;
+    if (failed(verifyLoopTypeRef(owner, "loop operand",
+                                 initOperands[ref.valueIndex].getType(),
+                                 ref.operandTypeRef)))
+      return failure();
+    if (failed(verifyLoopTypeRef(owner, "loop result",
+                                 resultTypes[ref.valueIndex],
+                                 ref.resultTypeRef)))
+      return failure();
+    FailureOr<DependentTensorTypeRef> actualInit =
+        getTypeRefFromValue(initOperands[ref.valueIndex]);
+    if (succeeded(actualInit) &&
+        !haveEqualTypeRefs(*actualInit, ref.operandTypeRef))
+      return owner->emitOpError()
+             << "loop operand type reference does not match init refinements";
+    FailureOr<DependentTensorTypeRef> actualYield =
+        getTypeRefFromValue(yieldedValues[ref.valueIndex]);
+    if (succeeded(actualYield) &&
+        !haveEqualTypeRefs(*actualYield, ref.resultTypeRef))
+      return owner->emitOpError()
+             << "loop result type reference does not match yielded refinements";
+  }
+  return success();
 }
 
 static FailureOr<DependentTensorTypeRef> getTypeRefFromValue(Value value,
@@ -524,6 +633,13 @@ LogicalResult ForOp::verifyRegions() {
 
     ++i;
   }
+
+  auto yield = cast<YieldOp>(getBody()->getTerminator());
+  if (failed(verifyLoopRefinements(
+          getOperation(), getProperties().dependentTensorLoopTypeRefs,
+          getInitArgs(), getResultTypes(), yield.getResults())))
+    return failure();
+
   return success();
 }
 

@@ -1,8 +1,11 @@
-// RUN: mlir-opt %s --split-input-file --verify-each=false -pass-pipeline='builtin.module(test-dependent-tensor-corrupt-refinements,verify-dependent-tensor-refinements)' -verify-diagnostics
+// RUN: mlir-opt %s --split-input-file -pass-pipeline='builtin.module(test-dependent-tensor-corrupt-refinements)' -verify-diagnostics
 
 func.func @refinement_bad_dominance_property_owner() {
   %dim = arith.constant 1 : index
+  // expected-error@+2 {{property SSA value does not dominate this operation}}
+  // expected-note@+1 {{property SSA use is owned by this operation}}
   %t = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
+  // expected-note@+1 {{property SSA value defined here}}
   %late = arith.constant 2 : index
   return
 }
@@ -11,8 +14,11 @@ func.func @refinement_bad_dominance_property_owner() {
 
 func.func @refinement_cycle_like_dimension() {
   %dim = arith.constant 1 : index
+  // expected-error@+2 {{property SSA value does not dominate this operation}}
+  // expected-note@+1 {{property SSA use is owned by this operation}}
   %t = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
   %c0 = arith.constant 0 : index
+  // expected-note@+1 {{property SSA value defined here}}
   %late_dim = dependent_tensor.dim %t, %c0 : tensor<?xf32>
   return
 }
@@ -23,8 +29,10 @@ func.func @refinement_isolated_capture_source(%outer: index) {
   return
 }
 
+// expected-note@below {{required by region isolation constraints}}
 func.func @refinement_isolated_capture_victim() {
   %dim = arith.constant 1 : index
+  // expected-error@+1 {{using property SSA value defined outside the region}}
   %t = dependent_tensor.make () #tensor<[%dim], f32> : tensor<?xf32>
   return
 }

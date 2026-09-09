@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -split-input-file -verify-dependent-tensor-refinements -verify-diagnostics | FileCheck %s
+// RUN: mlir-opt %s -split-input-file -verify-diagnostics | FileCheck %s
 
 func.func @dependent_matmul_kernel(
     %n : index,
@@ -136,12 +136,12 @@ func.func @dependent_matmul_kernel_loop_result_metadata_mismatch(
     #types[%A : #tensor<[%n, %k], f32>, %B : #tensor<[%k, %m], f32>, %C : #tensor<[%n, %m], f32>] -> #tensor<[%n, %m], f32> {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
+  // expected-error@+1 {{loop result type reference does not match yielded refinements}}
   %C_final = scf.for %i = %c0 to %n step %c1 iter_args(%Ci = %C)
       -> (tensor<?x?xf32>)
       #types[%Ci : #tensor<[%n, %m], f32>] -> #tensor<[%m, %n], f32>
  {
     scf.yield %Ci : tensor<?x?xf32>
   }
-  // expected-error@+1 {{'func.return' op returned value does not match function result dependency metadata}}
   return %C_final : tensor<?x?xf32>
 }

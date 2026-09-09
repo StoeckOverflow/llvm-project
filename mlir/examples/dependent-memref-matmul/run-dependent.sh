@@ -13,8 +13,8 @@ K="${K:-${N}}"
 M="${M:-${N}}"
 REPEATS="${REPEATS:-10}"
 BUILD_ONLY=0
-DEPENDENT_PIPELINE='builtin.module(convert-dependent-tensor-to-dependent-memref,func.func(convert-scf-to-cf,convert-arith-to-llvm),lower-dependent-memref-to-llvm,reconcile-unrealized-casts)'
-DIRECT_STRIDED_PIPELINE='builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),lower-dependent-memref-to-llvm,reconcile-unrealized-casts)'
+DEPENDENT_PIPELINE='builtin.module(convert-dependent-tensor-to-dependent-memref,lower-dependent-memref-to-llvm,func.func(convert-scf-to-cf,convert-arith-to-llvm),reconcile-unrealized-casts)'
+DIRECT_STRIDED_PIPELINE='builtin.module(lower-dependent-memref-to-llvm,func.func(convert-scf-to-cf,convert-arith-to-llvm),reconcile-unrealized-casts)'
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

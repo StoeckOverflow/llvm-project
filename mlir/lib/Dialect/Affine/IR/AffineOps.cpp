@@ -25,6 +25,7 @@
 #include "mlir/Interfaces/ShapedOpInterfaces.h"
 #include "mlir/Interfaces/ValueBoundsOpInterface.h"
 #include "mlir/Transforms/InliningUtils.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -77,6 +78,116 @@ getAffineTypeRefFromValue(Value value) {
   if (failed(refinement))
     return failure();
   return getAffineTypeRefFromValueRefinement(*refinement);
+}
+
+static bool haveEqualAffineTypeRefs(const DependentTensorTypeRef &lhs,
+                                    const DependentTensorTypeRef &rhs) {
+  return lhs.rank == rhs.rank && lhs.offset == rhs.offset &&
+         lhs.hasExplicitLayout == rhs.hasExplicitLayout &&
+         lhs.dimValues == rhs.dimValues && lhs.strideValues == rhs.strideValues;
+}
+
+static bool isAffineDependentLoopValueType(Type type) {
+  return isa<RankedTensorType, MemRefType>(type);
+}
+
+static LogicalResult
+verifyAffineLoopTypeRef(Operation *owner, StringRef kind, Type type,
+                        const DependentTensorTypeRef &typeRef) {
+  if (auto tensorType = dyn_cast<RankedTensorType>(type)) {
+    if (typeRef.rank != tensorType.getRank() || typeRef.hasExplicitLayout ||
+        !typeRef.strideValues.empty())
+      return owner->emitOpError()
+             << "has invalid dependent " << kind << " tensor type ref";
+    if (typeRef.dimValues.size() != static_cast<size_t>(typeRef.rank))
+      return owner->emitOpError()
+             << "requires one dependent dimension value per " << kind
+             << " tensor dimension";
+    for (auto [dim, operand] : llvm::enumerate(typeRef.dimValues)) {
+      Value value = operand.get();
+      if (!tensorType.isDynamicDim(dim) || !value || !value.getType().isIndex())
+        return owner->emitOpError()
+               << "requires index-typed dependent " << kind
+               << " dimensions to correspond to dynamic tensor dims";
+    }
+    return success();
+  }
+
+  auto memrefType = dyn_cast<MemRefType>(type);
+  if (!memrefType)
+    return owner->emitOpError()
+           << "requires tensor or memref type for dependent " << kind
+           << " type ref";
+  bool flatCarrier = memrefType.getRank() == 0 && typeRef.rank > 0;
+  if (!flatCarrier && typeRef.rank != memrefType.getRank())
+    return owner->emitOpError()
+           << "requires dependent " << kind << " rank to match memref rank";
+  if (typeRef.dimValues.size() != static_cast<size_t>(typeRef.rank))
+    return owner->emitOpError() << "requires one dependent dimension value per "
+                                << kind << " memref dimension";
+  if (typeRef.hasExplicitLayout &&
+      typeRef.strideValues.size() != static_cast<size_t>(typeRef.rank))
+    return owner->emitOpError() << "requires one dependent stride value per "
+                                << kind << " memref dimension";
+  for (auto [dim, operand] : llvm::enumerate(typeRef.dimValues)) {
+    Value value = operand.get();
+    if (!flatCarrier && !memrefType.isDynamicDim(dim))
+      return owner->emitOpError()
+             << "requires dependent " << kind
+             << " dimensions to correspond to dynamic memref dims";
+    if (!value || !value.getType().isIndex())
+      return owner->emitOpError()
+             << "requires index-typed dependent " << kind << " dimensions";
+  }
+  for (const PropertyOperand &operand : typeRef.strideValues) {
+    Value value = operand.get();
+    if (!value || !value.getType().isIndex())
+      return owner->emitOpError()
+             << "requires index-typed dependent " << kind << " strides";
+  }
+  return success();
+}
+
+static LogicalResult verifyAffineLoopRefinements(
+    Operation *owner, ArrayRef<DependentTensorLoopTypeRef> loopTypeRefs,
+    ValueRange initOperands, TypeRange resultTypes, ValueRange yieldedValues) {
+  llvm::SmallDenseSet<unsigned> seenLoopRefs;
+  for (const DependentTensorLoopTypeRef &ref : loopTypeRefs) {
+    if (!seenLoopRefs.insert(ref.valueIndex).second)
+      return owner->emitOpError() << "has duplicate dependent loop type refs";
+    if (ref.valueIndex >= resultTypes.size() ||
+        ref.valueIndex >= initOperands.size() ||
+        ref.valueIndex >= yieldedValues.size())
+      return owner->emitOpError()
+             << "has dependent loop type refs out of range";
+    if (!isAffineDependentLoopValueType(resultTypes[ref.valueIndex]) &&
+        !isAffineDependentLoopValueType(
+            initOperands[ref.valueIndex].getType()) &&
+        !isAffineDependentLoopValueType(
+            yieldedValues[ref.valueIndex].getType()))
+      continue;
+    if (failed(verifyAffineLoopTypeRef(owner, "loop operand",
+                                       initOperands[ref.valueIndex].getType(),
+                                       ref.operandTypeRef)))
+      return failure();
+    if (failed(verifyAffineLoopTypeRef(owner, "loop result",
+                                       resultTypes[ref.valueIndex],
+                                       ref.resultTypeRef)))
+      return failure();
+    FailureOr<DependentTensorTypeRef> actualInit =
+        getAffineTypeRefFromValue(initOperands[ref.valueIndex]);
+    if (succeeded(actualInit) &&
+        !haveEqualAffineTypeRefs(*actualInit, ref.operandTypeRef))
+      return owner->emitOpError()
+             << "loop operand type reference does not match init refinements";
+    FailureOr<DependentTensorTypeRef> actualYield =
+        getAffineTypeRefFromValue(yieldedValues[ref.valueIndex]);
+    if (succeeded(actualYield) &&
+        !haveEqualAffineTypeRefs(*actualYield, ref.resultTypeRef))
+      return owner->emitOpError()
+             << "loop result type reference does not match yielded refinements";
+  }
+  return success();
 }
 
 static FailureOr<DependentTensorTypeRef>
@@ -2429,6 +2540,12 @@ LogicalResult AffineForOp::verifyRegions() {
         "mismatch between the number of basic block args and results");
 
   if (failed(populateAffineDependentTensorLoopTypeRefs(*this)))
+    return failure();
+
+  auto yield = cast<AffineYieldOp>(getBody()->getTerminator());
+  if (failed(verifyAffineLoopRefinements(
+          getOperation(), getProperties().dependentTensorLoopTypeRefs,
+          getInits(), getResultTypes(), yield.getOperands())))
     return failure();
 
   return success();

@@ -302,6 +302,38 @@ struct ConvertInsertOp
   }
 };
 
+struct ConvertForOp : public OpConversionPattern<scf::ForOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(scf::ForOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    SmallVector<Type> resultTypes;
+    if (failed(getTypeConverter()->convertTypes(op.getResultTypes(),
+                                                resultTypes)))
+      return failure();
+
+    if (failed(rewriter.convertRegionTypes(&op.getRegion(),
+                                           *getTypeConverter())))
+      return failure();
+
+    scf::ForOp newOp = scf::ForOp::create(
+        rewriter, op.getLoc(), adaptor.getLowerBound(), adaptor.getUpperBound(),
+        adaptor.getStep(), adaptor.getInitArgs(), /*bodyBuilder=*/nullptr,
+        op.getUnsignedCmp());
+    newOp->setAttrs(op->getAttrs());
+    newOp.getProperties().dependentTensorLoopTypeRefs =
+        op.getProperties().dependentTensorLoopTypeRefs;
+    reattachPropertyOperands(newOp);
+
+    rewriter.eraseBlock(newOp.getBody(0));
+    rewriter.inlineRegionBefore(op.getRegion(), newOp.getRegion(),
+                                newOp.getRegion().end());
+    rewriter.replaceOp(op, newOp.getResults());
+    return success();
+  }
+};
+
 struct ConvertDimOp : public OpConversionPattern<dependent_tensor::DimOp> {
   ConvertDimOp(TypeConverter &converter, MLIRContext *ctx,
                const TensorDimRefinementMap &tensorDims)
@@ -363,6 +395,7 @@ struct ConvertDependentTensorToDependentMemRefPass
     TensorDimRefinementMap tensorDims;
     collectTensorDimRefinements(getOperation(), tensorDims);
 
+    patterns.add<ConvertForOp>(converter, ctx, PatternBenefit(2));
     patterns.add<ConvertMakeOp>(converter, ctx);
     patterns.add<ConvertExtractOp, ConvertInsertOp, ConvertDimOp>(
         converter, ctx, tensorDims);

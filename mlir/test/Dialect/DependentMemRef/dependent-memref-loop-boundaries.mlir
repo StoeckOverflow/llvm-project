@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -split-input-file -verify-dependent-memref-refinements -verify-diagnostics | FileCheck %s
+// RUN: mlir-opt %s -split-input-file -verify-diagnostics | FileCheck %s
 
 func.func @memref_loop_boundaries(%m : index, %n : index, %s0 : index, %s1 : index)
     -> memref<?x?xf32>

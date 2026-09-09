@@ -12,6 +12,7 @@
 #include "mlir/Conversion/ConvertToLLVM/ToLLVMInterface.h"
 #include "mlir/Dialect/Bufferization/IR/BufferizableOpInterface.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/DependentTensorSupport.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Matchers.h"
@@ -25,6 +26,7 @@
 #include "mlir/Transforms/InliningUtils.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
@@ -379,6 +381,400 @@ findBoundaryRefinement(ArrayRef<DependentTypeValueRefinement> refinements,
       return &candidate;
   return nullptr;
 }
+
+struct DependentTypeRefinementInfo {
+  Type type;
+  SmallVector<Value, 4> dimValues;
+  int64_t offset = 0;
+  SmallVector<Value, 4> strideValues;
+  bool hasExplicitLayout = false;
+};
+
+static bool hasDependentBoundaryType(Type type) {
+  return isa<RankedTensorType, MemRefType>(type);
+}
+
+static bool haveEqualRefinements(const DependentTypeRefinementInfo &lhs,
+                                 const DependentTypeRefinementInfo &rhs) {
+  return lhs.type == rhs.type && lhs.dimValues == rhs.dimValues &&
+         lhs.offset == rhs.offset && lhs.strideValues == rhs.strideValues &&
+         lhs.hasExplicitLayout == rhs.hasExplicitLayout;
+}
+
+static FailureOr<DependentTypeRefinementInfo>
+decodeStoredRefinementForValueType(Type type,
+                                   const DependentTypeValueRefinement &stored) {
+  DependentTypeRefinementInfo info;
+  info.type = type;
+  info.dimValues = stored.getDimValues();
+  info.offset = stored.offset;
+  info.strideValues = stored.getStrideValues();
+  info.hasExplicitLayout = stored.hasExplicitLayout;
+
+  if (auto tensorType = dyn_cast<RankedTensorType>(type)) {
+    if (stored.rank != tensorType.getRank() || stored.hasExplicitLayout ||
+        !stored.strideValues.empty())
+      return failure();
+    if (stored.dimValues.size() != static_cast<size_t>(stored.rank))
+      return failure();
+    for (auto [dim, value] : llvm::enumerate(info.dimValues)) {
+      if (!tensorType.isDynamicDim(dim) || !value || !value.getType().isIndex())
+        return failure();
+    }
+    return info;
+  }
+
+  auto memrefType = dyn_cast<MemRefType>(type);
+  if (!memrefType)
+    return failure();
+  bool flatCarrier = memrefType.getRank() == 0 && stored.rank > 0;
+  if (!flatCarrier && stored.rank != memrefType.getRank())
+    return failure();
+  if (stored.dimValues.size() != static_cast<size_t>(stored.rank))
+    return failure();
+  if (stored.hasExplicitLayout &&
+      stored.strideValues.size() != static_cast<size_t>(stored.rank))
+    return failure();
+  for (auto [dim, value] : llvm::enumerate(info.dimValues)) {
+    if (!flatCarrier && !memrefType.isDynamicDim(dim))
+      return failure();
+    if (!value || !value.getType().isIndex())
+      return failure();
+  }
+  for (Value value : info.strideValues)
+    if (!value || !value.getType().isIndex())
+      return failure();
+  return info;
+}
+
+static LogicalResult
+verifyStoredRefinementForValueType(Operation *owner, StringRef kind, Type type,
+                                   const DependentTypeValueRefinement &stored,
+                                   unsigned expectedIndex,
+                                   func::FuncOp funcBoundaryOwner = nullptr) {
+  if (!hasDependentBoundaryType(type))
+    return owner->emitOpError()
+           << "requires tensor or memref type for dependent " << kind
+           << " refinements";
+  if (stored.valueIndex != expectedIndex)
+    return owner->emitOpError()
+           << "has dependent " << kind << " refinements for wrong value index";
+
+  bool flatCarrier = false;
+  if (auto tensorType = dyn_cast<RankedTensorType>(type)) {
+    if (stored.rank != tensorType.getRank())
+      return owner->emitOpError()
+             << "requires dependent " << kind << " rank to match tensor rank";
+    if (stored.hasExplicitLayout || !stored.strideValues.empty())
+      return owner->emitOpError()
+             << "requires dependent " << kind
+             << " tensor refinements to omit layout metadata";
+    if (stored.dimValues.size() != static_cast<size_t>(stored.rank))
+      return owner->emitOpError()
+             << "requires one dependent dimension value per " << kind
+             << " tensor dimension";
+    for (auto [dim, value] : llvm::enumerate(stored.getDimValues())) {
+      if (!tensorType.isDynamicDim(dim))
+        return owner->emitOpError()
+               << "requires dependent " << kind
+               << " dimensions to correspond to dynamic tensor dims";
+      if (!value)
+        return owner->emitOpError()
+               << "has null dependent " << kind << " dimension value";
+      if (!value.getType().isIndex())
+        return owner->emitOpError() << "requires index-typed dependent " << kind
+                                    << " dimension values";
+    }
+  } else {
+    auto memrefType = cast<MemRefType>(type);
+    flatCarrier = memrefType.getRank() == 0 && stored.rank > 0;
+    if (!flatCarrier && stored.rank != memrefType.getRank())
+      return owner->emitOpError()
+             << "requires dependent " << kind << " rank to match memref rank";
+    if (stored.dimValues.size() != static_cast<size_t>(stored.rank))
+      return owner->emitOpError()
+             << "requires one dependent dimension value per " << kind
+             << " memref dimension";
+    if (stored.hasExplicitLayout &&
+        stored.strideValues.size() != static_cast<size_t>(stored.rank))
+      return owner->emitOpError() << "requires one dependent stride value per "
+                                  << kind << " memref dimension";
+    for (auto [dim, value] : llvm::enumerate(stored.getDimValues())) {
+      if (!flatCarrier && !memrefType.isDynamicDim(dim))
+        return owner->emitOpError()
+               << "requires dependent " << kind
+               << " dimensions to correspond to dynamic memref dims";
+      if (!value)
+        return owner->emitOpError()
+               << "has null dependent " << kind << " dimension value";
+      if (!value.getType().isIndex())
+        return owner->emitOpError() << "requires index-typed dependent " << kind
+                                    << " dimension values";
+    }
+    for (Value value : stored.getStrideValues()) {
+      if (!value)
+        return owner->emitOpError()
+               << "has null dependent " << kind << " stride value";
+      if (!value.getType().isIndex())
+        return owner->emitOpError()
+               << "requires index-typed dependent " << kind << " stride values";
+    }
+  }
+
+  if (!funcBoundaryOwner)
+    return success();
+  auto isEntryBlockArg = [&](Value value) {
+    auto arg = dyn_cast<BlockArgument>(value);
+    return arg && !funcBoundaryOwner.isExternal() &&
+           arg.getOwner() == &funcBoundaryOwner.getBody().front();
+  };
+  for (Value value : stored.getDimValues())
+    if (!isEntryBlockArg(value))
+      return owner->emitOpError()
+             << "requires function boundary dependent " << kind
+             << " dimensions to reference entry block arguments";
+  for (Value value : stored.getStrideValues())
+    if (!isEntryBlockArg(value))
+      return owner->emitOpError()
+             << "requires function boundary dependent " << kind
+             << " strides to reference entry block arguments";
+  return success();
+}
+
+static FailureOr<DependentTypeRefinementInfo> getValueRefinement(Value value);
+
+static LogicalResult
+mapCalleeRefinementValues(func::CallOp call, func::FuncOp callee,
+                          const DependentTypeValueRefinement &stored,
+                          SmallVectorImpl<Value> &dims,
+                          SmallVectorImpl<Value> &strides) {
+  auto mapValue = [&](Value value) -> FailureOr<Value> {
+    auto arg = dyn_cast<BlockArgument>(value);
+    if (!arg || callee.isExternal() ||
+        arg.getOwner() != &callee.getBody().front() ||
+        arg.getArgNumber() >= call.getNumOperands())
+      return failure();
+    return call.getOperand(arg.getArgNumber());
+  };
+
+  dims.clear();
+  dims.reserve(stored.dimValues.size());
+  for (Value dimValue : stored.getDimValues()) {
+    FailureOr<Value> mapped = mapValue(dimValue);
+    if (failed(mapped))
+      return failure();
+    dims.push_back(*mapped);
+  }
+  strides.clear();
+  strides.reserve(stored.strideValues.size());
+  for (Value strideValue : stored.getStrideValues()) {
+    FailureOr<Value> mapped = mapValue(strideValue);
+    if (failed(mapped))
+      return failure();
+    strides.push_back(*mapped);
+  }
+  return success();
+}
+
+static FailureOr<DependentTypeRefinementInfo>
+getCallResultRefinement(OpResult result, func::CallOp call, func::FuncOp callee,
+                        Type type) {
+  const DependentTypeValueRefinement *stored = findBoundaryRefinement(
+      callee.getProperties().dependentTypeResultRefinements,
+      result.getResultNumber());
+  if (!stored)
+    return failure();
+  DependentTypeValueRefinement mapped = *stored;
+  SmallVector<Value> dims, strides;
+  if (failed(mapCalleeRefinementValues(call, callee, *stored, dims, strides)))
+    return failure();
+  mapped.assignDimValues(dims);
+  mapped.assignStrideValues(strides);
+  return decodeStoredRefinementForValueType(type, mapped);
+}
+
+static FailureOr<DependentTypeRefinementInfo>
+getBlockArgumentRefinement(BlockArgument arg, Type type) {
+  Block *block = arg.getOwner();
+  Operation *parentOp = block ? block->getParentOp() : nullptr;
+  auto iface = dyn_cast_or_null<DependentTensorPropertyOpInterface>(parentOp);
+  if (!iface)
+    return failure();
+  unsigned regionNumber = 0;
+  unsigned blockNumber = 0;
+  for (Region &region : parentOp->getRegions()) {
+    if (&region != block->getParent()) {
+      ++regionNumber;
+      continue;
+    }
+    for (Block &candidate : region) {
+      if (&candidate != block) {
+        ++blockNumber;
+        continue;
+      }
+      FailureOr<DependentTypeValueRefinement> stored =
+          iface.getDependentTensorBlockArgumentRefinement(
+              regionNumber, blockNumber, arg.getArgNumber());
+      if (failed(stored))
+        return failure();
+      return decodeStoredRefinementForValueType(type, *stored);
+    }
+  }
+  return failure();
+}
+
+static FailureOr<DependentTypeRefinementInfo> getValueRefinement(Value value) {
+  Type type = value.getType();
+  if (!hasDependentBoundaryType(type))
+    return failure();
+
+  if (auto arg = dyn_cast<BlockArgument>(value))
+    return getBlockArgumentRefinement(arg, type);
+
+  OpResult result = cast<OpResult>(value);
+  Operation *def = result.getOwner();
+  if (auto castOp = dyn_cast<UnrealizedConversionCastOp>(def)) {
+    if (castOp.getInputs().size() != 1)
+      return failure();
+    FailureOr<DependentTypeRefinementInfo> source =
+        getValueRefinement(castOp.getInputs().front());
+    if (failed(source))
+      return failure();
+    source->type = type;
+    return source;
+  }
+  if (auto call = dyn_cast<func::CallOp>(def)) {
+    auto callee = SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(
+        call, call.getCalleeAttr());
+    if (!callee)
+      return failure();
+    return getCallResultRefinement(result, call, callee, type);
+  }
+
+  auto iface = dyn_cast<DependentTensorPropertyOpInterface>(def);
+  if (!iface)
+    return failure();
+  FailureOr<DependentTypeValueRefinement> stored =
+      iface.getDependentTensorResultRefinement(result.getResultNumber());
+  if (failed(stored))
+    return failure();
+  return decodeStoredRefinementForValueType(type, *stored);
+}
+
+static LogicalResult verifyFuncBoundaryRefinements(func::FuncOp func) {
+  llvm::SmallDenseSet<unsigned> seenArgRefinements;
+  for (const DependentTypeValueRefinement &stored :
+       func.getProperties().dependentTypeArgRefinements) {
+    if (stored.valueIndex >= func.getNumArguments())
+      return func.emitOpError()
+             << "has dependent argument refinements out of range";
+    Value argument = func.getArgument(stored.valueIndex);
+    if (!hasDependentBoundaryType(argument.getType()))
+      continue;
+    if (!seenArgRefinements.insert(stored.valueIndex).second)
+      return func.emitOpError()
+             << "has duplicate dependent argument refinements";
+    if (failed(verifyStoredRefinementForValueType(func, "argument",
+                                                  argument.getType(), stored,
+                                                  stored.valueIndex, func)))
+      return failure();
+  }
+
+  llvm::SmallDenseSet<unsigned> seenResultRefinements;
+  for (const DependentTypeValueRefinement &stored :
+       func.getProperties().dependentTypeResultRefinements) {
+    if (stored.valueIndex >= func.getNumResults())
+      return func.emitOpError()
+             << "has dependent result refinements out of range";
+    Type resultType = func.getResultTypes()[stored.valueIndex];
+    if (!hasDependentBoundaryType(resultType))
+      continue;
+    if (!seenResultRefinements.insert(stored.valueIndex).second)
+      return func.emitOpError() << "has duplicate dependent result refinements";
+    if (failed(verifyStoredRefinementForValueType(
+            func, "result", resultType, stored, stored.valueIndex, func)))
+      return failure();
+  }
+  return success();
+}
+
+static LogicalResult verifyReturnDependentRefinements(func::FuncOp func,
+                                                      Operation *returnOp,
+                                                      ValueRange operands) {
+  for (auto [i, operand] : llvm::enumerate(operands)) {
+    const DependentTypeValueRefinement *stored = findBoundaryRefinement(
+        func.getProperties().dependentTypeResultRefinements, i);
+    FailureOr<DependentTypeRefinementInfo> actual = getValueRefinement(operand);
+    if (!stored) {
+      if (succeeded(actual))
+        return returnOp->emitOpError()
+               << "returned value carries dependent refinements not declared "
+                  "in function result properties";
+      continue;
+    }
+    Type resultType = func.getResultTypes()[i];
+    if (!hasDependentBoundaryType(resultType))
+      continue;
+    FailureOr<DependentTypeRefinementInfo> expected =
+        decodeStoredRefinementForValueType(resultType, *stored);
+    if (failed(actual) || failed(expected))
+      return returnOp->emitOpError()
+             << "failed to resolve dependent result refinements";
+    if (!haveEqualRefinements(*actual, *expected))
+      return returnOp->emitOpError()
+             << "returned value does not match function result dependency "
+                "metadata";
+  }
+  return success();
+}
+
+static LogicalResult verifyCallDependentRefinements(func::CallOp call,
+                                                    func::FuncOp callee) {
+  for (auto [i, operand] : llvm::enumerate(call.getOperands())) {
+    const DependentTypeValueRefinement *stored = findBoundaryRefinement(
+        callee.getProperties().dependentTypeArgRefinements, i);
+    FailureOr<DependentTypeRefinementInfo> actual = getValueRefinement(operand);
+    if (!stored) {
+      if (succeeded(actual))
+        return call.emitOpError()
+               << "operand #" << i
+               << " carries dependent refinements not declared by the callee";
+      continue;
+    }
+    Type argType = callee.getArgumentTypes()[i];
+    if (!hasDependentBoundaryType(argType))
+      continue;
+
+    DependentTypeValueRefinement mapped = *stored;
+    SmallVector<Value> dims, strides;
+    if (failed(mapCalleeRefinementValues(call, callee, *stored, dims, strides)))
+      return call.emitOpError()
+             << "failed to map callee dependent refinements for operand #" << i;
+    mapped.assignDimValues(dims);
+    mapped.assignStrideValues(strides);
+    FailureOr<DependentTypeRefinementInfo> expected =
+        decodeStoredRefinementForValueType(argType, mapped);
+    if (failed(actual) || failed(expected))
+      return call.emitOpError()
+             << "failed to resolve dependent refinements for operand #" << i;
+    if (!haveEqualRefinements(*actual, *expected))
+      return call.emitOpError() << "operand #" << i
+                                << " does not match callee dependency metadata";
+  }
+
+  for (OpResult result : call.getResults()) {
+    const DependentTypeValueRefinement *stored = findBoundaryRefinement(
+        callee.getProperties().dependentTypeResultRefinements,
+        result.getResultNumber());
+    if (!stored || !hasDependentBoundaryType(result.getType()))
+      continue;
+    if (failed(getValueRefinement(result)))
+      return call.emitOpError()
+             << "failed to resolve dependent refinements for result #"
+             << result.getResultNumber();
+  }
+  return success();
+}
 } // namespace
 
 //===----------------------------------------------------------------------===//
@@ -443,7 +839,7 @@ LogicalResult CallOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
       return diag;
     }
 
-  return success();
+  return verifyCallDependentRefinements(*this, fn);
 }
 
 FunctionType CallOp::getCalleeType() {
@@ -878,10 +1274,16 @@ FuncOp::getDependentTensorBlockArgumentRefinement(unsigned regionNumber,
       getProperties().dependentTypeArgRefinements, argumentNumber);
   if (!refinement)
     return failure();
-  if (refinement->hasExplicitLayout ||
-      !isa<RankedTensorType>(getArgument(argumentNumber).getType()))
-    return failure();
-  return *refinement;
+  Type type = getArgument(argumentNumber).getType();
+  if (auto tensorType = dyn_cast<RankedTensorType>(type)) {
+    if (refinement->hasExplicitLayout || !refinement->strideValues.empty())
+      return failure();
+    (void)tensorType;
+    return *refinement;
+  }
+  if (isa<MemRefType>(type))
+    return *refinement;
+  return failure();
 }
 
 /// Clone the internal blocks from this function into dest and all attributes
@@ -959,6 +1361,9 @@ FuncOp FuncOp::clone() {
 //===----------------------------------------------------------------------===//
 
 LogicalResult FuncOp::verifyRegions() {
+  if (failed(verifyFuncBoundaryRefinements(*this)))
+    return failure();
+
   // External declarations have no body to check.
   if (isDeclaration())
     return success();
@@ -979,14 +1384,19 @@ LogicalResult FuncOp::verifyRegions() {
              << operands.size() << " operands, but enclosing function (@"
              << getName() << ") returns " << resultTypes.size();
 
+    SmallVector<Value> returnValues;
+    returnValues.reserve(operands.size());
     for (auto [i, opType] : llvm::enumerate(llvm::zip(operands, resultTypes))) {
       auto [operand, resTy] = opType;
+      returnValues.push_back(operand.get());
       if (operand.get().getType() != resTy)
         return returnOp->emitError() << "type of return operand " << i << " ("
                                      << operand.get().getType()
                                      << ") doesn't match function result type ("
                                      << resTy << ") in function @" << getName();
     }
+    if (failed(verifyReturnDependentRefinements(*this, returnOp, returnValues)))
+      return failure();
   }
 
   return success();

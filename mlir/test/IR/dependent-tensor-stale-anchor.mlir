@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -verify-dependent-tensor-refinements | FileCheck %s
+// RUN: mlir-opt %s | FileCheck %s
 
 func.func @stale_anchor(%x : index) {
   %t = dependent_tensor.make () #tensor<[%x], f32> : tensor<?xf32>

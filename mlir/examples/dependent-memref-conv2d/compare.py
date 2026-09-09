@@ -8,8 +8,8 @@ from pathlib import Path
 
 BASELINE_PIPELINE = "builtin.module(one-shot-bufferize{bufferize-function-boundaries},func.func(convert-scf-to-cf,convert-arith-to-llvm),finalize-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)"
 MEMREF_PIPELINE = "builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),finalize-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)"
-DEPENDENT_PIPELINE = "builtin.module(convert-dependent-tensor-to-dependent-memref,func.func(convert-scf-to-cf,convert-arith-to-llvm),lower-dependent-memref-to-llvm,reconcile-unrealized-casts)"
-DIRECT_DEPENDENT_PIPELINE = "builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),lower-dependent-memref-to-llvm,reconcile-unrealized-casts)"
+DEPENDENT_PIPELINE = "builtin.module(convert-dependent-tensor-to-dependent-memref,lower-dependent-memref-to-llvm,func.func(convert-scf-to-cf,convert-arith-to-llvm),reconcile-unrealized-casts)"
+DIRECT_DEPENDENT_PIPELINE = "builtin.module(lower-dependent-memref-to-llvm,func.func(convert-scf-to-cf,convert-arith-to-llvm),reconcile-unrealized-casts)"
 
 
 def run(command, **kwargs):

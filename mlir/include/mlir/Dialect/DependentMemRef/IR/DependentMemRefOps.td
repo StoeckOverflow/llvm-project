@@ -20,7 +20,10 @@ class DependentMemRef_Op<string mnemonic, list<Trait> traits = []>
 
 def DependentMemRef_AllocOp : DependentMemRef_Op<"alloc", [
     DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
-      ["walkPropertySSAUses"]>]> {
+      ["walkPropertySSAUses"]>,
+    DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
+      ["getDependentTensorResultRefinement",
+       "walkDependentTensorPropertyUses"]>]> {
   let summary = "allocate a dependent memref";
   let arguments = (ins DependentTypeValueRefinementProp:$result_refinement);
   let results = (outs AnyMemRef:$memref);
@@ -36,7 +39,10 @@ def DependentMemRef_DeallocOp : DependentMemRef_Op<"dealloc"> {
 
 def DependentMemRef_ReinterpretCastOp : DependentMemRef_Op<"reinterpret_cast", [
     DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
-      ["walkPropertySSAUses"]>]> {
+      ["walkPropertySSAUses"]>,
+    DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
+      ["getDependentTensorResultRefinement",
+       "walkDependentTensorPropertyUses"]>]> {
   let summary = "attach dependent memref shape/layout metadata to a carrier";
   let arguments = (ins AnyMemRef:$source,
                        DependentTypeValueRefinementProp:$result_refinement);
@@ -47,7 +53,10 @@ def DependentMemRef_ReinterpretCastOp : DependentMemRef_Op<"reinterpret_cast", [
 
 def DependentMemRef_CastOp : DependentMemRef_Op<"cast", [
     DeclareOpInterfaceMethods<PropertySSAUseOpInterface,
-      ["walkPropertySSAUses"]>]> {
+      ["walkPropertySSAUses"]>,
+    DeclareOpInterfaceMethods<DependentTensorPropertyOpInterface,
+      ["getDependentTensorResultRefinement",
+       "walkDependentTensorPropertyUses"]>]> {
   let summary = "refinement-preserving dependent memref cast";
   let arguments = (ins AnyMemRef:$source,
                        DependentTypeValueRefinementProp:$result_refinement);
