@@ -1,0 +1,11 @@
+{
+  "baseline_mlir_opt": "/home/stoeckoverflow/llvm-project-main/build_mlir_baseline/bin/mlir-opt",
+  "baseline_pipeline": "builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),finalize-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)",
+  "dependent_mlir_opt": "/home/stoeckoverflow/llvm-project/build/bin/mlir-opt",
+  "dependent_pipeline": "builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),lower-dependent-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)",
+  "generated": "/home/stoeckoverflow/llvm-project/mlir/examples/dependent-refinement-verification/artifacts/archive/2026-09-09_18-09/generated_kernels",
+  "repetitions": 1000,
+  "seed": 0,
+  "single_binary_smoke": false,
+  "warmups": 50
+}

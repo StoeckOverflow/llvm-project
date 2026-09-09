@@ -1,0 +1,22 @@
+$ /home/stoeckoverflow/llvm-project-main/build_mlir_baseline/bin/mlir-opt /home/stoeckoverflow/llvm-project/mlir/examples/dependent-refinement-verification/artifacts/archive/2026-09-09_18-09/generated_kernels/baseline-memref-contraction-rank-32.mlir '-pass-pipeline=builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),finalize-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)' -mlir-disable-threading -mlir-timing -mlir-timing-display=list -o /dev/null
+
+===-------------------------------------------------------------------------===
+                         ... Execution time report ...
+===-------------------------------------------------------------------------===
+  Total Execution Time: 0.0143 seconds
+
+  ----Wall Time----  ----Name----
+    0.0143 (100.0%)  root
+    0.0024 ( 16.6%)  Pipeline Collection : ['func.func']
+    0.0024 ( 16.4%)  'func.func' Pipeline
+    0.0023 ( 15.9%)  Output
+    0.0022 ( 15.1%)  Parser
+    0.0020 ( 13.8%)  FinalizeMemRefToLLVMConversionPass
+    0.0019 ( 13.6%)  ConvertFuncToLLVMPass
+    0.0018 ( 12.7%)  ConvertControlFlowToLLVMPass
+    0.0015 ( 10.7%)  ArithToLLVMConversionPass
+    0.0010 (  7.0%)  ReconcileUnrealizedCastsPass
+    0.0008 (  5.7%)  SCFToControlFlowPass
+    0.0000 (  0.3%)  (A) DataLayoutAnalysis
+    0.0008 (  5.3%)  Rest
+    0.0143 (100.0%)  Total
