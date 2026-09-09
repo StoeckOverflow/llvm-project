@@ -8,6 +8,9 @@ from pathlib import Path
 
 
 BASELINE_PIPELINE = "builtin.module(one-shot-bufferize{bufferize-function-boundaries},func.func(convert-scf-to-cf,convert-arith-to-llvm),finalize-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)"
+DEPENDENT_PIPELINE = "builtin.module(convert-dependent-tensor-to-dependent-memref,func.func(convert-scf-to-cf,convert-arith-to-llvm),lower-dependent-memref-to-llvm,reconcile-unrealized-casts)"
+MEMREF_PIPELINE = "builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),finalize-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)"
+DIRECT_DEPENDENT_PIPELINE = "builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),lower-dependent-memref-to-llvm,reconcile-unrealized-casts)"
 
 
 def run(command):
@@ -190,9 +193,7 @@ def main():
         [
             str(mlir_opt),
             str(script_dir / "dependent-matmul.mlir"),
-            "-convert-dependent-tensor-to-dependent-memref",
-            "-lower-dependent-memref-to-llvm",
-            "-reconcile-unrealized-casts",
+            f"-pass-pipeline={DEPENDENT_PIPELINE}",
         ],
         out_dir / "dependent.mlir-timing.txt",
     )
@@ -231,7 +232,7 @@ def main():
         [
             str(mlir_opt),
             str(script_dir / "baseline-strided-matmul.mlir"),
-            "-pass-pipeline=builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),finalize-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)",
+            f"-pass-pipeline={MEMREF_PIPELINE}",
         ],
         out_dir / "baseline-strided" / "baseline_matmul_strided.mlir-timing.txt",
     )
@@ -239,8 +240,7 @@ def main():
         [
             str(mlir_opt),
             str(script_dir / "dependent-strided-matmul.mlir"),
-            "-lower-dependent-memref-to-llvm",
-            "-reconcile-unrealized-casts",
+            f"-pass-pipeline={DIRECT_DEPENDENT_PIPELINE}",
         ],
         out_dir / "direct-strided" / "dependent_matmul_strided.mlir-timing.txt",
     )
