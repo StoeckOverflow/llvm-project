@@ -16,6 +16,28 @@ def run(command, **kwargs):
     return subprocess.run(command, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
 
 
+def default_baseline_mlir_opt(repo_root):
+    worktree_build = repo_root.parent / "llvm-project-main" / "build_mlir_baseline" / "bin" / "mlir-opt"
+    if worktree_build.exists():
+        return worktree_build
+    return repo_root / "build_mlir_baseline" / "bin" / "mlir-opt"
+
+
+def default_dependent_mlir_opt(repo_root):
+    return repo_root / "build" / "bin" / "mlir-opt"
+
+
+def require_tool(label, path):
+    if not path.exists():
+        raise FileNotFoundError(f"{label} does not exist: {path}")
+
+
+def mlir_opt_for_route(name, baseline_mlir_opt, dependent_mlir_opt):
+    if name in {"baseline", "baseline_strided"}:
+        return baseline_mlir_opt
+    return dependent_mlir_opt
+
+
 def extract_mlir_timing(stderr):
     try:
         timing = json.loads(stderr)
@@ -131,11 +153,21 @@ def emit_route(mlir_opt, mlir_translate, llvm_opt, source, out_dir, stem, pipeli
 def main():
     parser = argparse.ArgumentParser(description="Build Conv2D-shaped structural LLVM lowering artifacts.")
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--mlir-opt", type=Path, default=None,
+                        help="Use one mlir-opt binary for all routes; intended for smoke checks only.")
+    parser.add_argument("--baseline-mlir-opt", type=Path, default=None,
+                        help="Upstream/main mlir-opt used for baseline routes.")
+    parser.add_argument("--dependent-mlir-opt", type=Path, default=None,
+                        help="Prototype mlir-opt used for dependent routes.")
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
     repo_root = Path(run(["git", "-C", str(script_dir), "rev-parse", "--show-toplevel"]).stdout.strip())
-    mlir_opt = Path(os.environ.get("MLIR_OPT", repo_root / "build/bin/mlir-opt"))
+    shared_mlir_opt = args.mlir_opt.resolve() if args.mlir_opt else None
+    baseline_mlir_opt = (args.baseline_mlir_opt or shared_mlir_opt or default_baseline_mlir_opt(repo_root)).resolve()
+    dependent_mlir_opt = (args.dependent_mlir_opt or shared_mlir_opt or default_dependent_mlir_opt(repo_root)).resolve()
+    require_tool("baseline mlir-opt", baseline_mlir_opt)
+    require_tool("dependent mlir-opt", dependent_mlir_opt)
     mlir_translate = Path(os.environ.get("MLIR_TRANSLATE", repo_root / "build/bin/mlir-translate"))
     llvm_opt = Path(os.environ.get("LLVM_OPT", repo_root / "build/bin/opt"))
     out_dir = args.out or script_dir / "artifacts"
@@ -148,16 +180,26 @@ def main():
         "direct_strided": ("dependent-strided-conv2d.mlir", "dependent_conv2d_strided", DIRECT_DEPENDENT_PIPELINE),
     }
 
-    result = {"routes": {}}
+    result = {
+        "toolchains": {
+            "single_binary_smoke": shared_mlir_opt is not None,
+            "baseline_mlir_opt": str(baseline_mlir_opt),
+            "dependent_mlir_opt": str(dependent_mlir_opt),
+        },
+        "routes": {},
+    }
     for name, (source_name, stem, pipeline) in routes.items():
         route_dir = out_dir / name.replace("_", "-")
         timing_path = route_dir / f"{stem}.mlir-timing.txt"
         source = script_dir / source_name
+        route_mlir_opt = mlir_opt_for_route(name, baseline_mlir_opt, dependent_mlir_opt)
         if pipeline.startswith("-"):
-            timing_cmd = [str(mlir_opt), str(source), *pipeline.split()]
+            timing_cmd = [str(route_mlir_opt), str(source), *pipeline.split()]
         else:
-            timing_cmd = [str(mlir_opt), str(source), f"-pass-pipeline={pipeline}"]
-        metrics = emit_route(mlir_opt, mlir_translate, llvm_opt, source, route_dir, stem, pipeline)
+            timing_cmd = [str(route_mlir_opt), str(source), f"-pass-pipeline={pipeline}"]
+        metrics = emit_route(route_mlir_opt, mlir_translate, llvm_opt, source, route_dir, stem, pipeline)
+        metrics["mlir_opt_path"] = str(route_mlir_opt)
+        metrics["mlir_pipeline"] = pipeline
         metrics["mlir_opt"] = measure_mlir_opt(timing_cmd, timing_path)
         result["routes"][name] = metrics
 

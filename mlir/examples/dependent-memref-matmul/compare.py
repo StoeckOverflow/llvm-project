@@ -13,11 +13,38 @@ MEMREF_PIPELINE = "builtin.module(func.func(convert-scf-to-cf,convert-arith-to-l
 DIRECT_DEPENDENT_PIPELINE = "builtin.module(lower-dependent-memref-to-llvm,func.func(convert-scf-to-cf,convert-arith-to-llvm),reconcile-unrealized-casts)"
 
 
-def run(command):
+def run(command, **kwargs):
     result = subprocess.run(
-        command, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        command, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        **kwargs,
     )
     return result.stdout
+
+
+def repo_root_from(script_dir):
+    return Path(run(["git", "-C", str(script_dir), "rev-parse", "--show-toplevel"]).strip())
+
+
+def default_baseline_mlir_opt(repo_root):
+    worktree_build = repo_root.parent / "llvm-project-main" / "build_mlir_baseline" / "bin" / "mlir-opt"
+    if worktree_build.exists():
+        return worktree_build
+    return repo_root / "build_mlir_baseline" / "bin" / "mlir-opt"
+
+
+def default_dependent_mlir_opt(repo_root):
+    return repo_root / "build" / "bin" / "mlir-opt"
+
+
+def route_env(mlir_opt):
+    env = os.environ.copy()
+    env["MLIR_OPT"] = str(mlir_opt)
+    return env
+
+
+def require_tool(label, path):
+    if not path.exists():
+        raise FileNotFoundError(f"{label} does not exist: {path}")
 
 
 def extract_mlir_timing(stderr):
@@ -141,13 +168,21 @@ def main():
     parser.add_argument("--repeats", type=int, default=10)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--skip-run", action="store_true")
+    parser.add_argument("--mlir-opt", type=Path, default=None,
+                        help="Use one mlir-opt binary for all routes; intended for smoke checks only.")
+    parser.add_argument("--baseline-mlir-opt", type=Path, default=None,
+                        help="Upstream/main mlir-opt used for baseline routes.")
+    parser.add_argument("--dependent-mlir-opt", type=Path, default=None,
+                        help="Prototype mlir-opt used for dependent routes.")
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
-    repo_root = Path(
-        run(["git", "-C", str(script_dir), "rev-parse", "--show-toplevel"]).strip()
-    )
-    mlir_opt = Path(os.environ.get("MLIR_OPT", repo_root / "build/bin/mlir-opt"))
+    repo_root = repo_root_from(script_dir)
+    shared_mlir_opt = args.mlir_opt.resolve() if args.mlir_opt else None
+    baseline_mlir_opt = (args.baseline_mlir_opt or shared_mlir_opt or default_baseline_mlir_opt(repo_root)).resolve()
+    dependent_mlir_opt = (args.dependent_mlir_opt or shared_mlir_opt or default_dependent_mlir_opt(repo_root)).resolve()
+    require_tool("baseline mlir-opt", baseline_mlir_opt)
+    require_tool("dependent mlir-opt", dependent_mlir_opt)
     llvm_opt = Path(os.environ.get("LLVM_OPT", repo_root / "build/bin/opt"))
     out_dir = args.out or script_dir / "artifacts"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -169,11 +204,16 @@ def main():
     if args.skip_run:
         common.append("--build-only")
 
-    dependent_output = run([str(script_dir / "run-dependent.sh"), *common])
-    baseline_output = run([str(script_dir / "run-baseline.sh"), *common])
+    dependent_output = run([str(script_dir / "run-dependent.sh"), *common], env=route_env(dependent_mlir_opt))
+    baseline_output = run([str(script_dir / "run-baseline.sh"), *common], env=route_env(baseline_mlir_opt))
 
     result = {
         "problem": {"n": args.n, "k": k, "m": m, "repeats": args.repeats},
+        "toolchains": {
+            "single_binary_smoke": shared_mlir_opt is not None,
+            "baseline_mlir_opt": str(baseline_mlir_opt),
+            "dependent_mlir_opt": str(dependent_mlir_opt),
+        },
         "dependent": collect_ir_metrics("dependent", out_dir),
         "baseline": collect_ir_metrics("baseline", out_dir),
         "structural_artifacts": {
@@ -189,17 +229,21 @@ def main():
             ),
         },
     }
+    result["dependent"]["mlir_opt_path"] = str(dependent_mlir_opt)
+    result["dependent"]["mlir_pipeline"] = DEPENDENT_PIPELINE
     result["dependent"]["mlir_opt"] = measure_mlir_opt(
         [
-            str(mlir_opt),
+            str(dependent_mlir_opt),
             str(script_dir / "dependent-matmul.mlir"),
             f"-pass-pipeline={DEPENDENT_PIPELINE}",
         ],
         out_dir / "dependent.mlir-timing.txt",
     )
+    result["baseline"]["mlir_opt_path"] = str(baseline_mlir_opt)
+    result["baseline"]["mlir_pipeline"] = BASELINE_PIPELINE
     result["baseline"]["mlir_opt"] = measure_mlir_opt(
         [
-            str(mlir_opt),
+            str(baseline_mlir_opt),
             str(script_dir / "baseline-tensor-matmul.mlir"),
             f"-pass-pipeline={BASELINE_PIPELINE}",
         ],
@@ -228,17 +272,21 @@ def main():
         out_dir / "baseline.opt-timing.txt",
     )
 
+    result["structural_artifacts"]["baseline_strided"]["mlir_opt_path"] = str(baseline_mlir_opt)
+    result["structural_artifacts"]["baseline_strided"]["mlir_pipeline"] = MEMREF_PIPELINE
     result["structural_artifacts"]["baseline_strided"]["mlir_opt"] = measure_mlir_opt(
         [
-            str(mlir_opt),
+            str(baseline_mlir_opt),
             str(script_dir / "baseline-strided-matmul.mlir"),
             f"-pass-pipeline={MEMREF_PIPELINE}",
         ],
         out_dir / "baseline-strided" / "baseline_matmul_strided.mlir-timing.txt",
     )
+    result["structural_artifacts"]["direct_strided"]["mlir_opt_path"] = str(dependent_mlir_opt)
+    result["structural_artifacts"]["direct_strided"]["mlir_pipeline"] = DIRECT_DEPENDENT_PIPELINE
     result["structural_artifacts"]["direct_strided"]["mlir_opt"] = measure_mlir_opt(
         [
-            str(mlir_opt),
+            str(dependent_mlir_opt),
             str(script_dir / "dependent-strided-matmul.mlir"),
             f"-pass-pipeline={DIRECT_DEPENDENT_PIPELINE}",
         ],

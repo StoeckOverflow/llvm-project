@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import csv
+import json
 import os
 import random
 import re
@@ -251,6 +252,22 @@ def main():
 
     rows = read_manifest(args.generated / "manifest.csv")
     args.out.mkdir(parents=True, exist_ok=True)
+    run_config = {
+        "single_binary_smoke": shared_mlir_opt is not None,
+        "baseline_mlir_opt": str(args.baseline_mlir_opt),
+        "dependent_mlir_opt": str(args.dependent_mlir_opt),
+        "baseline_pipeline": BASELINE_PIPELINE,
+        "dependent_pipeline": DEPENDENT_PIPELINE,
+        "generated": str(args.generated),
+        "repetitions": args.repetitions,
+        "warmups": args.warmups,
+        "seed": args.seed,
+    }
+    (args.out / "run_config.json").write_text(
+        json.dumps(run_config, indent=2, sort_keys=True) + "\n"
+    )
+    if shared_mlir_opt is not None:
+        print("warning: --mlir-opt uses one binary for both routes; use split flags for paper runs")
 
     rng = random.Random(args.seed)
     warmup_jobs = rows * args.warmups

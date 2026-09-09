@@ -15,17 +15,24 @@ The baseline path is:
 tensor -> one-shot-bufferize -> memref -> LLVM dialect -> LLVM IR -> opt -O3
 ```
 
-Run the comparison from the repository root:
+Run the comparison from the repository root. Baseline routes should use the
+clean upstream/main worktree build; dependent routes should use this branch's
+prototype build:
 
 ```sh
-mlir/examples/dependent-memref-matmul/compare.py --n 128 --k 128 --m 128 --repeats 10
+mlir/examples/dependent-memref-matmul/compare.py \
+  --n 128 --k 128 --m 128 --repeats 10 \
+  --baseline-mlir-opt ../llvm-project-main/build_mlir_baseline/bin/mlir-opt \
+  --dependent-mlir-opt build/bin/mlir-opt
 ```
 
 
 For a benchmark sweep, use:
 
 ```sh
-mlir/examples/dependent-memref-matmul/run-benchmarks.py
+mlir/examples/dependent-memref-matmul/run-benchmarks.py \
+  --baseline-mlir-opt ../llvm-project-main/build_mlir_baseline/bin/mlir-opt \
+  --dependent-mlir-opt build/bin/mlir-opt
 ```
 
 The benchmark runner defaults to 30 repeats for each square size:
@@ -39,7 +46,9 @@ The benchmark runner defaults to 30 repeats for each square size:
 For paper/artifact performance numbers, use the larger sweep:
 
 ```sh
-mlir/examples/dependent-memref-matmul/run-benchmarks.py --paper
+mlir/examples/dependent-memref-matmul/run-benchmarks.py --paper \
+  --baseline-mlir-opt ../llvm-project-main/build_mlir_baseline/bin/mlir-opt \
+  --dependent-mlir-opt build/bin/mlir-opt
 ```
 
 `--paper` runs 30 repeats for:
@@ -119,7 +128,8 @@ tar -czf dependent-memref-matmul-benchmarks.tar.gz \
 ```
 
 The scripts save generated artifacts under
-`mlir/examples/dependent-memref-matmul/artifacts/`:
+`mlir/examples/dependent-memref-matmul/artifacts/`. `results.json` also records
+which `mlir-opt` binary and pass pipeline was used for each route:
 
 ```text
 dependent.llvm.mlir

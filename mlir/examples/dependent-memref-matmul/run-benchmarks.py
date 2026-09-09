@@ -230,6 +230,24 @@ def main():
         action="store_true",
         help="Collect code-size and compile-time metrics without executing kernels.",
     )
+    parser.add_argument(
+        "--mlir-opt",
+        type=Path,
+        default=None,
+        help="Use one mlir-opt binary for all routes; intended for smoke checks only.",
+    )
+    parser.add_argument(
+        "--baseline-mlir-opt",
+        type=Path,
+        default=None,
+        help="Upstream/main mlir-opt used for baseline routes.",
+    )
+    parser.add_argument(
+        "--dependent-mlir-opt",
+        type=Path,
+        default=None,
+        help="Prototype mlir-opt used for dependent routes.",
+    )
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
@@ -257,6 +275,12 @@ def main():
         ]
         if args.skip_run:
             command.append("--skip-run")
+        if args.mlir_opt:
+            command.extend(["--mlir-opt", str(args.mlir_opt)])
+        if args.baseline_mlir_opt:
+            command.extend(["--baseline-mlir-opt", str(args.baseline_mlir_opt)])
+        if args.dependent_mlir_opt:
+            command.extend(["--dependent-mlir-opt", str(args.dependent_mlir_opt)])
         run(command)
         result = read_json(size_dir / "results.json")
         runs.append(summarize_size(size, result))
@@ -267,6 +291,7 @@ def main():
         "sizes": sizes,
         "paper": args.paper,
         "skip_run": args.skip_run,
+        "toolchains": read_json(out_dir / f"size-{sizes[0]}" / "results.json").get("toolchains", {}) if sizes else {},
         "runs": runs,
     }
     summary_json = out_dir / "summary.json"

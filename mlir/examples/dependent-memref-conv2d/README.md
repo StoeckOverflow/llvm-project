@@ -21,16 +21,21 @@ direct-strided
   ranked memref carriers + #memref refinements -> descriptor-free LLVM
 ```
 
-Run from the repository root:
+Run from the repository root. Baseline routes should use the clean
+upstream/main worktree build; dependent routes should use this branch's
+prototype build:
 
 ```sh
 mlir/examples/dependent-memref-conv2d/compare.py \
-  --out mlir/examples/dependent-memref-conv2d/artifacts/archive/2026-09-08_timing-instrumentation
+  --out mlir/examples/dependent-memref-conv2d/artifacts/archive/2026-09-08_timing-instrumentation \
+  --baseline-mlir-opt ../llvm-project-main/build_mlir_baseline/bin/mlir-opt \
+  --dependent-mlir-opt build/bin/mlir-opt
 ```
 
 The primary structural metrics are generated LLVM-dialect MLIR line count,
 `llvm.insertvalue` count, and `llvm.extractvalue` count. Each route also records
-compile-time measurements:
+compile-time measurements. `results.json` records the `mlir-opt` binary and
+pass pipeline used for each route:
 
 ```text
 mlir_opt.wall_ms                  process wall time around mlir-opt
