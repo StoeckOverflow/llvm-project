@@ -20,6 +20,18 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def default_baseline_mlir_opt() -> Path:
+    worktree_build = (repo_root().parent / "llvm-project-main" /
+                      "build_mlir_baseline" / "bin" / "mlir-opt")
+    if worktree_build.exists():
+        return worktree_build
+    return repo_root() / "build_mlir_baseline" / "bin" / "mlir-opt"
+
+
+def default_dependent_mlir_opt() -> Path:
+    return repo_root() / "build" / "bin" / "mlir-opt"
+
+
 def parse_timing(report: str):
     times = {}
     total = None
@@ -70,6 +82,12 @@ def pipeline_for_route(route: str) -> str:
     if route == "baseline_memref":
         return BASELINE_PIPELINE
     return DEPENDENT_PIPELINE
+
+
+def mlir_opt_for_route(args, route: str) -> Path:
+    if route == "baseline_memref":
+        return args.baseline_mlir_opt
+    return args.dependent_mlir_opt
 
 
 def mlir_opt_cmd(mlir_opt: Path, input_path: Path, output_path: Path,
@@ -131,8 +149,9 @@ def write_timing_output(mlir_opt: Path, row, out: Path):
     return timing_path
 
 
-def run_measured(mlir_opt: Path, row, repetition: int, out: Path):
+def run_measured(args, row, repetition: int, out: Path):
     route = row["route"]
+    mlir_opt = mlir_opt_for_route(args, route)
     metrics = run_mlir_opt(mlir_opt, Path(row["path"]), Path(os.devnull),
                            pipeline_for_route(route))
     return {
@@ -204,14 +223,31 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--generated", type=Path, default=Path("artifacts/runs/latest/generated_kernels"))
     ap.add_argument("--out", type=Path, default=Path("artifacts/runs/latest"))
-    ap.add_argument("--mlir-opt", type=Path, default=repo_root() / "build/bin/mlir-opt")
+    ap.add_argument("--mlir-opt", type=Path, default=None,
+                    help="Use one mlir-opt binary for both routes.")
+    ap.add_argument("--baseline-mlir-opt", type=Path, default=None,
+                    help="Upstream/main mlir-opt used for baseline_memref.")
+    ap.add_argument("--dependent-mlir-opt", type=Path, default=None,
+                    help="Prototype mlir-opt used for dependent memref.")
     ap.add_argument("--repetitions", type=int, default=1000)
     ap.add_argument("--warmups", type=int, default=50)
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     args.generated = args.generated.resolve()
     args.out = args.out.resolve()
-    args.mlir_opt = args.mlir_opt.resolve()
+    shared_mlir_opt = args.mlir_opt.resolve() if args.mlir_opt else None
+    args.baseline_mlir_opt = (
+        args.baseline_mlir_opt or shared_mlir_opt or default_baseline_mlir_opt()
+    ).resolve()
+    args.dependent_mlir_opt = (
+        args.dependent_mlir_opt or shared_mlir_opt or default_dependent_mlir_opt()
+    ).resolve()
+    for label, path in [
+        ("baseline mlir-opt", args.baseline_mlir_opt),
+        ("dependent mlir-opt", args.dependent_mlir_opt),
+    ]:
+        if not path.exists():
+            raise FileNotFoundError(f"{label} does not exist: {path}")
 
     rows = read_manifest(args.generated / "manifest.csv")
     args.out.mkdir(parents=True, exist_ok=True)
@@ -222,8 +258,8 @@ def main():
     for index, row in enumerate(warmup_jobs, 1):
         if index == 1 or index % 100 == 0 or index == len(warmup_jobs):
             print(f"warmup {index}/{len(warmup_jobs)}")
-        run_mlir_opt(args.mlir_opt, Path(row["path"]), Path(os.devnull),
-                     pipeline_for_route(row["route"]))
+        run_mlir_opt(mlir_opt_for_route(args, row["route"]), Path(row["path"]),
+                     Path(os.devnull), pipeline_for_route(row["route"]))
 
     jobs = [(row, rep) for row in rows for rep in range(args.repetitions)]
     rng.shuffle(jobs)
@@ -231,11 +267,12 @@ def main():
     for index, (row, rep) in enumerate(jobs, 1):
         if index == 1 or index % 250 == 0 or index == len(jobs):
             print(f"measurement {index}/{len(jobs)}")
-        all_rows.append(run_measured(args.mlir_opt, row, rep, args.out))
+        all_rows.append(run_measured(args, row, rep, args.out))
 
     for row in rows:
-        write_lowered_output(args.mlir_opt, row, args.out)
-        write_timing_output(args.mlir_opt, row, args.out)
+        route_mlir_opt = mlir_opt_for_route(args, row["route"])
+        write_lowered_output(route_mlir_opt, row, args.out)
+        write_timing_output(route_mlir_opt, row, args.out)
 
     results_path = args.out / "results.csv"
     with results_path.open("w", newline="") as f:

@@ -30,7 +30,26 @@ as the x-axis dimension count.
 
 ## Commands
 
-Run from `mlir/examples/dependent-refinement-verification`:
+Run from `mlir/examples/dependent-refinement-verification`. The baseline route
+should use an upstream/main `mlir-opt`; the dependent route should use the
+prototype `mlir-opt` from this branch. A convenient local setup is:
+
+```bash
+git worktree add ../../../../llvm-project-main main
+cmake -S ../../../../llvm-project-main/llvm \
+  -B ../../../../llvm-project-main/build_mlir_baseline \
+  -G Ninja \
+  -DLLVM_ENABLE_PROJECTS='mlir;clang' \
+  -DLLVM_TARGETS_TO_BUILD=Native \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DLLVM_ENABLE_ASSERTIONS=ON \
+  -DLLVM_CCACHE_BUILD=ON \
+  -DLLVM_BUILD_EXAMPLES=OFF \
+  -DMLIR_ENABLE_BINDINGS_PYTHON=0
+ninja -C ../../../../llvm-project-main/build_mlir_baseline mlir-opt
+```
+
+Then run the benchmark:
 
 ```bash
 python3 generate.py \
@@ -40,6 +59,8 @@ python3 generate.py \
 python3 run-benchmarks.py \
   --generated artifacts/runs/latest/generated_kernels \
   --out artifacts/runs/latest \
+  --baseline-mlir-opt ../../../../llvm-project-main/build_mlir_baseline/bin/mlir-opt \
+  --dependent-mlir-opt ../../../build/bin/mlir-opt \
   --warmups 50 \
   --repetitions 1000
 
@@ -73,7 +94,7 @@ it does not archive one timing file per repetition.
 To manually inspect MLIR's raw timing report for a baseline input, run:
 
 ```bash
-build/bin/mlir-opt <baseline-input.mlir> \
+../../../../llvm-project-main/build_mlir_baseline/bin/mlir-opt <baseline-input.mlir> \
   -pass-pipeline='builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),finalize-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)' \
   -mlir-disable-threading \
   -mlir-timing \
@@ -84,7 +105,7 @@ build/bin/mlir-opt <baseline-input.mlir> \
 For a dependent input, run:
 
 ```bash
-build/bin/mlir-opt <dependent-input.mlir> \
+../../../build/bin/mlir-opt <dependent-input.mlir> \
   -pass-pipeline='builtin.module(verify-dependent-memref-refinements,func.func(convert-scf-to-cf,convert-arith-to-llvm),lower-dependent-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)' \
   -mlir-disable-threading \
   -mlir-timing \
@@ -108,7 +129,8 @@ median_rest_ms
 The plotted value is `median_total_ms`. One lowered LLVM-dialect MLIR output is
 also written per generated input under `lowered_kernels/` for artifact
 inspection. One representative raw MLIR timing report per generated input is
-written under `mlir_timing_outputs/`.
+written under `mlir_timing_outputs/`; each file starts with the exact command,
+including the route-specific `mlir-opt` binary and full pass pipeline.
 
 ## Archive Layout
 
@@ -128,6 +150,8 @@ python3 generate.py \
 python3 run-benchmarks.py \
   --generated artifacts/archive/2026-09-09_full-mlir-lowering-compile-time/generated_kernels \
   --out artifacts/archive/2026-09-09_full-mlir-lowering-compile-time \
+  --baseline-mlir-opt ../../../../llvm-project-main/build_mlir_baseline/bin/mlir-opt \
+  --dependent-mlir-opt ../../../build/bin/mlir-opt \
   --warmups 50 \
   --repetitions 1000
 
