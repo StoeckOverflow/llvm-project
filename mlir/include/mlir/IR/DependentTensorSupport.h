@@ -138,15 +138,12 @@ ParseResult parseMemRefSpec(OpAsmParser &parser, PendingMemRefSpec &spec);
 ParseResult resolveMemRefSpec(OpAsmParser &parser, MemRefType type,
                               const PendingMemRefSpec &spec,
                               unsigned valueIndex,
-                              DependentMemRefValueRefinement &refinement);
+                              DependentTypeValueRefinement &refinement);
 bool allowsFlatMemRefCarrier(MemRefType type,
-                             const DependentMemRefValueRefinement &stored);
+                             const DependentTypeValueRefinement &stored);
 LogicalResult
 verifyStoredRefinement(Operation *op, Value value,
-                       const DependentMemRefValueRefinement &stored);
-void printMemRefSpec(OpAsmPrinter &printer,
-                     const DependentMemRefValueRefinement &refinement,
-                     Type elementType);
+                       const DependentTypeValueRefinement &stored);
 void printMemRefSpec(OpAsmPrinter &printer,
                      const DependentTypeValueRefinement &refinement,
                      Type elementType);

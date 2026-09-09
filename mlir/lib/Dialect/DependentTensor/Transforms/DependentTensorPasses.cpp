@@ -25,8 +25,9 @@ using namespace mlir::dependent_tensor;
 namespace {
 static FailureOr<TensorValueRefinement>
 buildInfoFromStored(RankedTensorType type,
-                    const DependentTensorValueRefinement &stored) {
-  if (stored.rank != type.getRank() ||
+                    const DependentTypeValueRefinement &stored) {
+  if (stored.rank != type.getRank() || stored.hasExplicitLayout ||
+      !stored.strideValues.empty() ||
       stored.dimValues.size() != static_cast<size_t>(type.getRank()))
     return failure();
   TensorValueRefinement info{type, {}};
@@ -38,15 +39,6 @@ buildInfoFromStored(RankedTensorType type,
     info.dimValues.push_back(dimValue);
   }
   return info;
-}
-
-static DependentTensorValueRefinement
-convertToTensorRefinement(const DependentTypeValueRefinement &stored) {
-  DependentTensorValueRefinement converted;
-  converted.valueIndex = stored.valueIndex;
-  converted.rank = stored.rank;
-  converted.assignDimValues(stored.getDimValues());
-  return converted;
 }
 
 static FailureOr<TensorValueRefinement>
@@ -101,7 +93,7 @@ verifyAndBuildTensorTypeRef(Operation *owner, StringRef kind, Type type,
 
 static LogicalResult
 verifyStoredTensorRefinement(Operation *owner, StringRef kind, Type type,
-                             const DependentTensorValueRefinement &stored,
+                             const DependentTypeValueRefinement &stored,
                              unsigned expectedIndex,
                              func::FuncOp funcBoundaryOwner = nullptr) {
   auto rankedType = dyn_cast<RankedTensorType>(type);
@@ -111,6 +103,9 @@ verifyStoredTensorRefinement(Operation *owner, StringRef kind, Type type,
   if (stored.valueIndex != expectedIndex)
     return owner->emitOpError()
            << "has dependent " << kind << " refinements for wrong value index";
+  if (stored.hasExplicitLayout || !stored.strideValues.empty())
+    return owner->emitOpError()
+           << "has layout on dependent tensor " << kind << " refinements";
   if (stored.rank != rankedType.getRank())
     return owner->emitOpError()
            << "requires dependent " << kind << " rank to match tensor rank";
@@ -163,14 +158,9 @@ static LogicalResult verifyFuncBoundaryProperties(func::FuncOp func) {
     if (!seenArgRefinements.insert(stored.valueIndex).second)
       return func.emitOpError()
              << "has duplicate dependent argument refinements";
-    if (stored.hasExplicitLayout)
-      return func.emitOpError()
-             << "has layout on dependent tensor argument refinements";
-    DependentTensorValueRefinement tensorRef =
-        convertToTensorRefinement(stored);
     if (failed(verifyStoredTensorRefinement(
             func, "argument", func.getArgument(stored.valueIndex).getType(),
-            tensorRef, stored.valueIndex, func)))
+            stored, stored.valueIndex, func)))
       return failure();
   }
   llvm::SmallDenseSet<unsigned> seenResultRefinements;
@@ -183,50 +173,10 @@ static LogicalResult verifyFuncBoundaryProperties(func::FuncOp func) {
       continue;
     if (!seenResultRefinements.insert(stored.valueIndex).second)
       return func.emitOpError() << "has duplicate dependent result refinements";
-    if (stored.hasExplicitLayout)
-      return func.emitOpError()
-             << "has layout on dependent tensor result refinements";
-    DependentTensorValueRefinement tensorRef =
-        convertToTensorRefinement(stored);
     if (failed(verifyStoredTensorRefinement(
-            func, "result", func.getResultTypes()[stored.valueIndex], tensorRef,
+            func, "result", func.getResultTypes()[stored.valueIndex], stored,
             stored.valueIndex, func)))
       return failure();
-  }
-  return success();
-}
-
-static LogicalResult verifyInterfaceProperties(Operation *op) {
-  auto iface = dyn_cast<DependentTensorPropertyOpInterface>(op);
-  if (!iface)
-    return success();
-  if (isa<func::FuncOp>(op))
-    return success();
-
-  for (OpResult result : op->getResults()) {
-    FailureOr<DependentTensorValueRefinement> stored =
-        iface.getDependentTensorResultRefinement(result.getResultNumber());
-    if (failed(stored))
-      continue;
-    if (failed(verifyStoredTensorRefinement(op, "result", result.getType(),
-                                            *stored, result.getResultNumber())))
-      return failure();
-  }
-
-  for (auto [regionNumber, region] : llvm::enumerate(op->getRegions())) {
-    for (auto [blockNumber, block] : llvm::enumerate(region)) {
-      for (BlockArgument arg : block.getArguments()) {
-        FailureOr<DependentTensorValueRefinement> stored =
-            iface.getDependentTensorBlockArgumentRefinement(
-                regionNumber, blockNumber, arg.getArgNumber());
-        if (failed(stored))
-          continue;
-        if (failed(verifyStoredTensorRefinement(op, "block argument",
-                                                arg.getType(), *stored,
-                                                arg.getArgNumber())))
-          return failure();
-      }
-    }
   }
   return success();
 }
@@ -247,9 +197,7 @@ static LogicalResult verifyReturnRefinements(func::FuncOp func,
 
     auto rankedResultType =
         dyn_cast<RankedTensorType>(func.getResultTypes()[i]);
-    DependentTensorValueRefinement tensorRef =
-        convertToTensorRefinement(*stored);
-    auto expected = buildInfoFromStored(rankedResultType, tensorRef);
+    auto expected = buildInfoFromStored(rankedResultType, *stored);
     if (failed(actual) || failed(expected))
       return ret.emitOpError()
              << "failed to resolve dependent_tensor result refinements";
@@ -294,7 +242,7 @@ static LogicalResult verifyCallRefinements(func::CallOp call) {
                                   << i;
       mappedDims.push_back(call.getOperand(arg.getArgNumber()));
     }
-    DependentTensorValueRefinement mapped = convertToTensorRefinement(*stored);
+    DependentTypeValueRefinement mapped = *stored;
     mapped.assignDimValues(mappedDims);
     auto expected = buildInfoFromStored(rankedArgType, mapped);
     if (failed(actual) || failed(expected))
@@ -387,14 +335,6 @@ struct VerifyDependentTensorRefinementsPass
 
   void runOnOperation() override {
     ModuleOp module = getOperation();
-    WalkResult propertyWalk = module.walk([&](Operation *op) {
-      if (failed(verifyInterfaceProperties(op)))
-        return WalkResult::interrupt();
-      return WalkResult::advance();
-    });
-    if (propertyWalk.wasInterrupted())
-      return signalPassFailure();
-
     for (func::FuncOp func : module.getOps<func::FuncOp>()) {
       if (failed(verifyFuncBoundaryProperties(func)))
         return signalPassFailure();

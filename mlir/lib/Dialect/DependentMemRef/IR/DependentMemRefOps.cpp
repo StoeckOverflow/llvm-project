@@ -16,7 +16,7 @@ static void printValueList(OpAsmPrinter &printer, ValueRange values) {
   printer << "]";
 }
 
-static void walkRefinement(DependentMemRefValueRefinement &refinement,
+static void walkRefinement(DependentTypeValueRefinement &refinement,
                            function_ref<void(PropertyOperand &)> callback) {
   for (PropertyOperand &operand : refinement.dimValues)
     callback(operand);
@@ -25,7 +25,7 @@ static void walkRefinement(DependentMemRefValueRefinement &refinement,
 }
 
 static FailureOr<MemRefValueRefinement>
-decodeStored(Value value, const DependentMemRefValueRefinement &stored) {
+decodeStored(Value value, const DependentTypeValueRefinement &stored) {
   auto type = dyn_cast<MemRefType>(value.getType());
   if (!type)
     return failure();
@@ -44,11 +44,11 @@ decodeStored(Value value, const DependentMemRefValueRefinement &stored) {
 }
 } // namespace
 
-DependentMemRefValueRefinement
+DependentTypeValueRefinement
 dependent_memref::buildStoredRefinement(unsigned valueIndex, MemRefType type,
                                         ValueRange dimValues, int64_t offset,
                                         ValueRange strideValues) {
-  DependentMemRefValueRefinement stored;
+  DependentTypeValueRefinement stored;
   stored.valueIndex = valueIndex;
   stored.rank = type.getRank() == 0 && !dimValues.empty()
                     ? static_cast<int64_t>(dimValues.size())
@@ -61,7 +61,7 @@ dependent_memref::buildStoredRefinement(unsigned valueIndex, MemRefType type,
 }
 
 FailureOr<MemRefValueRefinement> dependent_memref::decodeStoredRefinement(
-    Value value, const DependentMemRefValueRefinement &stored) {
+    Value value, const DependentTypeValueRefinement &stored) {
   return decodeStored(value, stored);
 }
 
@@ -203,7 +203,7 @@ parseSourceRefinedOp(OpAsmParser &parser, OperationState &result,
                      OpAsmParser::UnresolvedOperand &source,
                      SmallVectorImpl<OpAsmParser::UnresolvedOperand> *indices,
                      Type &sourceType, Type *resultType,
-                     DependentMemRefValueRefinement &refinement) {
+                     DependentTypeValueRefinement &refinement) {
   PendingMemRefSpec spec;
   if (parser.parseOperand(source))
     return failure();

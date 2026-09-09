@@ -32,7 +32,7 @@ def MakeOp : DependentTensor_Op<"make", [
   }];
 
   let arguments = (ins
-    DependentTensorValueRefinementProp:$result_refinement
+    DependentTypeValueRefinementProp:$result_refinement
   );
   let results = (outs AnyRankedTensor:$result);
   let builders = [
@@ -101,7 +101,7 @@ def InsertOp : DependentTensor_Op<"insert", [
     AnyType:$scalar,
     AnyRankedTensor:$dest,
     Variadic<Index>:$indices,
-    DependentTensorValueRefinementProp:$result_refinement
+    DependentTypeValueRefinementProp:$result_refinement
   );
   let results = (outs AnyRankedTensor:$result);
   let builders = [

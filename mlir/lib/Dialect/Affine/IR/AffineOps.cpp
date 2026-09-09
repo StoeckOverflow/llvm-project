@@ -43,30 +43,36 @@ using llvm::divideCeilSigned;
 using llvm::divideFloorSigned;
 using llvm::mod;
 
-static FailureOr<DependentTensorValueRefinement>
+static FailureOr<DependentTypeValueRefinement>
 getAffineDependentTensorRefinementFromValue(Value value);
 
 static DependentTensorTypeRef getAffineTypeRefFromValueRefinement(
-    const DependentTensorValueRefinement &refinement) {
+    const DependentTypeValueRefinement &refinement) {
   DependentTensorTypeRef typeRef;
   typeRef.rank = refinement.rank;
+  typeRef.offset = refinement.offset;
+  typeRef.hasExplicitLayout = refinement.hasExplicitLayout;
   typeRef.assignDimValues(refinement.getDimValues());
+  typeRef.assignStrideValues(refinement.getStrideValues());
   return typeRef;
 }
 
-static DependentTensorValueRefinement
+static DependentTypeValueRefinement
 getAffineValueRefinementFromTypeRef(unsigned valueIndex,
                                     const DependentTensorTypeRef &typeRef) {
-  DependentTensorValueRefinement refinement;
+  DependentTypeValueRefinement refinement;
   refinement.valueIndex = valueIndex;
   refinement.rank = typeRef.rank;
+  refinement.offset = typeRef.offset;
+  refinement.hasExplicitLayout = typeRef.hasExplicitLayout;
   refinement.assignDimValues(typeRef.getDimValues());
+  refinement.assignStrideValues(typeRef.getStrideValues());
   return refinement;
 }
 
 static FailureOr<DependentTensorTypeRef>
 getAffineTypeRefFromValue(Value value) {
-  FailureOr<DependentTensorValueRefinement> refinement =
+  FailureOr<DependentTypeValueRefinement> refinement =
       getAffineDependentTensorRefinementFromValue(value);
   if (failed(refinement))
     return failure();
@@ -79,7 +85,7 @@ getAffineTypeRefFromValue(Value value, Operation *op) {
       value, op, [](Value value) { return getAffineTypeRefFromValue(value); });
 }
 
-static FailureOr<DependentTensorValueRefinement>
+static FailureOr<DependentTypeValueRefinement>
 getAffineDependentTensorRefinementFromBlockArgument(BlockArgument arg) {
   Operation *parentOp =
       arg.getOwner() ? arg.getOwner()->getParentOp() : nullptr;
@@ -92,7 +98,7 @@ getAffineDependentTensorRefinementFromBlockArgument(BlockArgument arg) {
       regionNumber, /*blockNumber=*/0, arg.getArgNumber());
 }
 
-static FailureOr<DependentTensorValueRefinement>
+static FailureOr<DependentTypeValueRefinement>
 getAffineDependentTensorRefinementFromValue(Value value) {
   if (auto result = dyn_cast<OpResult>(value)) {
     auto iface =
@@ -2338,7 +2344,7 @@ AffineForOp::getDependentTensorLoopResultTypeRef(unsigned resultNumber) {
   return failure();
 }
 
-FailureOr<DependentTensorValueRefinement>
+FailureOr<DependentTypeValueRefinement>
 AffineForOp::getDependentTensorResultRefinement(unsigned resultNumber) {
   FailureOr<DependentTensorTypeRef> typeRef =
       getDependentTensorLoopResultTypeRef(resultNumber);
@@ -2347,7 +2353,7 @@ AffineForOp::getDependentTensorResultRefinement(unsigned resultNumber) {
   return getAffineValueRefinementFromTypeRef(resultNumber, *typeRef);
 }
 
-FailureOr<DependentTensorValueRefinement>
+FailureOr<DependentTypeValueRefinement>
 AffineForOp::getDependentTensorBlockArgumentRefinement(
     unsigned regionNumber, unsigned blockNumber, unsigned argumentNumber) {
   if (regionNumber != 0 || blockNumber != 0 || argumentNumber == 0)

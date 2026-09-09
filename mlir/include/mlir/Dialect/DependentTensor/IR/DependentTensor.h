@@ -31,12 +31,11 @@ bool haveEqualRefinements(const TensorValueRefinement &lhs,
                           const TensorValueRefinement &rhs);
 FailureOr<bool> haveEqualDimRefinements(Value lhs, unsigned lhsDim, Value rhs,
                                         unsigned rhsDim);
-DependentTensorValueRefinement buildStoredRefinement(unsigned valueIndex,
-                                                     RankedTensorType type,
-                                                     ArrayRef<Value> dimValues);
+DependentTypeValueRefinement buildStoredRefinement(unsigned valueIndex,
+                                                   RankedTensorType type,
+                                                   ArrayRef<Value> dimValues);
 FailureOr<TensorValueRefinement>
-decodeStoredRefinement(Value value,
-                       const DependentTensorValueRefinement &stored);
+decodeStoredRefinement(Value value, const DependentTypeValueRefinement &stored);
 LogicalResult refreshDependentTensorForwardingRefinement(Operation *op);
 
 } // namespace dependent_tensor

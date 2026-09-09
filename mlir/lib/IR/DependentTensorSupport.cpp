@@ -23,12 +23,6 @@ llvm::hash_code mlir::hash_value(const DependentTensorTypeRef &refinement) {
       hashDependentTensorDimValues(refinement.strideValues));
 }
 
-llvm::hash_code
-mlir::hash_value(const DependentTensorValueRefinement &refinement) {
-  return llvm::hash_combine(refinement.valueIndex, refinement.rank,
-                            hashDependentTensorDimValues(refinement.dimValues));
-}
-
 llvm::hash_code mlir::hash_value(const DependentTensorLoopTypeRef &refinement) {
   return llvm::hash_combine(refinement.valueIndex,
                             hash_value(refinement.operandTypeRef),
@@ -38,15 +32,6 @@ llvm::hash_code mlir::hash_value(const DependentTensorLoopTypeRef &refinement) {
 llvm::hash_code
 mlir::hash_value(const DependentTensorDimValueRefinement &refinement) {
   return hashDependentTensorDimValues(refinement.dimValues);
-}
-
-llvm::hash_code
-mlir::hash_value(const DependentMemRefValueRefinement &refinement) {
-  return llvm::hash_combine(
-      refinement.valueIndex, refinement.rank, refinement.offset,
-      refinement.hasExplicitLayout,
-      hashDependentTensorDimValues(refinement.dimValues),
-      hashDependentTensorDimValues(refinement.strideValues));
 }
 
 llvm::hash_code
@@ -208,7 +193,7 @@ ParseResult mlir::dependent_memref::parseMemRefSpec(OpAsmParser &parser,
 
 ParseResult mlir::dependent_memref::resolveMemRefSpec(
     OpAsmParser &parser, MemRefType type, const PendingMemRefSpec &spec,
-    unsigned valueIndex, DependentMemRefValueRefinement &refinement) {
+    unsigned valueIndex, DependentTypeValueRefinement &refinement) {
   bool flatCarrier = type.getRank() == 0 && !spec.dims.empty();
   int64_t logicalRank =
       flatCarrier ? static_cast<int64_t>(spec.dims.size()) : type.getRank();
@@ -248,12 +233,12 @@ ParseResult mlir::dependent_memref::resolveMemRefSpec(
 }
 
 bool mlir::dependent_memref::allowsFlatMemRefCarrier(
-    MemRefType type, const DependentMemRefValueRefinement &stored) {
+    MemRefType type, const DependentTypeValueRefinement &stored) {
   return type.getRank() == 0 && stored.rank > 0;
 }
 
 LogicalResult mlir::dependent_memref::verifyStoredRefinement(
-    Operation *op, Value value, const DependentMemRefValueRefinement &stored) {
+    Operation *op, Value value, const DependentTypeValueRefinement &stored) {
   auto type = dyn_cast<MemRefType>(value.getType());
   if (!type)
     return op->emitOpError("requires memref value refinements");
@@ -284,20 +269,6 @@ LogicalResult mlir::dependent_memref::verifyStoredRefinement(
       return op->emitOpError("requires index-typed dependent strides");
   }
   return success();
-}
-
-void mlir::dependent_memref::printMemRefSpec(
-    OpAsmPrinter &printer, const DependentMemRefValueRefinement &refinement,
-    Type elementType) {
-  printer << "#memref<";
-  printDependentMemRefValueList(printer, refinement.getDimValues());
-  printer << ", ";
-  printer.printType(elementType);
-  if (refinement.hasExplicitLayout) {
-    printer << ", offset: " << refinement.offset << ", strides: ";
-    printDependentMemRefValueList(printer, refinement.getStrideValues());
-  }
-  printer << ">";
 }
 
 void mlir::dependent_memref::printMemRefSpec(
@@ -699,7 +670,7 @@ void mlir::dependent_tensor::printTypeRef(OpAsmPrinter &printer,
   SmallVector<Value, 4> dimValues;
   typeRef.appendDimValuesTo(dimValues);
   if (auto memrefType = dyn_cast<MemRefType>(valueType)) {
-    DependentMemRefValueRefinement memrefRef;
+    DependentTypeValueRefinement memrefRef;
     memrefRef.rank = typeRef.rank;
     memrefRef.offset = typeRef.offset;
     memrefRef.hasExplicitLayout = typeRef.hasExplicitLayout;

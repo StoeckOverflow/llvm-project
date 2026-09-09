@@ -124,7 +124,7 @@ public:
   }
 
   FailureOr<Value> linearize(ValueRange indices,
-                             const DependentMemRefValueRefinement &stored) {
+                             const DependentTypeValueRefinement &stored) {
     SmallVector<Value> idxs = remapValues(rewriter, indices);
     SmallVector<StrideExpr> strides = getStrides(stored);
     if (idxs.size() != strides.size())
@@ -163,7 +163,7 @@ private:
   }
 
   SmallVector<StrideExpr>
-  getStrides(const DependentMemRefValueRefinement &stored) {
+  getStrides(const DependentTypeValueRefinement &stored) {
     if (!stored.hasExplicitLayout) {
       SmallVector<Value> dims = remapValues(rewriter, stored.getDimValues());
       return materializeDefaultStrides(dims);

@@ -26,22 +26,6 @@ using namespace mlir;
 using namespace mlir::dependent_memref;
 
 namespace {
-static WalkResult interruptIfFailed(LogicalResult result) {
-  return failed(result) ? WalkResult::interrupt() : WalkResult::advance();
-}
-
-static DependentMemRefValueRefinement
-convertToMemRefRefinement(const DependentTypeValueRefinement &stored) {
-  DependentMemRefValueRefinement converted;
-  converted.valueIndex = stored.valueIndex;
-  converted.rank = stored.rank;
-  converted.offset = stored.offset;
-  converted.hasExplicitLayout = stored.hasExplicitLayout;
-  converted.assignDimValues(stored.getDimValues());
-  converted.assignStrideValues(stored.getStrideValues());
-  return converted;
-}
-
 static bool haveEqualRefinements(const MemRefValueRefinement &lhs,
                                  const MemRefValueRefinement &rhs) {
   return lhs.type == rhs.type && lhs.dimValues == rhs.dimValues &&
@@ -49,10 +33,10 @@ static bool haveEqualRefinements(const MemRefValueRefinement &lhs,
          lhs.hasExplicitLayout == rhs.hasExplicitLayout;
 }
 
+template <typename RefinementT>
 static FailureOr<MemRefValueRefinement>
-decodeStoredRefinementForType(MemRefType type,
-                              const DependentMemRefValueRefinement &stored) {
-  bool flatCarrier = allowsFlatMemRefCarrier(type, stored);
+decodeStoredRefinementForType(MemRefType type, const RefinementT &stored) {
+  bool flatCarrier = type.getRank() == 0 && stored.rank > 0;
   if (!flatCarrier && stored.rank != type.getRank())
     return failure();
   MemRefValueRefinement info{type, stored.getDimValues(), stored.offset,
@@ -134,7 +118,7 @@ verifyAndBuildMemRefTypeRef(Operation *owner, StringRef kind, Type type,
 
 static LogicalResult
 verifyStoredMemRefRefinement(Operation *owner, StringRef kind, Type type,
-                             const DependentMemRefValueRefinement &stored,
+                             const DependentTypeValueRefinement &stored,
                              unsigned expectedIndex,
                              func::FuncOp funcBoundaryOwner = nullptr) {
   auto memrefType = dyn_cast<MemRefType>(type);
@@ -145,7 +129,7 @@ verifyStoredMemRefRefinement(Operation *owner, StringRef kind, Type type,
     return owner->emitOpError()
            << "has dependent " << kind << " refinements for wrong value index";
 
-  bool flatCarrier = allowsFlatMemRefCarrier(memrefType, stored);
+  bool flatCarrier = memrefType.getRank() == 0 && stored.rank > 0;
   if (!flatCarrier && stored.rank != memrefType.getRank())
     return owner->emitOpError()
            << "requires dependent " << kind << " rank to match memref rank";
@@ -196,19 +180,11 @@ verifyStoredMemRefRefinement(Operation *owner, StringRef kind, Type type,
   return success();
 }
 
-static DependentMemRefValueRefinement
-convertToMemRefRefinement(unsigned valueIndex,
-                          const DependentTensorTypeRef &stored) {
-  DependentMemRefValueRefinement converted;
-  converted.valueIndex = valueIndex;
-  converted.rank = stored.rank;
-  converted.offset = stored.offset;
-  converted.hasExplicitLayout = stored.hasExplicitLayout;
-  converted.assignDimValues(stored.getDimValues());
-  converted.assignStrideValues(stored.getStrideValues());
-  return converted;
-}
-
+// Verify func.func #types metadata such as
+//   #types[%A : #memref<[%n], ...>]
+// The referenced value index must name the described argument/result, and all
+// symbolic dims/strides must be entry block args. This stays out of FuncOp's
+// verifier so Func does not need to interpret dependent_memref #memref specs.
 static LogicalResult verifyFuncBoundaryProperties(func::FuncOp func) {
   llvm::SmallDenseSet<unsigned> seenArgRefinements;
   for (const DependentTypeValueRefinement &stored :
@@ -222,10 +198,8 @@ static LogicalResult verifyFuncBoundaryProperties(func::FuncOp func) {
     if (!seenArgRefinements.insert(stored.valueIndex).second)
       return func.emitOpError()
              << "has duplicate dependent argument refinements";
-    DependentMemRefValueRefinement memrefRef =
-        convertToMemRefRefinement(stored);
     if (failed(verifyStoredMemRefRefinement(func, "argument",
-                                            argument.getType(), memrefRef,
+                                            argument.getType(), stored,
                                             stored.valueIndex, func)))
       return failure();
   }
@@ -241,10 +215,8 @@ static LogicalResult verifyFuncBoundaryProperties(func::FuncOp func) {
       continue;
     if (!seenResultRefinements.insert(stored.valueIndex).second)
       return func.emitOpError() << "has duplicate dependent result refinements";
-    DependentMemRefValueRefinement memrefRef =
-        convertToMemRefRefinement(stored);
-    if (failed(verifyStoredMemRefRefinement(
-            func, "result", resultType, memrefRef, stored.valueIndex, func)))
+    if (failed(verifyStoredMemRefRefinement(func, "result", resultType, stored,
+                                            stored.valueIndex, func)))
       return failure();
   }
   return success();
@@ -260,16 +232,6 @@ findStoredRefinement(ArrayRef<DependentTypeValueRefinement> refinements,
 }
 
 static FailureOr<MemRefValueRefinement> getValueRefinement(Value value);
-
-static FailureOr<MemRefValueRefinement>
-getFuncArgRefinement(BlockArgument arg, func::FuncOp func, MemRefType type) {
-  const DependentTypeValueRefinement *stored = findStoredRefinement(
-      func.getProperties().dependentTypeArgRefinements, arg.getArgNumber());
-  if (!stored)
-    return failure();
-  return decodeStoredRefinementForType(type,
-                                       convertToMemRefRefinement(*stored));
-}
 
 static LogicalResult
 mapCalleeRefinementValues(func::CallOp call, func::FuncOp callee,
@@ -312,7 +274,7 @@ getCallResultRefinement(OpResult result, func::CallOp call, func::FuncOp callee,
       result.getResultNumber());
   if (!stored)
     return failure();
-  DependentMemRefValueRefinement mapped = convertToMemRefRefinement(*stored);
+  DependentTypeValueRefinement mapped = *stored;
   SmallVector<Value> dims, strides;
   if (failed(mapCalleeRefinementValues(call, callee, *stored, dims, strides)))
     return failure();
@@ -328,9 +290,7 @@ getLoopResultRefinement(OpResult result, MemRefType type,
       dependent_tensor::findLoopTypeRef(loopTypeRefs, result.getResultNumber());
   if (!stored)
     return failure();
-  return decodeStoredRefinementForType(
-      type, convertToMemRefRefinement(result.getResultNumber(),
-                                      stored->resultTypeRef));
+  return decodeStoredRefinementForType(type, stored->resultTypeRef);
 }
 
 static FailureOr<MemRefValueRefinement> getLoopBlockArgumentRefinement(
@@ -340,8 +300,7 @@ static FailureOr<MemRefValueRefinement> getLoopBlockArgumentRefinement(
       dependent_tensor::findLoopTypeRef(loopTypeRefs, iterIndex);
   if (!stored)
     return failure();
-  return decodeStoredRefinementForType(
-      type, convertToMemRefRefinement(iterIndex, stored->operandTypeRef));
+  return decodeStoredRefinementForType(type, stored->operandTypeRef);
 }
 
 static FailureOr<MemRefValueRefinement>
@@ -349,8 +308,13 @@ getBlockArgumentRefinement(BlockArgument arg, MemRefType type) {
   Block *block = arg.getOwner();
   auto func =
       dyn_cast_or_null<func::FuncOp>(block ? block->getParentOp() : nullptr);
-  if (func && block == &func.getBody().front())
-    return getFuncArgRefinement(arg, func, type);
+  if (func && block == &func.getBody().front()) {
+    const DependentTypeValueRefinement *stored = findStoredRefinement(
+        func.getProperties().dependentTypeArgRefinements, arg.getArgNumber());
+    if (!stored)
+      return failure();
+    return decodeStoredRefinementForType(type, *stored);
+  }
 
   Operation *parentOp = block ? block->getParentOp() : nullptr;
   if (auto forOp = dyn_cast_or_null<scf::ForOp>(parentOp)) {
@@ -405,6 +369,9 @@ static FailureOr<MemRefValueRefinement> getValueRefinement(Value value) {
   return failure();
 }
 
+// Verify that returned memrefs satisfy the enclosing function's declared
+// result #types. Example: returning %A to -> #memref<[%n], ...> requires %A to
+// carry that same refinement.
 static LogicalResult verifyReturnRefinements(func::FuncOp func,
                                              func::ReturnOp ret) {
   for (auto [i, operand] : llvm::enumerate(ret.getOperands())) {
@@ -422,8 +389,8 @@ static LogicalResult verifyReturnRefinements(func::FuncOp func,
       continue;
 
     auto resultType = cast<MemRefType>(func.getResultTypes()[i]);
-    FailureOr<MemRefValueRefinement> expected = decodeStoredRefinementForType(
-        resultType, convertToMemRefRefinement(*stored));
+    FailureOr<MemRefValueRefinement> expected =
+        decodeStoredRefinementForType(resultType, *stored);
     if (failed(actual) || failed(expected))
       return ret.emitOpError()
              << "failed to resolve dependent_memref result refinements";
@@ -434,6 +401,8 @@ static LogicalResult verifyReturnRefinements(func::FuncOp func,
   return success();
 }
 
+// Verify that call operands/results match the callee's #types contract after
+// substituting callee entry block args with the actual call operands.
 static LogicalResult verifyCallRefinements(func::CallOp call) {
   auto callee = SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(
       call, call.getCalleeAttr());
@@ -457,7 +426,7 @@ static LogicalResult verifyCallRefinements(func::CallOp call) {
       continue;
 
     auto argType = cast<MemRefType>(callee.getArgumentTypes()[i]);
-    DependentMemRefValueRefinement mapped = convertToMemRefRefinement(*stored);
+    DependentTypeValueRefinement mapped = *stored;
     SmallVector<Value> dims, strides;
     if (failed(mapCalleeRefinementValues(call, callee, *stored, dims, strides)))
       return call.emitOpError() << "failed to map callee dependent_memref "
@@ -489,6 +458,9 @@ static LogicalResult verifyCallRefinements(func::CallOp call) {
   return success();
 }
 
+// Verify loop-carried refinements across the whole loop boundary: the init
+// operand, region block argument, yielded value, and loop result must describe
+// the same dependent memref.
 static LogicalResult verifyLoopRefinements(
     Operation *owner, ArrayRef<DependentTensorLoopTypeRef> loopTypeRefs,
     ValueRange initOperands, TypeRange resultTypes, ValueRange yieldedValues) {
@@ -588,35 +560,6 @@ struct VerifyDependentMemRefRefinementsPass
     });
     if (affineWalk.wasInterrupted())
       return signalPassFailure();
-
-    WalkResult walk = module.walk([&](Operation *op) {
-      if (auto alloc = dyn_cast<AllocOp>(op))
-        return interruptIfFailed(verifyStoredRefinement(
-            op, alloc.getMemref(), alloc.getProperties().result_refinement));
-      if (auto cast = dyn_cast<CastOp>(op))
-        return interruptIfFailed(verifyStoredRefinement(
-            op, cast.getResult(), cast.getProperties().result_refinement));
-      if (auto reinterpret = dyn_cast<ReinterpretCastOp>(op))
-        return interruptIfFailed(verifyStoredRefinement(
-            op, reinterpret.getResult(),
-            reinterpret.getProperties().result_refinement));
-      if (auto dim = dyn_cast<DimOp>(op))
-        return interruptIfFailed(verifyStoredRefinement(
-            op, dim.getSource(), dim.getProperties().source_refinement));
-      if (auto dimExact = dyn_cast<DimExactOp>(op))
-        return interruptIfFailed(
-            verifyStoredRefinement(op, dimExact.getSource(),
-                                   dimExact.getProperties().source_refinement));
-      if (auto load = dyn_cast<LoadOp>(op))
-        return interruptIfFailed(verifyStoredRefinement(
-            op, load.getSource(), load.getProperties().source_refinement));
-      if (auto store = dyn_cast<StoreOp>(op))
-        return interruptIfFailed(verifyStoredRefinement(
-            op, store.getSource(), store.getProperties().source_refinement));
-      return WalkResult::advance();
-    });
-    if (walk.wasInterrupted())
-      signalPassFailure();
   }
 };
 } // namespace

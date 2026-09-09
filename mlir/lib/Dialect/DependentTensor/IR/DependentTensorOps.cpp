@@ -29,10 +29,10 @@ buildValueRefinement(RankedTensorType type, ArrayRef<Value> dimValues) {
   return info;
 }
 
-static DependentTensorValueRefinement buildStored(unsigned valueIndex,
-                                                  RankedTensorType type,
-                                                  ArrayRef<Value> dimValues) {
-  DependentTensorValueRefinement stored;
+static DependentTypeValueRefinement buildStored(unsigned valueIndex,
+                                                RankedTensorType type,
+                                                ArrayRef<Value> dimValues) {
+  DependentTypeValueRefinement stored;
   stored.valueIndex = valueIndex;
   stored.rank = type.getRank();
   stored.assignDimValues(dimValues);
@@ -63,26 +63,13 @@ findStoredRefinement(Range &&range, unsigned valueIndex) {
   return nullptr;
 }
 
-static DependentTensorValueRefinement
-convertToTensorRefinement(const DependentTypeValueRefinement &refinement) {
-  DependentTensorValueRefinement converted;
-  converted.valueIndex = refinement.valueIndex;
-  converted.rank = refinement.rank;
-  converted.assignDimValues(refinement.getDimValues());
-  return converted;
-}
-
 static FailureOr<TensorValueRefinement>
 getFuncArgRefinement(BlockArgument arg, func::FuncOp func,
                      RankedTensorType rankedType) {
   if (const DependentTypeValueRefinement *stored =
           findStoredRefinement(func.getProperties().dependentTypeArgRefinements,
                                arg.getArgNumber())) {
-    if (stored->hasExplicitLayout)
-      return failure();
-    DependentTensorValueRefinement tensorRef =
-        convertToTensorRefinement(*stored);
-    return decodeStoredRefinement(arg, tensorRef);
+    return decodeStoredRefinement(arg, *stored);
   }
   return failure();
 }
@@ -93,8 +80,7 @@ getCallResultRefinement(OpResult result, func::CallOp call, func::FuncOp callee,
   if (const DependentTypeValueRefinement *stored = findStoredRefinement(
           callee.getProperties().dependentTypeResultRefinements,
           result.getResultNumber())) {
-    if (stored->hasExplicitLayout)
-      return failure();
+    DependentTypeValueRefinement mapped = *stored;
     SmallVector<Value> mappedDims;
     mappedDims.reserve(stored->dimValues.size());
     for (Value dimValue : stored->getDimValues()) {
@@ -104,24 +90,26 @@ getCallResultRefinement(OpResult result, func::CallOp call, func::FuncOp callee,
         return failure();
       mappedDims.push_back(call.getOperand(arg.getArgNumber()));
     }
-    return buildValueRefinement(rankedType, mappedDims);
+    mapped.assignDimValues(mappedDims);
+    return decodeStoredRefinement(result, mapped);
   }
   return failure();
 }
 } // namespace
 
-DependentTensorValueRefinement dependent_tensor::buildStoredRefinement(
+DependentTypeValueRefinement dependent_tensor::buildStoredRefinement(
     unsigned valueIndex, RankedTensorType type, ArrayRef<Value> dimValues) {
   return buildStored(valueIndex, type, dimValues);
 }
 
 FailureOr<TensorValueRefinement> dependent_tensor::decodeStoredRefinement(
-    Value value, const DependentTensorValueRefinement &stored) {
+    Value value, const DependentTypeValueRefinement &stored) {
   auto rankedType = dyn_cast<RankedTensorType>(value.getType());
   if (!rankedType)
     return failure();
   unsigned valueIndex = getValueIndex(value);
-  if (stored.valueIndex != valueIndex || stored.rank != rankedType.getRank())
+  if (stored.valueIndex != valueIndex || stored.rank != rankedType.getRank() ||
+      stored.hasExplicitLayout || !stored.strideValues.empty())
     return failure();
   return buildValueRefinement(rankedType, stored.getDimValues());
 }
@@ -163,7 +151,7 @@ dependent_tensor::getValueRefinement(Value value) {
     }
     if (!foundRegion || !foundBlock)
       return failure();
-    FailureOr<DependentTensorValueRefinement> stored =
+    FailureOr<DependentTypeValueRefinement> stored =
         iface.getDependentTensorBlockArgumentRefinement(
             regionNumber, blockNumber, arg.getArgNumber());
     if (failed(stored))
@@ -174,7 +162,7 @@ dependent_tensor::getValueRefinement(Value value) {
   auto result = cast<OpResult>(value);
   Operation *def = result.getOwner();
   if (auto iface = dyn_cast<DependentTensorPropertyOpInterface>(def)) {
-    FailureOr<DependentTensorValueRefinement> stored =
+    FailureOr<DependentTypeValueRefinement> stored =
         iface.getDependentTensorResultRefinement(result.getResultNumber());
     if (succeeded(stored))
       return decodeStoredRefinement(value, *stored);
@@ -245,12 +233,14 @@ static ParseResult resolveTensorRefinement(
 
 static LogicalResult
 verifyStoredRefinement(Operation *op, Value value,
-                       const DependentTensorValueRefinement &stored) {
+                       const DependentTypeValueRefinement &stored) {
   auto rankedType = dyn_cast<RankedTensorType>(value.getType());
   if (!rankedType)
     return op->emitOpError("requires ranked tensor value refinements");
   if (stored.valueIndex != cast<OpResult>(value).getResultNumber())
     return op->emitOpError("has dependent tensor refinements for wrong result");
+  if (stored.hasExplicitLayout || !stored.strideValues.empty())
+    return op->emitOpError("requires tensor refinements without layout");
   if (stored.rank != rankedType.getRank())
     return op->emitOpError(
         "requires dependent tensor rank to match result rank");
@@ -348,7 +338,7 @@ void MakeOp::walkDependentTensorPropertyUses(
   walkPropertySSAUses(callback);
 }
 
-FailureOr<DependentTensorValueRefinement>
+FailureOr<DependentTypeValueRefinement>
 MakeOp::getDependentTensorResultRefinement(unsigned resultNumber) {
   if (resultNumber != 0)
     return failure();
@@ -632,7 +622,7 @@ void InsertOp::walkDependentTensorPropertyUses(
   walkPropertySSAUses(callback);
 }
 
-FailureOr<DependentTensorValueRefinement>
+FailureOr<DependentTypeValueRefinement>
 InsertOp::getDependentTensorResultRefinement(unsigned resultNumber) {
   if (resultNumber != 0)
     return failure();

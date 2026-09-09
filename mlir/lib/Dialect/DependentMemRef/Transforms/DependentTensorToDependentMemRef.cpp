@@ -53,7 +53,7 @@ static void collectTensorDimRefinements(Operation *root,
   });
 }
 
-static DependentMemRefValueRefinement
+static DependentTypeValueRefinement
 memrefRefinementFromTensor(Value originalValue, Value convertedValue,
                            const TensorDimRefinementMap &tensorDims) {
   auto memrefType = cast<MemRefType>(convertedValue.getType());
@@ -217,7 +217,7 @@ static Operation *createAllocLike(PatternRewriter &rewriter, Location loc,
 static Operation *createLoadLike(PatternRewriter &rewriter, Location loc,
                                  Value source, ValueRange indices,
                                  Type resultType,
-                                 const DependentMemRefValueRefinement &ref) {
+                                 const DependentTypeValueRefinement &ref) {
   OperationState state(loc, LoadOp::getOperationName());
   state.addOperands(source);
   state.addOperands(indices);
@@ -230,7 +230,7 @@ static Operation *createLoadLike(PatternRewriter &rewriter, Location loc,
 
 static Operation *createStoreLike(PatternRewriter &rewriter, Location loc,
                                   Value value, Value source, ValueRange indices,
-                                  const DependentMemRefValueRefinement &ref) {
+                                  const DependentTypeValueRefinement &ref) {
   OperationState state(loc, StoreOp::getOperationName());
   state.addOperands(value);
   state.addOperands(source);

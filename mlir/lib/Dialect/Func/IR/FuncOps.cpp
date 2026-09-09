@@ -93,13 +93,13 @@ static bool hasDependentTensorSeedArgsAttr(DictionaryAttr attrs) {
   return attrs && attrs.get("dependent_tensor.seed_args");
 }
 
-struct PendingDependentTensorValueRefinement {
+struct PendingDependentTensorBoundaryRefinement {
   uint32_t valueIndex = 0;
   RankedTensorType type;
   SmallVector<OpAsmParser::UnresolvedOperand> dims;
 };
 
-struct PendingDependentTypeValueRefinement {
+struct PendingDependentMemRefValueRefinement {
   uint32_t valueIndex = 0;
   MemRefType type;
   dependent_memref::PendingMemRefSpec spec;
@@ -108,10 +108,10 @@ struct PendingDependentTypeValueRefinement {
 static ParseResult parseDependentTypesBoundary(
     OpAsmParser &parser, ArrayRef<OpAsmParser::Argument> entryArgs,
     ArrayRef<Type> argTypes, ArrayRef<Type> resultTypes,
-    SmallVectorImpl<PendingDependentTensorValueRefinement> &argTensorRefs,
-    SmallVectorImpl<PendingDependentTensorValueRefinement> &resultTensorRefs,
-    SmallVectorImpl<PendingDependentTypeValueRefinement> &argMemRefRefs,
-    SmallVectorImpl<PendingDependentTypeValueRefinement> &resultMemRefRefs) {
+    SmallVectorImpl<PendingDependentTensorBoundaryRefinement> &argTensorRefs,
+    SmallVectorImpl<PendingDependentTensorBoundaryRefinement> &resultTensorRefs,
+    SmallVectorImpl<PendingDependentMemRefValueRefinement> &argMemRefRefs,
+    SmallVectorImpl<PendingDependentMemRefValueRefinement> &resultMemRefRefs) {
   if (failed(parser.parseOptionalHashKeyword("types")))
     return success();
 
@@ -132,7 +132,7 @@ static ParseResult parseDependentTypesBoundary(
     unsigned argIndex = it->second;
     Type argType = argTypes[argIndex];
     if (auto rankedType = dyn_cast<RankedTensorType>(argType)) {
-      PendingDependentTensorValueRefinement info;
+      PendingDependentTensorBoundaryRefinement info;
       info.valueIndex = argIndex;
       info.type = rankedType;
       if (parser.parseColon() ||
@@ -142,7 +142,7 @@ static ParseResult parseDependentTypesBoundary(
       return success();
     }
     if (auto memRefType = dyn_cast<MemRefType>(argType)) {
-      PendingDependentTypeValueRefinement info;
+      PendingDependentMemRefValueRefinement info;
       info.valueIndex = argIndex;
       info.type = memRefType;
       if (parser.parseColon() ||
@@ -176,7 +176,7 @@ static ParseResult parseDependentTypesBoundary(
   auto parseResultRefinement = [&](unsigned resultIndex) -> ParseResult {
     Type resultType = resultTypes[resultIndex];
     if (auto rankedType = dyn_cast<RankedTensorType>(resultType)) {
-      PendingDependentTensorValueRefinement resultInfo;
+      PendingDependentTensorBoundaryRefinement resultInfo;
       resultInfo.valueIndex = resultIndex;
       resultInfo.type = rankedType;
       if (dependent_tensor::parseTensorSpec(parser, rankedType,
@@ -186,7 +186,7 @@ static ParseResult parseDependentTypesBoundary(
       return success();
     }
     if (auto memRefType = dyn_cast<MemRefType>(resultType)) {
-      PendingDependentTypeValueRefinement resultInfo;
+      PendingDependentMemRefValueRefinement resultInfo;
       resultInfo.valueIndex = resultIndex;
       resultInfo.type = memRefType;
       if (dependent_memref::parseMemRefSpec(parser, resultInfo.spec))
@@ -221,8 +221,8 @@ static ParseResult parseDependentTypesBoundary(
 static ParseResult resolveDependentTensorTypesBoundary(
     OpAsmParser &parser, ArrayRef<OpAsmParser::Argument> entryArgs,
     Region &body,
-    ArrayRef<PendingDependentTensorValueRefinement> pendingArgRefinements,
-    ArrayRef<PendingDependentTensorValueRefinement> pendingResultRefinements,
+    ArrayRef<PendingDependentTensorBoundaryRefinement> pendingArgRefinements,
+    ArrayRef<PendingDependentTensorBoundaryRefinement> pendingResultRefinements,
     SmallVectorImpl<DependentTypeValueRefinement> &argRefinements,
     SmallVectorImpl<DependentTypeValueRefinement> &resultRefinements) {
   if (pendingArgRefinements.empty() && pendingResultRefinements.empty())
@@ -242,7 +242,7 @@ static ParseResult resolveDependentTensorTypesBoundary(
   }
 
   auto resolveOne =
-      [&](const PendingDependentTensorValueRefinement &pending,
+      [&](const PendingDependentTensorBoundaryRefinement &pending,
           SmallVectorImpl<DependentTypeValueRefinement> &out) -> ParseResult {
     DependentTypeValueRefinement info;
     info.valueIndex = pending.valueIndex;
@@ -263,11 +263,11 @@ static ParseResult resolveDependentTensorTypesBoundary(
     return success();
   };
 
-  for (const PendingDependentTensorValueRefinement &pending :
+  for (const PendingDependentTensorBoundaryRefinement &pending :
        pendingArgRefinements)
     if (resolveOne(pending, argRefinements))
       return failure();
-  for (const PendingDependentTensorValueRefinement &pending :
+  for (const PendingDependentTensorBoundaryRefinement &pending :
        pendingResultRefinements)
     if (resolveOne(pending, resultRefinements))
       return failure();
@@ -277,8 +277,8 @@ static ParseResult resolveDependentTensorTypesBoundary(
 static ParseResult resolveDependentMemRefTypesBoundary(
     OpAsmParser &parser, ArrayRef<OpAsmParser::Argument> entryArgs,
     Region &body,
-    ArrayRef<PendingDependentTypeValueRefinement> pendingArgRefinements,
-    ArrayRef<PendingDependentTypeValueRefinement> pendingResultRefinements,
+    ArrayRef<PendingDependentMemRefValueRefinement> pendingArgRefinements,
+    ArrayRef<PendingDependentMemRefValueRefinement> pendingResultRefinements,
     SmallVectorImpl<DependentTypeValueRefinement> &argRefinements,
     SmallVectorImpl<DependentTypeValueRefinement> &resultRefinements) {
   if (pendingArgRefinements.empty() && pendingResultRefinements.empty())
@@ -315,7 +315,7 @@ static ParseResult resolveDependentMemRefTypesBoundary(
   };
 
   auto resolveOne =
-      [&](const PendingDependentTypeValueRefinement &pending,
+      [&](const PendingDependentMemRefValueRefinement &pending,
           SmallVectorImpl<DependentTypeValueRefinement> &out) -> ParseResult {
     const dependent_memref::PendingMemRefSpec &spec = pending.spec;
     bool flatCarrier = pending.type.getRank() == 0 && !spec.dims.empty();
@@ -360,24 +360,15 @@ static ParseResult resolveDependentMemRefTypesBoundary(
     return success();
   };
 
-  for (const PendingDependentTypeValueRefinement &pending :
+  for (const PendingDependentMemRefValueRefinement &pending :
        pendingArgRefinements)
     if (resolveOne(pending, argRefinements))
       return failure();
-  for (const PendingDependentTypeValueRefinement &pending :
+  for (const PendingDependentMemRefValueRefinement &pending :
        pendingResultRefinements)
     if (resolveOne(pending, resultRefinements))
       return failure();
   return success();
-}
-
-static DependentTensorValueRefinement convertToDependentTensorValueRefinement(
-    const DependentTypeValueRefinement &refinement) {
-  DependentTensorValueRefinement converted;
-  converted.valueIndex = refinement.valueIndex;
-  converted.rank = refinement.rank;
-  converted.assignDimValues(refinement.getDimValues());
-  return converted;
 }
 
 static const DependentTypeValueRefinement *
@@ -630,10 +621,12 @@ ParseResult FuncOp::parse(OpAsmParser &parser, OperationState &result) {
       builder, result, entryArgs, resultAttrs, getArgAttrsAttrName(result.name),
       getResAttrsAttrName(result.name));
 
-  SmallVector<PendingDependentTensorValueRefinement> pendingArgRefinements;
-  SmallVector<PendingDependentTensorValueRefinement> pendingResultRefinements;
-  SmallVector<PendingDependentTypeValueRefinement, 2> pendingTypeArgRefinements;
-  SmallVector<PendingDependentTypeValueRefinement, 2>
+  SmallVector<PendingDependentTensorBoundaryRefinement> pendingArgRefinements;
+  SmallVector<PendingDependentTensorBoundaryRefinement>
+      pendingResultRefinements;
+  SmallVector<PendingDependentMemRefValueRefinement, 2>
+      pendingTypeArgRefinements;
+  SmallVector<PendingDependentMemRefValueRefinement, 2>
       pendingTypeResultRefinements;
   if (parseDependentTypesBoundary(
           parser, entryArgs, argTypes, resultTypes, pendingArgRefinements,
@@ -694,9 +687,7 @@ void FuncOp::print(OpAsmPrinter &p) {
       p << " : ";
       Type type = getArgument(refinement.valueIndex).getType();
       if (auto tensorType = dyn_cast<RankedTensorType>(type)) {
-        DependentTensorValueRefinement tensorRef =
-            convertToDependentTensorValueRefinement(refinement);
-        dependent_tensor::printTensorSpec(p, tensorRef.getDimValues(),
+        dependent_tensor::printTensorSpec(p, refinement.getDimValues(),
                                           tensorType.getElementType());
         return;
       }
@@ -713,9 +704,7 @@ void FuncOp::print(OpAsmPrinter &p) {
       auto printResultRefinement = [&](const auto &refinement) {
         Type type = getFunctionType().getResult(refinement.valueIndex);
         if (auto tensorType = dyn_cast<RankedTensorType>(type)) {
-          DependentTensorValueRefinement tensorRef =
-              convertToDependentTensorValueRefinement(refinement);
-          dependent_tensor::printTensorSpec(p, tensorRef.getDimValues(),
+          dependent_tensor::printTensorSpec(p, refinement.getDimValues(),
                                             tensorType.getElementType());
           return;
         }
@@ -879,7 +868,7 @@ LogicalResult FuncOp::updateFunctionPropertiesForResultErasure(
   return success();
 }
 
-FailureOr<DependentTensorValueRefinement>
+FailureOr<DependentTypeValueRefinement>
 FuncOp::getDependentTensorBlockArgumentRefinement(unsigned regionNumber,
                                                   unsigned blockNumber,
                                                   unsigned argumentNumber) {
@@ -892,7 +881,7 @@ FuncOp::getDependentTensorBlockArgumentRefinement(unsigned regionNumber,
   if (refinement->hasExplicitLayout ||
       !isa<RankedTensorType>(getArgument(argumentNumber).getType()))
     return failure();
-  return convertToDependentTensorValueRefinement(*refinement);
+  return *refinement;
 }
 
 /// Clone the internal blocks from this function into dest and all attributes

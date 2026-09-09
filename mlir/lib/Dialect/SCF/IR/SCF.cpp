@@ -41,29 +41,35 @@ using namespace mlir::scf;
 
 #include "mlir/Dialect/SCF/IR/SCFOpsDialect.cpp.inc"
 
-static FailureOr<DependentTensorValueRefinement>
+static FailureOr<DependentTypeValueRefinement>
 getDependentTensorRefinementFromValue(Value value);
 
-static DependentTensorTypeRef getTypeRefFromValueRefinement(
-    const DependentTensorValueRefinement &refinement) {
+static DependentTensorTypeRef
+getTypeRefFromValueRefinement(const DependentTypeValueRefinement &refinement) {
   DependentTensorTypeRef typeRef;
   typeRef.rank = refinement.rank;
+  typeRef.offset = refinement.offset;
+  typeRef.hasExplicitLayout = refinement.hasExplicitLayout;
   typeRef.assignDimValues(refinement.getDimValues());
+  typeRef.assignStrideValues(refinement.getStrideValues());
   return typeRef;
 }
 
-static DependentTensorValueRefinement
+static DependentTypeValueRefinement
 getValueRefinementFromTypeRef(unsigned valueIndex,
                               const DependentTensorTypeRef &typeRef) {
-  DependentTensorValueRefinement refinement;
+  DependentTypeValueRefinement refinement;
   refinement.valueIndex = valueIndex;
   refinement.rank = typeRef.rank;
+  refinement.offset = typeRef.offset;
+  refinement.hasExplicitLayout = typeRef.hasExplicitLayout;
   refinement.assignDimValues(typeRef.getDimValues());
+  refinement.assignStrideValues(typeRef.getStrideValues());
   return refinement;
 }
 
 static FailureOr<DependentTensorTypeRef> getTypeRefFromValue(Value value) {
-  FailureOr<DependentTensorValueRefinement> refinement =
+  FailureOr<DependentTypeValueRefinement> refinement =
       getDependentTensorRefinementFromValue(value);
   if (failed(refinement))
     return failure();
@@ -76,7 +82,7 @@ static FailureOr<DependentTensorTypeRef> getTypeRefFromValue(Value value,
       value, op, [](Value value) { return getTypeRefFromValue(value); });
 }
 
-static FailureOr<DependentTensorValueRefinement>
+static FailureOr<DependentTypeValueRefinement>
 getDependentTensorRefinementFromBlockArgument(BlockArgument arg) {
   Block *block = arg.getOwner();
   Operation *parentOp = block ? block->getParentOp() : nullptr;
@@ -100,7 +106,7 @@ getDependentTensorRefinementFromBlockArgument(BlockArgument arg) {
   return failure();
 }
 
-static FailureOr<DependentTensorValueRefinement>
+static FailureOr<DependentTypeValueRefinement>
 getDependentTensorRefinementFromValue(Value value) {
   if (!value)
     return failure();
@@ -780,7 +786,7 @@ ForOp::getDependentTensorLoopResultTypeRef(unsigned resultNumber) {
   return failure();
 }
 
-FailureOr<DependentTensorValueRefinement>
+FailureOr<DependentTypeValueRefinement>
 ForOp::getDependentTensorResultRefinement(unsigned resultNumber) {
   FailureOr<DependentTensorTypeRef> typeRef =
       getDependentTensorLoopResultTypeRef(resultNumber);
@@ -789,7 +795,7 @@ ForOp::getDependentTensorResultRefinement(unsigned resultNumber) {
   return getValueRefinementFromTypeRef(resultNumber, *typeRef);
 }
 
-FailureOr<DependentTensorValueRefinement>
+FailureOr<DependentTypeValueRefinement>
 ForOp::getDependentTensorBlockArgumentRefinement(unsigned regionNumber,
                                                  unsigned blockNumber,
                                                  unsigned argumentNumber) {

@@ -21,18 +21,17 @@ struct MemRefValueRefinement {
   bool hasExplicitLayout = false;
 };
 
-DependentMemRefValueRefinement
+DependentTypeValueRefinement
 buildStoredRefinement(unsigned valueIndex, MemRefType type,
                       ValueRange dimValues, int64_t offset = 0,
                       ValueRange strideValues = {});
 FailureOr<MemRefValueRefinement>
-decodeStoredRefinement(Value value,
-                       const DependentMemRefValueRefinement &stored);
+decodeStoredRefinement(Value value, const DependentTypeValueRefinement &stored);
 LogicalResult
 verifyStoredRefinement(Operation *op, Value value,
-                       const DependentMemRefValueRefinement &stored);
+                       const DependentTypeValueRefinement &stored);
 void printMemRefSpec(OpAsmPrinter &printer,
-                     const DependentMemRefValueRefinement &refinement,
+                     const DependentTypeValueRefinement &refinement,
                      Type elementType);
 
 } // namespace dependent_memref
