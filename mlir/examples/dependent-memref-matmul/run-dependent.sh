@@ -13,6 +13,8 @@ K="${K:-${N}}"
 M="${M:-${N}}"
 REPEATS="${REPEATS:-10}"
 BUILD_ONLY=0
+DEPENDENT_PIPELINE='builtin.module(convert-dependent-tensor-to-dependent-memref,func.func(convert-scf-to-cf,convert-arith-to-llvm),lower-dependent-memref-to-llvm,reconcile-unrealized-casts)'
+DIRECT_STRIDED_PIPELINE='builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),lower-dependent-memref-to-llvm,reconcile-unrealized-casts)'
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -51,15 +53,11 @@ mkdir -p "${OUT_DIR}"
 mkdir -p "${OUT_DIR}/direct-strided"
 
 "${MLIR_OPT}" "${SCRIPT_DIR}/dependent-matmul.mlir" \
-  -convert-dependent-tensor-to-dependent-memref \
-  -lower-dependent-memref-to-llvm \
-  -reconcile-unrealized-casts \
+  -pass-pipeline="${DEPENDENT_PIPELINE}" \
   -mlir-print-op-generic >"${OUT_DIR}/dependent.llvm.mlir"
 
 "${MLIR_OPT}" "${SCRIPT_DIR}/dependent-matmul.mlir" \
-  -convert-dependent-tensor-to-dependent-memref \
-  -lower-dependent-memref-to-llvm \
-  -reconcile-unrealized-casts |
+  -pass-pipeline="${DEPENDENT_PIPELINE}" |
   "${MLIR_TRANSLATE}" -mlir-to-llvmir >"${OUT_DIR}/dependent.ll"
 
 "${LLVM_OPT}" -O3 -S "${OUT_DIR}/dependent.ll" -o "${OUT_DIR}/dependent.opt.ll"
@@ -68,13 +66,11 @@ cp "${SCRIPT_DIR}/dependent-strided-matmul.mlir" \
   "${OUT_DIR}/direct-strided/input.mlir"
 
 "${MLIR_OPT}" "${SCRIPT_DIR}/dependent-strided-matmul.mlir" \
-  -lower-dependent-memref-to-llvm \
-  -reconcile-unrealized-casts \
+  -pass-pipeline="${DIRECT_STRIDED_PIPELINE}" \
   -mlir-print-op-generic >"${OUT_DIR}/direct-strided/dependent_matmul_strided.llvm.mlir"
 
 "${MLIR_OPT}" "${SCRIPT_DIR}/dependent-strided-matmul.mlir" \
-  -lower-dependent-memref-to-llvm \
-  -reconcile-unrealized-casts |
+  -pass-pipeline="${DIRECT_STRIDED_PIPELINE}" |
   "${MLIR_TRANSLATE}" -mlir-to-llvmir >"${OUT_DIR}/direct-strided/dependent_matmul_strided.ll"
 
 "${LLVM_OPT}" -O3 -S "${OUT_DIR}/direct-strided/dependent_matmul_strided.ll" \
