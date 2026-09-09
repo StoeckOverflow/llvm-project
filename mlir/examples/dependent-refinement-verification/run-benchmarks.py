@@ -4,6 +4,7 @@ import csv
 import os
 import random
 import re
+import shlex
 import statistics
 import subprocess
 from pathlib import Path
@@ -11,9 +12,8 @@ from pathlib import Path
 
 TIMING_RE = re.compile(r"^\s*([0-9.]+) \(\s*[0-9.]+%\)\s+(.+?)\s*$")
 TOTAL_RE = re.compile(r"Total Execution Time:\s+([0-9.]+) seconds")
-BASELINE_PIPELINE = "builtin.module()"
-DEPENDENT_PIPELINE = "builtin.module(verify-dependent-memref-refinements)"
-PASS_NAME = "VerifyDependentMemRefRefinementsPass"
+BASELINE_PIPELINE = "builtin.module(func.func(convert-scf-to-cf,convert-arith-to-llvm),finalize-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts)"
+DEPENDENT_PIPELINE = "builtin.module(verify-dependent-memref-refinements,func.func(convert-scf-to-cf,convert-arith-to-llvm),lower-dependent-memref-to-llvm,reconcile-unrealized-casts)"
 
 
 def repo_root() -> Path:
@@ -38,7 +38,6 @@ def parse_timing(report: str):
         "total_ms": total if total is not None else times.get("Total", 0.0),
         "parser_ms": times.get("Parser", 0.0),
         "output_ms": times.get("Output", 0.0),
-        "pass_ms": times.get(PASS_NAME, 0.0),
         "rest_ms": times.get("Rest", 0.0),
     }
 
@@ -73,17 +72,25 @@ def pipeline_for_route(route: str) -> str:
     return DEPENDENT_PIPELINE
 
 
-def run_mlir_opt(mlir_opt: Path, input_path: Path, output_path: Path, pipeline: str):
+def mlir_opt_cmd(mlir_opt: Path, input_path: Path, output_path: Path,
+                 pipeline: str, *, generic: bool = False):
     cmd = [
         str(mlir_opt),
         str(input_path),
         f"-pass-pipeline={pipeline}",
         "-mlir-disable-threading",
-        "-mlir-timing",
-        "-mlir-timing-display=list",
-        "-o",
-        str(output_path),
     ]
+    if generic:
+        cmd.append("-mlir-print-op-generic")
+    else:
+        cmd += ["-mlir-timing", "-mlir-timing-display=list"]
+    cmd += ["-o", str(output_path)]
+    return cmd
+
+
+def run_mlir_opt(mlir_opt: Path, input_path: Path, output_path: Path,
+                 pipeline: str):
+    cmd = mlir_opt_cmd(mlir_opt, input_path, output_path, pipeline)
     proc = subprocess.run(cmd, cwd=repo_root(), text=True,
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if proc.returncode != 0:
@@ -91,38 +98,49 @@ def run_mlir_opt(mlir_opt: Path, input_path: Path, output_path: Path, pipeline: 
     return parse_timing(proc.stdout)
 
 
-def write_verified_output(mlir_opt: Path, row, out: Path):
+def write_lowered_output(mlir_opt: Path, row, out: Path):
     route = row["route"]
-    rank = row["rank"]
+    rank = row.get("max_carrier_rank", row["rank"])
     input_path = Path(row["path"])
-    verified_path = out / "verified" / f"{route}-rank-{rank}.mlir"
-    verified_path.parent.mkdir(parents=True, exist_ok=True)
-    pipeline = pipeline_for_route(route)
-    cmd = [
-        str(mlir_opt),
-        str(input_path),
-        f"-pass-pipeline={pipeline}",
-        "-o",
-        str(verified_path),
-    ]
+    lowered_path = out / "lowered_kernels" / f"{route}-dimensions-{rank}.llvm.mlir"
+    lowered_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = mlir_opt_cmd(mlir_opt, input_path, lowered_path,
+                       pipeline_for_route(route), generic=True)
     proc = subprocess.run(cmd, cwd=repo_root(), text=True,
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if proc.returncode != 0:
         raise RuntimeError(f"mlir-opt failed for {input_path}:\n{proc.stdout}")
-    return verified_path
+    return lowered_path
+
+
+def write_timing_output(mlir_opt: Path, row, out: Path):
+    route = row["route"]
+    rank = row.get("max_carrier_rank", row["rank"])
+    input_path = Path(row["path"])
+    timing_path = out / "mlir_timing_outputs" / f"{route}-dimensions-{rank}.txt"
+    timing_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = mlir_opt_cmd(mlir_opt, input_path, Path(os.devnull),
+                       pipeline_for_route(route))
+    proc = subprocess.run(cmd, cwd=repo_root(), text=True,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if proc.returncode != 0:
+        raise RuntimeError(f"mlir-opt failed for {input_path}:\n{proc.stdout}")
+    timing_path.write_text(
+        "$ " + " ".join(shlex.quote(arg) for arg in cmd) + "\n\n" + proc.stdout
+    )
+    return timing_path
 
 
 def run_measured(mlir_opt: Path, row, repetition: int, out: Path):
     route = row["route"]
-    rank = row["rank"]
-    metrics = run_mlir_opt(mlir_opt, Path(row["path"]), Path(os.devnull), pipeline_for_route(route))
+    metrics = run_mlir_opt(mlir_opt, Path(row["path"]), Path(os.devnull),
+                           pipeline_for_route(route))
     return {
         **row,
         "repetition": repetition,
         "total_ms": f"{metrics['total_ms']:.6f}",
         "parser_ms": f"{metrics['parser_ms']:.6f}",
         "output_ms": f"{metrics['output_ms']:.6f}",
-        "pass_ms": f"{metrics['pass_ms']:.6f}",
         "rest_ms": f"{metrics['rest_ms']:.6f}",
     }
 
@@ -146,10 +164,10 @@ def write_summary(rows, out: Path):
     summary = []
     for (route, rank), group in sorted(grouped.items()):
         total_values = [float(r["total_ms"]) for r in group]
-        pass_values = [float(r["pass_ms"]) for r in group]
+        parser_values = [float(r["parser_ms"]) for r in group]
+        output_values = [float(r["output_ms"]) for r in group]
+        rest_values = [float(r["rest_ms"]) for r in group]
         base = group[0]
-        total_median = statistics.median(total_values)
-        pass_median = statistics.median(pass_values)
         summary.append({
             "route": route,
             "contraction_rank": base.get("contraction_rank", rank),
@@ -164,17 +182,16 @@ def write_summary(rows, out: Path):
             "logical_dim_refs": base["logical_dim_refs"],
             "refinement_value_refs": base.get("refinement_value_refs", base["logical_dim_refs"]),
             "repetitions": len(group),
-            "median_total_ms": f"{total_median:.6f}",
+            "median_total_ms": f"{statistics.median(total_values):.6f}",
             "mean_total_ms": f"{statistics.mean(total_values):.6f}",
             "min_total_ms": f"{min(total_values):.6f}",
             "p25_total_ms": f"{quantile(total_values, 0.25):.6f}",
             "p75_total_ms": f"{quantile(total_values, 0.75):.6f}",
             "max_total_ms": f"{max(total_values):.6f}",
             "stdev_total_ms": f"{statistics.stdev(total_values) if len(total_values) > 1 else 0.0:.6f}",
-            "median_pass_ms": f"{pass_median:.6f}",
-            "mean_pass_ms": f"{statistics.mean(pass_values):.6f}",
-            "p25_pass_ms": f"{quantile(pass_values, 0.25):.6f}",
-            "p75_pass_ms": f"{quantile(pass_values, 0.75):.6f}",
+            "median_parser_ms": f"{statistics.median(parser_values):.6f}",
+            "median_output_ms": f"{statistics.median(output_values):.6f}",
+            "median_rest_ms": f"{statistics.median(rest_values):.6f}",
         })
     path = out / "summary.csv"
     with path.open("w", newline="") as f:
@@ -185,7 +202,7 @@ def write_summary(rows, out: Path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--generated", type=Path, default=Path("artifacts/generated"))
+    ap.add_argument("--generated", type=Path, default=Path("artifacts/runs/latest/generated_kernels"))
     ap.add_argument("--out", type=Path, default=Path("artifacts/runs/latest"))
     ap.add_argument("--mlir-opt", type=Path, default=repo_root() / "build/bin/mlir-opt")
     ap.add_argument("--repetitions", type=int, default=1000)
@@ -196,8 +213,7 @@ def main():
     args.out = args.out.resolve()
     args.mlir_opt = args.mlir_opt.resolve()
 
-    manifest = args.generated / "manifest.csv"
-    rows = read_manifest(manifest)
+    rows = read_manifest(args.generated / "manifest.csv")
     args.out.mkdir(parents=True, exist_ok=True)
 
     rng = random.Random(args.seed)
@@ -206,7 +222,8 @@ def main():
     for index, row in enumerate(warmup_jobs, 1):
         if index == 1 or index % 100 == 0 or index == len(warmup_jobs):
             print(f"warmup {index}/{len(warmup_jobs)}")
-        run_mlir_opt(args.mlir_opt, Path(row["path"]), Path(os.devnull), pipeline_for_route(row["route"]))
+        run_mlir_opt(args.mlir_opt, Path(row["path"]), Path(os.devnull),
+                     pipeline_for_route(row["route"]))
 
     jobs = [(row, rep) for row in rows for rep in range(args.repetitions)]
     rng.shuffle(jobs)
@@ -217,7 +234,8 @@ def main():
         all_rows.append(run_measured(args.mlir_opt, row, rep, args.out))
 
     for row in rows:
-        write_verified_output(args.mlir_opt, row, args.out)
+        write_lowered_output(args.mlir_opt, row, args.out)
+        write_timing_output(args.mlir_opt, row, args.out)
 
     results_path = args.out / "results.csv"
     with results_path.open("w", newline="") as f:

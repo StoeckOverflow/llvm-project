@@ -67,8 +67,8 @@ def main():
     rows = read_rows(args.input)
     rank_key = "max_carrier_rank" if "max_carrier_rank" in rows[0] else "rank"
     plot(rows, rank_key, "median_total_ms",
-         "median MLIR verification compile time [ms]", args.out,
-         "verification-compile-time-vs-dimensions")
+         "median MLIR lowering compile time [ms]", args.out,
+         "mlir-lowering-compile-time-vs-dimensions")
 
 
 if __name__ == "__main__":
