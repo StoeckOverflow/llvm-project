@@ -77,9 +77,10 @@ mlir-lowering-compile-time-vs-dimensions.pdf
 mlir-lowering-compile-time-vs-dimensions.png
 ```
 
-The figure has two point/line series, `baseline memref` and `dependent memref`,
-with memref dimensions on the x-axis and median full MLIR lowering compile time
-on the y-axis.
+The figure has two point/line series, `MLIR` and
+`MLIR with value-dependent types`, with program size
+`[#tensor dimensions]` on the x-axis and median full MLIR
+lowering compile time on the y-axis.
 
 ## Timing Method
 

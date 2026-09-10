@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 COLORS = {"baseline_memref": "#666666", "memref": "#16805b"}
 MARKERS = {"baseline_memref": "o", "memref": "s"}
-LABELS = {"baseline_memref": "baseline memref", "memref": "dependent memref"}
+LABELS = {"baseline_memref": "MLIR", "memref": "MLIR with value-dependent types"}
 
 
 def read_rows(path: Path):
@@ -43,7 +43,7 @@ def plot(rows, x_key, y_key, ylabel, out: Path, stem: str):
     labels = {
         "rank": "contraction rank",
         "contraction_rank": "contraction rank",
-        "max_carrier_rank": "memref dimensions",
+        "max_carrier_rank": "program size [#tensor dimensions]",
         "logical_dim_refs": "logical dimension references",
         "refinement_value_refs": "refinement value references",
         "lines": "generated MLIR lines",
