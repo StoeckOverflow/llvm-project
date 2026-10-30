@@ -48,3 +48,13 @@ The `*.mlir-timing.txt` files contain MLIR pass timing JSON from
 `-mlir-disable-threading -mlir-timing -mlir-timing-display=list
 -mlir-output-format=json`. The `*.opt-timing.txt` files contain LLVM
 `-time-passes` reports.
+
+## Matched-stride rebuttal input
+
+`matched-baseline-strided-conv2d.mlir` is an additional ordinary-memref baseline
+accepting the explicit strides used by `dependent-strided-conv2d.mlir`, including
+the dynamic unit stride. It uses flat rank-zero buffer arguments and logical
+carrier ranks 6/4/4. Lower it with `MEMREF_PIPELINE` from `compare.py`; compare
+with the dependent input using `DIRECT_DEPENDENT_PIPELINE`. The default
+comparison script still uses the original paper inputs. This controls stride
+computation but does not equalize lowered ABIs or address-arithmetic flags.
