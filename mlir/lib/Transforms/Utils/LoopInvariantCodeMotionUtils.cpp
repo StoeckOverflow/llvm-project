@@ -30,8 +30,7 @@ using namespace mlir;
 /// - the op and none of its contained operations depend on values inside of the
 ///   loop (by means of calling definedOutside).
 /// - the op has no side-effects.
-static bool canBeHoisted(Operation *op,
-                         function_ref<bool(OpOperand &)> condition) {
+static bool canBeHoisted(Operation *op, function_ref<bool(SSAUse)> condition) {
   // Do not move terminators.
   if (op->hasTrait<OpTrait::IsTerminator>())
     return false;
@@ -40,13 +39,15 @@ static bool canBeHoisted(Operation *op,
   // defined outside of the loop or in a nested region, but not at the level of
   // the loop body.
   auto walkFn = [&](Operation *child) {
-    for (OpOperand &operand : child->getOpOperands()) {
-      // Ignore values defined in a nested region.
-      if (op->isAncestor(operand.get().getParentRegion()->getParentOp()))
-        continue;
-      if (!condition(operand))
-        return WalkResult::interrupt();
-    }
+    bool legal = true;
+    child->walkSSAUses([&](SSAUse use) {
+      Value value = use.get();
+      if (!value || op->isAncestor(value.getParentRegion()->getParentOp()))
+        return;
+      legal &= condition(use);
+    });
+    if (!legal)
+      return WalkResult::interrupt();
     return WalkResult::advance();
   };
   return !op->walk(walkFn).wasInterrupted();
@@ -54,8 +55,8 @@ static bool canBeHoisted(Operation *op,
 
 static bool canBeHoisted(Operation *op,
                          function_ref<bool(Value)> definedOutside) {
-  return canBeHoisted(
-      op, [&](OpOperand &operand) { return definedOutside(operand.get()); });
+  return canBeHoisted(op,
+                      [&](SSAUse use) { return definedOutside(use.get()); });
 }
 
 size_t mlir::moveLoopInvariantCode(
@@ -99,9 +100,10 @@ size_t mlir::moveLoopInvariantCode(
 
       // Since the op has been moved, we need to check its users within the
       // top-level of the loop body.
-      for (Operation *user : op->getUsers())
-        if (user->getParentRegion() == region)
-          worklist.push(user);
+      for (Value result : op->getResults())
+        for (Operation *user : result.getAllUsers())
+          if (user->getParentRegion() == region)
+            worklist.push(user);
     }
   }
 
@@ -338,17 +340,20 @@ static LoopLikeOpInterface hoistSubsetAtIterArg(RewriterBase &rewriter,
 
     // Ops cannot be hoisted if they depend on loop-variant values.
     if (extractionOp) {
-      if (!canBeHoisted(extractionOp, [&](OpOperand &operand) {
+      if (!canBeHoisted(extractionOp, [&](SSAUse operand) {
             return loopLike.isDefinedOutsideOfLoop(operand.get()) ||
-                   &operand == &extractionOp.getSourceOperand();
+                   (operand.isOperand() &&
+                    &operand.getOperand() == &extractionOp.getSourceOperand());
           }))
         extractionOp = {};
     }
     if (insertionOp) {
-      if (!canBeHoisted(insertionOp, [&](OpOperand &operand) {
+      if (!canBeHoisted(insertionOp, [&](SSAUse operand) {
             return loopLike.isDefinedOutsideOfLoop(operand.get()) ||
-                   &operand == &insertionOp.getSourceOperand() ||
-                   &operand == &insertionOp.getDestinationOperand();
+                   (operand.isOperand() &&
+                    (&operand.getOperand() == &insertionOp.getSourceOperand() ||
+                     &operand.getOperand() ==
+                         &insertionOp.getDestinationOperand()));
           }))
         insertionOp = {};
     }
