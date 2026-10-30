@@ -9,6 +9,10 @@ import matplotlib.pyplot as plt
 COLORS = {"baseline_memref": "#666666", "memref": "#16805b"}
 MARKERS = {"baseline_memref": "o", "memref": "s"}
 LABELS = {"baseline_memref": "MLIR", "memref": "MLIR with value-dependent types"}
+for route in ("baseline_memref", "memref"):
+    COLORS[route + "_canonicalize"] = COLORS[route]
+    MARKERS[route + "_canonicalize"] = "^" if route == "baseline_memref" else "D"
+    LABELS[route + "_canonicalize"] = LABELS[route] + " + canonicalize"
 
 
 def read_rows(path: Path):
@@ -27,7 +31,7 @@ def read_rows(path: Path):
 
 def plot(rows, x_key, y_key, ylabel, out: Path, stem: str):
     fig, ax = plt.subplots(figsize=(6.2, 3.8))
-    for route in ["baseline_memref", "memref"]:
+    for route in LABELS:
         subset = sorted([r for r in rows if r["route"] == route], key=lambda r: r[x_key])
         if not subset:
             continue
@@ -37,6 +41,7 @@ def plot(rows, x_key, y_key, ylabel, out: Path, stem: str):
             marker=MARKERS[route],
             markersize=5,
             linewidth=1.6,
+            linestyle="--" if route.endswith("_canonicalize") else "-",
             color=COLORS[route],
             label=LABELS.get(route, route),
         )

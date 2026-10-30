@@ -175,3 +175,48 @@ artifacts/archive/2026-09-09_18-09/plots/mlir-lowering-compile-time-vs-dimension
 artifacts/archive/2026-09-09_18-09/pass-timing-interpretation.md
 artifacts/archive/2026-09-09_18-09/dependent-verification-coverage.md
 ```
+
+## Cleanup and LLVM end-to-end extensions
+
+`--include-canonicalization` measures four shuffled routes: each original route
+and the same pipeline followed by `canonicalize`. CSE is deliberately not added:
+canonicalization already removes descriptor insert/extract traffic in the
+structural examples. Original two-route invocations retain their behavior.
+The plotter includes all four series when present.
+
+`--ranks 2 16 64` selects contraction ranks (actual carrier ranks 4, 32, 128).
+`--llvm-end-to-end --llvm-bin <matching-build>/bin` instead measures complete
+subprocess wall time for MLIR lowering, translation to LLVM IR and
+`opt -passes='default<O3>' -S`. Intermediate MLIR and LLVM IR are written to
+files; final optimized output goes to `/dev/null`. This includes subprocess
+startup and intermediate I/O and must not be compared directly with MLIR's
+internal timing. The mode uses the same shuffled warmup/repetition protocol.
+It retains per-stage and total wall times in `llvm_results.csv`, median/IQR
+summaries in `llvm_summary.csv`, and one set of raw/optimized LLVM IR and assembly
+per route under `llvm/`. Assembly generation is outside the timed region.
+`llvm_commands.json` records artifact commands. `run_config.json` records the
+selected routes and timing conditions for either mode.
+
+A manifest can optionally supply a `pipeline` column, allowing structural
+experiments to reuse their original lowering pipelines. The canonicalized route
+appends cleanup to that pipeline. Inputs and pipelines must be semantically
+comparable; this runner does not establish equivalence or ABI compatibility.
+
+Example from the repository root:
+
+```sh
+python3 mlir/examples/dependent-refinement-verification/generate.py \
+  --out artifacts/rebuttal/generated --ranks 2 16 64
+
+python3 mlir/examples/dependent-refinement-verification/run-benchmarks.py \
+  --generated artifacts/rebuttal/generated \
+  --out artifacts/rebuttal/llvm-timing \
+  --mlir-opt build/bin/mlir-opt --include-canonicalization \
+  --llvm-end-to-end --llvm-bin build/bin --ranks 2 16 64 \
+  --warmups 10 --repetitions 100
+```
+
+Using one prototype binary controls the binary between routes but is not a
+comparison against an unmodified upstream build. Route differences still
+include different memory lowering and calling conventions. Cleanup overhead
+within a route and end-to-end route differences answer different questions.
