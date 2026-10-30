@@ -85,9 +85,10 @@ remapInlinedLocations(iterator_range<Region::iterator> inlinedBlocks,
 static void remapInlinedOperands(iterator_range<Region::iterator> inlinedBlocks,
                                  IRMapping &mapper) {
   auto remapOperands = [&](Operation *op) {
-    for (auto &operand : op->getOpOperands())
-      if (auto mappedOp = mapper.lookupOrNull(operand.get()))
-        operand.set(mappedOp);
+    op->walkSSAUses([&](SSAUse use) {
+      if (auto mappedOp = mapper.lookupOrNull(use.get()))
+        use.set(mappedOp);
+    });
   };
   for (auto &block : inlinedBlocks)
     block.walk(remapOperands);

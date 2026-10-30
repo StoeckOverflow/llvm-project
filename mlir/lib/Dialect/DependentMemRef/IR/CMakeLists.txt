@@ -9,6 +9,7 @@ add_mlir_dialect_library(MLIRDependentMemRefDialect
   MLIRDependentMemRefOpsIncGen
 
   LINK_LIBS PUBLIC
+  MLIRTransformUtils
   MLIRIR
   MLIRMemRefDialect
   MLIRSideEffectInterfaces

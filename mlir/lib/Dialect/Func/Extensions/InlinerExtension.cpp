@@ -51,6 +51,20 @@ struct FuncInlinerInterface : public DialectInlinerInterface {
   // Transformation Hooks
   //===--------------------------------------------------------------------===//
 
+  void processInlinedCallBlocks(Operation *call,
+                                iterator_range<Region::iterator>) const final {
+    auto callOp = dyn_cast<CallOpInterface>(call);
+    auto callee =
+        callOp ? dyn_cast_or_null<FuncOp>(callOp.resolveCallable()) : FuncOp();
+    // Moving a body consumes its function boundary. Drop that boundary's
+    // references before the moved entry block is erased. Cloned callees retain
+    // their body and their original contracts.
+    if (callee && callee.getBody().empty()) {
+      callee.getProperties().dependentTypeArgRefinements.clear();
+      callee.getProperties().dependentTypeResultRefinements.clear();
+    }
+  }
+
   /// Handle the given inlined terminator by replacing it with a new operation
   /// as necessary.
   void handleTerminator(Operation *op, Block *newDest) const final {
