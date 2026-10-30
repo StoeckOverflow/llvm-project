@@ -1,6 +1,6 @@
 // RUN: mlir-opt %s -convert-dependent-tensor-to-dependent-memref -split-input-file -mlir-print-op-generic | FileCheck %s
 
-func.func @tensor_ops(%m: index, %n: index, %i: index, %j: index, %v: f32) -> tensor<?x?xf32> {
+func.func @tensor_ops(%m: index, %n: index, %i: index, %j: index, %v: f32) -> tensor<?x?xf32> #types[] -> #tensor<[%m, %n], f32> {
   %t = dependent_tensor.make () #tensor<[%m, %n], f32> : tensor<?x?xf32>
   %old = dependent_tensor.extract %t[%i, %j] : f32
   %sum = arith.addf %old, %v : f32
