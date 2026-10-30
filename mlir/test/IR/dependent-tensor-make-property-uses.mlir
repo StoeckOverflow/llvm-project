@@ -27,3 +27,26 @@ func.func @check_refinements_are_direct_property_uses(%m : index, %i : index,
 // CHECK: dependent_tensor.make () #tensor<[%[[M]]], f32> : tensor<?xf32>
 // CHECK: dependent_tensor.dim %{{.*}}, %{{.*}}, #dim %[[M]] : tensor<?xf32>
 // CHECK: dependent_tensor.insert %{{.*}} into %{{.*}}[%{{.*}}] #tensor<[%[[M]]], f32> : f32 into tensor<?xf32>
+
+// -----
+
+func.func @check_property_use_list_api(%n: index, %i: index) -> tensor<?xf32>
+    #types[] -> #tensor<[%n], f32> {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %t = dependent_tensor.make () #tensor<[%n], f32> : tensor<?xf32>
+  %r = scf.for %iv = %c0 to %n step %c1 iter_args(%a = %t) -> tensor<?xf32>
+      #types[%a : #tensor<[%n], f32>] -> #tensor<[%n], f32> {
+    scf.yield %a : tensor<?xf32>
+  }
+  return %r : tensor<?xf32>
+}
+
+func.func @check_repeated_property_users(%n: index) {
+  %a = dependent_tensor.make () #tensor<[%n, %n], f32> : tensor<?x?xf32>
+  %b = dependent_tensor.make () #tensor<[%n], f32> : tensor<?xf32>
+  return
+}
+
+// CHECK-LABEL: func.func @check_property_use_list_api
+// CHECK-LABEL: func.func @check_repeated_property_users
